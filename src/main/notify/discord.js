@@ -2,7 +2,8 @@ import axios from 'axios'
 
 export async function sendDiscordAlert({ webhookUrl, dropEvent }) {
   if (!webhookUrl) return
-  const color = dropEvent.dropType === 'queue_open' ? 0xf5a623 : 0x00c851
+  const COLOR_MAP = { in_stock: 0x00c851, queue_open: 0xf5a623, price_drop: 0x2196f3 }
+  const color = COLOR_MAP[dropEvent.dropType] ?? 0x00c851
   try {
     await axios.post(webhookUrl, {
       embeds: [{

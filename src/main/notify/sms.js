@@ -5,7 +5,7 @@ export async function sendSmsAlert({ accountSid, authToken, from, to, dropEvent 
   try {
     const client = Twilio(accountSid, authToken)
     await client.messages.create({
-      body: `DROP: ${dropEvent.productName} @ ${dropEvent.retailer} — $${dropEvent.price ?? '?'}`,
+      body: `DROP: ${dropEvent.productName ?? 'Unknown'} @ ${dropEvent.retailer} — $${dropEvent.price ?? '?'}`,
       from,
       to
     })
