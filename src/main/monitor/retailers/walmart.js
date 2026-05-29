@@ -7,6 +7,7 @@ export class WalmartPoller {
     this.productUrl = productUrl
     this.maxPrice = maxPrice
     this.itemId = productUrl.split('/').pop().split('?')[0]
+    if (!this.itemId) throw new Error(`Cannot extract item ID from URL: ${productUrl}`)
     this._wasInStock = false
   }
 
@@ -24,6 +25,7 @@ export class WalmartPoller {
       const name = data?.name || 'Walmart Product'
 
       if (status !== 'IN_STOCK') { this._wasInStock = false; return null }
+      if (price == null) return null
       if (price > this.maxPrice) return null
       if (this._wasInStock) return null
 
