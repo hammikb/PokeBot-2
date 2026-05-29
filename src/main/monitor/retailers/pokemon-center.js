@@ -6,8 +6,8 @@ export class PokemonCenterPoller {
   constructor({ productUrl, maxPrice = Infinity }) {
     this.productUrl = productUrl
     this.maxPrice = maxPrice
-    this.sku = productUrl.split('/').pop().split('?')[0]
-    if (!this.sku) throw new Error(`Cannot extract SKU from URL: ${productUrl}`)
+    this.sku = productUrl.match(/\/product\/[^/]+\/([^/?#]+)$/)?.[1]
+    if (!this.sku) throw new Error(`Cannot extract SKU from Pokemon Center URL: ${productUrl}`)
     this._wasInStock = false
   }
 

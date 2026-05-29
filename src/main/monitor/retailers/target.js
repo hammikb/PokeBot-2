@@ -26,8 +26,8 @@ export class TargetPoller {
       const name = product?.item?.product_description?.title || 'Target Product'
 
       if (status !== 'IN_STOCK') { this._wasInStock = false; return null }
-      if (price == null) return null
-      if (price > this.maxPrice) return null
+      if (price == null) { this._wasInStock = false; return null }
+      if (price > this.maxPrice) { this._wasInStock = false; return null }
       if (this._wasInStock) return null
 
       this._wasInStock = true

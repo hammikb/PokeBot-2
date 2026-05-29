@@ -25,8 +25,8 @@ export class BestBuyPoller {
       const price = val?.price
 
       if (!purchasable) { this._wasInStock = false; return null }
-      if (price == null) return null
-      if (price > this.maxPrice) return null
+      if (price == null) { this._wasInStock = false; return null }
+      if (price > this.maxPrice) { this._wasInStock = false; return null }
       if (this._wasInStock) return null
 
       this._wasInStock = true

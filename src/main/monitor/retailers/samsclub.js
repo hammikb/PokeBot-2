@@ -26,8 +26,8 @@ export class SamsClubPoller {
       const name = product?.name || "Sam's Club Product"
 
       if (!inStock) { this._wasInStock = false; return null }
-      if (price == null) return null
-      if (price > this.maxPrice) return null
+      if (price == null) { this._wasInStock = false; return null }
+      if (price > this.maxPrice) { this._wasInStock = false; return null }
       if (this._wasInStock) return null
 
       this._wasInStock = true

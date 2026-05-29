@@ -23,8 +23,8 @@ export class GameStopPoller {
       const name = $('h1.product-name, h1[itemprop="name"]').first().text().trim() || 'GameStop Product'
 
       if (!inStock) { this._wasInStock = false; return null }
-      if (price == null) return null
-      if (price > this.maxPrice) return null
+      if (price == null) { this._wasInStock = false; return null }
+      if (price > this.maxPrice) { this._wasInStock = false; return null }
       if (this._wasInStock) return null
 
       this._wasInStock = true

@@ -24,8 +24,8 @@ export class CostcoPoller {
       const queueEnabled = $('[class*="queue"], [id*="waiting-room"]').length > 0
 
       if (!inStock) { this._wasInStock = false; return null }
-      if (price == null) return null
-      if (price > this.maxPrice) return null
+      if (price == null) { this._wasInStock = false; return null }
+      if (price > this.maxPrice) { this._wasInStock = false; return null }
       if (this._wasInStock) return null
 
       this._wasInStock = true
