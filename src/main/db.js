@@ -3,6 +3,7 @@ import Database from 'better-sqlite3'
 let db
 
 export function initDb(dbPath) {
+  if (db) db.close()
   db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
   db.exec(`
@@ -49,5 +50,6 @@ export function initDb(dbPath) {
 }
 
 export function getDb() {
+  if (!db) throw new Error('Database not initialised — call initDb() first')
   return db
 }

@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { initDb, getDb } from '../../src/main/db.js'
-import Database from 'better-sqlite3'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { rmSync } from 'fs'
