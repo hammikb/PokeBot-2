@@ -24,7 +24,7 @@ export class MonitorEngine extends EventEmitter {
   }
 
   stopAll() {
-    for (const id of this._timers.keys()) this.removeTask(id)
+    for (const id of [...this._timers.keys()]) this.removeTask(id)
   }
 
   getActiveTasks() {
