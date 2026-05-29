@@ -1,6 +1,6 @@
 import { waitForCaptchaIfNeeded } from '../captcha.js'
 
-export async function runTargetFlow(context, { productUrl, cvv, notificationEngine, dropEvent }) {
+export async function runTargetFlow(context, { productUrl, cvv, account, notificationEngine, dropEvent }) {
   const page = await context.newPage()
   try {
     await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
@@ -20,8 +20,10 @@ export async function runTargetFlow(context, { productUrl, cvv, notificationEngi
     // Target may prompt for password re-entry
     const passwordPrompt = page.locator('input[name="password"][type="password"]')
     if (await passwordPrompt.count() > 0) {
-      const account = dropEvent._account
-      if (account?.password) {
+      if (!account?.password) {
+        throw new Error('Target requires password re-entry but no account credentials were provided')
+      }
+      if (account.password) {
         await passwordPrompt.fill(account.password)
         const signInBtn = page.locator('button[type="submit"]:has-text("Sign in"), button:has-text("Sign In")')
         await signInBtn.first().click({ timeout: 10000 })
