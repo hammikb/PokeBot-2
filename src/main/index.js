@@ -34,13 +34,14 @@ async function createMainWindow(encryptionKey) {
   taskManager = new TaskManager({ accountManager, notificationEngine, browserPool, getDb })
 
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
-    minWidth: 1024,
-    minHeight: 640,
+    width: 1400,
+    height: 900,
+    minWidth: 1100,
+    minHeight: 700,
     show: false,
     autoHideMenuBar: true,
     backgroundColor: '#0f0f0f',
+    center: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -70,9 +71,12 @@ async function createMainWindow(encryptionKey) {
 async function showUnlockWindow() {
   return new Promise((resolve) => {
     const unlockWindow = new BrowserWindow({
-      width: 420,
-      height: 220,
+      width: 440,
+      height: 280,
       resizable: false,
+      center: true,
+      autoHideMenuBar: true,
+      show: false,
       backgroundColor: '#0f0f0f',
       webPreferences: {
         preload: join(__dirname, '../preload/index.js'),
@@ -81,6 +85,8 @@ async function showUnlockWindow() {
         sandbox: false
       }
     })
+
+    unlockWindow.on('ready-to-show', () => unlockWindow.show())
 
     ipcMain.handleOnce(IPC.UNLOCK, (_, password) => {
       const key = deriveKey(password)

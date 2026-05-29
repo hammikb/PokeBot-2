@@ -22,7 +22,7 @@ export default function Dashboard() {
       {/* Top: Live Feed + Active Tasks */}
       <div className="flex gap-3 flex-1 min-h-0">
         {/* Live Feed */}
-        <div className="w-72 bg-[#111] border border-gray-800 rounded p-3 flex flex-col min-h-0">
+        <div className="w-80 bg-[#111] border border-gray-800 rounded p-3 flex flex-col min-h-0">
           <div className="text-xs text-gray-500 uppercase tracking-widest mb-2">Live Feed</div>
           <div className="flex-1 overflow-y-auto space-y-1">
             {feedEvents.length === 0 && <div className="text-gray-600 text-xs">Waiting for drops...</div>}
@@ -41,6 +41,12 @@ export default function Dashboard() {
         <div className="flex-1 bg-[#111] border border-gray-800 rounded p-3 flex flex-col min-h-0">
           <div className="text-xs text-gray-500 uppercase tracking-widest mb-2">Active Tasks</div>
           <div className="flex-1 overflow-y-auto space-y-1">
+            {tasks.length === 0 && (
+              <div className="flex flex-col items-center justify-center h-full text-gray-700 text-xs gap-1 pt-8">
+                <span className="text-2xl">⏸</span>
+                <span>No tasks — go to Tasks to create one</span>
+              </div>
+            )}
             {tasks.map(t => {
               const status = taskStatuses[t.id] || t.status || 'idle'
               const accountCount = (() => { try { return JSON.parse(t.account_ids || '[]').length } catch { return 0 } })()
