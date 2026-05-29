@@ -12,6 +12,7 @@ import { IPC } from '../shared/constants.js'
 
 let mainWindow
 let taskManager
+let encryptionKey = null
 
 function getSettings() {
   try {
@@ -52,7 +53,7 @@ async function createMainWindow(encryptionKey) {
     mainWindow.show()
   })
 
-  registerIpcHandlers({ db: getDb(), accountManager, taskManager, getSettings, mainWindow })
+  registerIpcHandlers({ getDb, accountManager, taskManager, getSettings, mainWindow })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
@@ -103,12 +104,12 @@ app.whenReady().then(async () => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  const encryptionKey = await showUnlockWindow()
+  encryptionKey = await showUnlockWindow()
   await createMainWindow(encryptionKey)
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      // On macOS re-activate: key already derived — skip unlock and re-open main window
+    if (BrowserWindow.getAllWindows().length === 0 && encryptionKey) {
+      createMainWindow(encryptionKey)
     }
   })
 })

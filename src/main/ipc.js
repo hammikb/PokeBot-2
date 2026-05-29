@@ -2,11 +2,12 @@ import { ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
 import { IPC } from '../shared/constants.js'
 
-export function registerIpcHandlers({ db, accountManager, taskManager, getSettings, mainWindow }) {
+export function registerIpcHandlers({ getDb, accountManager, taskManager, getSettings, mainWindow }) {
   // Settings
   ipcMain.handle(IPC.SETTINGS_GET, () => getSettings())
   ipcMain.handle(IPC.SETTINGS_SET, (_, key, value) => {
-    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, JSON.stringify(value))
+    if (typeof key !== 'string' || !key) throw new Error('settings key must be a non-empty string')
+    getDb().prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, JSON.stringify(value))
     return true
   })
 
@@ -17,10 +18,13 @@ export function registerIpcHandlers({ db, accountManager, taskManager, getSettin
   ipcMain.handle(IPC.ACCOUNTS_DELETE, (_, id) => { accountManager.delete(id); return true })
 
   // Tasks
-  ipcMain.handle(IPC.TASKS_GET, () => db.prepare('SELECT * FROM tasks').all())
+  ipcMain.handle(IPC.TASKS_GET, () => getDb().prepare('SELECT * FROM tasks').all())
   ipcMain.handle(IPC.TASKS_CREATE, (_, data) => {
+    if (!data?.retailer || !data?.productUrl) {
+      throw new Error('retailer and productUrl are required to create a task')
+    }
     const id = randomUUID()
-    db.prepare(`
+    getDb().prepare(`
       INSERT INTO tasks (id, retailer, product_url, product_name, max_price, mode, account_ids, interval_ms)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
@@ -36,14 +40,14 @@ export function registerIpcHandlers({ db, accountManager, taskManager, getSettin
     return id
   })
   ipcMain.handle(IPC.TASKS_START, (_, id) => {
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)
+    const task = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(id)
     if (task) taskManager.startTask(task)
     return true
   })
   ipcMain.handle(IPC.TASKS_STOP, (_, id) => { taskManager.stopTask(id); return true })
   ipcMain.handle(IPC.TASKS_DELETE, (_, id) => {
     taskManager.stopTask(id)
-    db.prepare('DELETE FROM tasks WHERE id = ?').run(id)
+    getDb().prepare('DELETE FROM tasks WHERE id = ?').run(id)
     return true
   })
 
