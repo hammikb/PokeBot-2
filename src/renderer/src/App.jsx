@@ -1,34 +1,80 @@
-import Versions from './components/Versions'
-import electronLogo from './assets/electron.svg'
+import { useEffect } from 'react'
+import { HashRouter, Routes, Route, NavLink } from 'react-router-dom'
+import { useAppStore } from './store/appStore'
+import Dashboard from './pages/Dashboard'
+import Tasks from './pages/Tasks'
+import Accounts from './pages/Accounts'
+import Settings from './pages/Settings'
+import { IPC } from '../../shared/constants'
 
-function App() {
-  const ipcHandle = () => window.electron.ipcRenderer.send('ping')
+const ipc = window.electron?.ipcRenderer
+
+export default function App() {
+  const { loadTasks, loadAccounts, loadSettings, pushFeedEvent, setTaskStatus } = useAppStore()
+
+  useEffect(() => {
+    loadTasks()
+    loadAccounts()
+    loadSettings()
+    if (ipc) {
+      ipc.on(IPC.FEED_EVENT, pushFeedEvent)
+      ipc.on(IPC.TASK_STATUS, ({ taskId, status }) => setTaskStatus(taskId, status))
+    }
+    return () => {
+      ipc?.removeAllListeners(IPC.FEED_EVENT)
+      ipc?.removeAllListeners(IPC.TASK_STATUS)
+    }
+  }, [])
 
   return (
-    <>
-      <img alt="logo" className="logo" src={electronLogo} />
-      <div className="creator">Powered by electron-vite</div>
-      <div className="text">
-        Build an Electron app with <span className="react">React</span>
+    <HashRouter>
+      <div className="flex flex-col h-screen bg-[#0f0f0f] text-gray-100 font-mono text-sm">
+        <nav className="flex items-center gap-6 px-6 py-3 bg-[#1a1a1a] border-b border-gray-800 shrink-0">
+          <span className="text-red-500 font-bold tracking-widest mr-4 uppercase">PokeBot 2</span>
+          {[['/', 'Dashboard'], ['/tasks', 'Tasks'], ['/accounts', 'Accounts'], ['/settings', 'Settings']].map(([path, label]) => (
+            <NavLink key={path} to={path} end={path === '/'} className={({ isActive }) =>
+              `uppercase tracking-wider text-xs ${isActive ? 'text-red-400' : 'text-gray-400 hover:text-white'}`}>
+              {label}
+            </NavLink>
+          ))}
+        </nav>
+        <main className="flex-1 overflow-hidden">
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/tasks" element={<Tasks />} />
+            <Route path="/accounts" element={<Accounts />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/unlock" element={<UnlockPage />} />
+          </Routes>
+        </main>
       </div>
-      <p className="tip">
-        Please try pressing <code>F12</code> to open the devTool
-      </p>
-      <div className="actions">
-        <div className="action">
-          <a href="https://electron-vite.org/" target="_blank" rel="noreferrer">
-            Documentation
-          </a>
-        </div>
-        <div className="action">
-          <a target="_blank" rel="noreferrer" onClick={ipcHandle}>
-            Send IPC
-          </a>
-        </div>
-      </div>
-      <Versions></Versions>
-    </>
+    </HashRouter>
   )
 }
 
-export default App
+function UnlockPage() {
+  const ipc = window.electron?.ipcRenderer
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    const password = e.target.password.value
+    ipc?.invoke(window.__IPC_UNLOCK__ || 'app:unlock', password)
+  }
+  return (
+    <div className="flex items-center justify-center h-full bg-[#0f0f0f]">
+      <form onSubmit={handleSubmit} className="bg-[#1a1a1a] border border-gray-800 rounded p-8 space-y-4 w-80">
+        <div className="text-red-500 font-bold tracking-widest uppercase text-center mb-2">PokeBot 2</div>
+        <div className="text-gray-400 text-xs text-center">Enter your vault password</div>
+        <input
+          name="password"
+          type="password"
+          autoFocus
+          className="w-full bg-[#0f0f0f] border border-gray-700 rounded px-3 py-2 text-gray-200 text-xs outline-none focus:border-red-500"
+          placeholder="Password"
+        />
+        <button type="submit" className="w-full bg-red-600 hover:bg-red-500 text-white rounded px-4 py-2 uppercase tracking-wider font-bold text-xs">
+          Unlock
+        </button>
+      </form>
+    </div>
+  )
+}
