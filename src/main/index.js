@@ -52,6 +52,7 @@ async function createMainWindow(encryptionKey) {
 
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
+    mainWindow.maximize()
   })
 
   registerIpcHandlers({ getDb, accountManager, taskManager, getSettings, mainWindow })
@@ -71,8 +72,8 @@ async function createMainWindow(encryptionKey) {
 async function showUnlockWindow() {
   return new Promise((resolve) => {
     const unlockWindow = new BrowserWindow({
-      width: 440,
-      height: 280,
+      width: 480,
+      height: 320,
       resizable: false,
       center: true,
       autoHideMenuBar: true,
