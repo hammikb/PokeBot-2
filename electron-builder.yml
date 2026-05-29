@@ -1,18 +1,40 @@
-appId: com.electron.app
-productName: pokebot2
+appId: com.pokebot2.app
+productName: PokeBot 2
 directories:
+  output: dist
   buildResources: build
 files:
-  - '!**/.vscode/*'
-  - '!src/*'
-  - '!electron.vite.config.{js,ts,mjs,cjs}'
-  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
-  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+  - "!**/.vscode/*"
+  - "!src/*"
+  - "!electron.vite.config.{js,ts,mjs,cjs}"
+  - "!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}"
+  - "!{.env,.env.*,.npmrc,pnpm-lock.yaml}"
+  - "!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}"
+  - "!tests"
+  - "!docs"
 asarUnpack:
   - resources/**
   - node_modules/better-sqlite3/**
+  - node_modules/better-sqlite3/build/Release/*.node
+  - node_modules/playwright/**
+# NOTE: Playwright browser bundling is skipped here because node_modules/playwright/.local-chromium
+# does not exist until browsers are downloaded. Before building for distribution, run:
+#   npx playwright install chromium
+# Then re-add the extraResources section below:
+#
+# extraResources:
+#   - from: node_modules/playwright/.local-chromium
+#     to: chromium
+#     filter: "**/*"
+#
+# WARNING: Bundling Chromium adds ~200MB to the installer. Consider relying on
+# system Chromium or prompting end users to run `npx playwright install chromium`
+# on first launch as an alternative.
 win:
   executableName: pokebot2
+  target:
+    - target: nsis
+      arch: [x64]
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
@@ -26,18 +48,12 @@ mac:
     - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
   notarize: false
+  target:
+    - target: dmg
+      arch: [x64, arm64]
 dmg:
   artifactName: ${name}-${version}.${ext}
-linux:
-  target:
-    - AppImage
-    - snap
-    - deb
-  maintainer: electronjs.org
-  category: Utility
-appImage:
-  artifactName: ${name}-${version}.${ext}
-npmRebuild: false
 publish:
-  provider: generic
-  url: https://example.com/auto-updates
+  provider: github
+  owner: GITHUB_USERNAME_PLACEHOLDER
+  repo: pokebot2
