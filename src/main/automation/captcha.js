@@ -39,7 +39,7 @@ export async function waitForCaptchaIfNeeded(page, notificationEngine, dropEvent
           !document.title.toLowerCase().includes('access denied')
       },
       CAPTCHA_SELECTORS,
-      { timeout: 300000 }
+      { timeout: 300000, polling: 2000 }
     )
   } catch {
     // Timeout — CAPTCHA was not solved in 5 minutes, caller handles failure
