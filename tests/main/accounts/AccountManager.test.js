@@ -55,6 +55,13 @@ describe('AccountManager', () => {
     expect(manager.getAll()).toHaveLength(0)
   })
 
+  it('getDecrypted does not expose encrypted columns', async () => {
+    const id = await manager.create({ name: 'A', retailer: 'walmart', username: 'u', password: 'secret', cvv: '123' })
+    const dec = manager.getDecrypted(id)
+    expect(dec.password_enc).toBeUndefined()
+    expect(dec.cvv_enc).toBeUndefined()
+  })
+
   it('updates allowed fields', async () => {
     const id = await manager.create({ name: 'A', retailer: 'walmart', username: 'u', password: 'p', cvv: '1', proxy: 'old-proxy' })
     manager.update(id, { proxy: 'new-proxy' })

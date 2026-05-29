@@ -48,10 +48,11 @@ export class AccountManager {
   getDecrypted(id) {
     const row = this._getDb().prepare('SELECT * FROM accounts WHERE id = ?').get(id)
     if (!row) return null
+    const { password_enc, cvv_enc, ...rest } = row
     return {
-      ...row,
-      password: decrypt(row.password_enc, this._key),
-      cvv: row.cvv_enc ? decrypt(row.cvv_enc, this._key) : ''
+      ...rest,
+      password: decrypt(password_enc, this._key),
+      cvv: cvv_enc ? decrypt(cvv_enc, this._key) : ''
     }
   }
 
