@@ -17,8 +17,8 @@ export default function App() {
     loadAccounts()
     loadSettings()
     if (ipc) {
-      ipc.on(IPC.FEED_EVENT, pushFeedEvent)
-      ipc.on(IPC.TASK_STATUS, ({ taskId, status }) => setTaskStatus(taskId, status))
+      ipc.on(IPC.FEED_EVENT, (_event, data) => pushFeedEvent(data))
+      ipc.on(IPC.TASK_STATUS, (_event, { taskId, status }) => setTaskStatus(taskId, status))
     }
     return () => {
       ipc?.removeAllListeners(IPC.FEED_EVENT)
@@ -57,7 +57,7 @@ function UnlockPage() {
   const handleSubmit = (e) => {
     e.preventDefault()
     const password = e.target.password.value
-    ipc?.invoke(window.__IPC_UNLOCK__ || 'app:unlock', password)
+    ipc?.invoke(IPC.UNLOCK, password)
   }
   return (
     <div className="flex items-center justify-center h-full bg-[#0f0f0f]">
