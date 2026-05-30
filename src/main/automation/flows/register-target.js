@@ -38,7 +38,7 @@ export async function runTargetRegistration(
     await waitForCaptchaIfNeeded(page, captchaCtx.notificationEngine, captchaCtx.dropEvent)
 
     const errorEl = page.locator(
-      '[data-test="errorMessage"], [class*="error"], [class*="Error"]'
+      '[data-test="errorMessage"], [class*="form-error"], [aria-live="polite"]'
     )
     if ((await errorEl.count()) > 0) {
       const errorText = await errorEl.first().textContent().catch(() => '')

@@ -50,7 +50,7 @@ export async function runWalmartRegistration(
       return { success: false, alreadyExists: false, error: errorText.trim() }
     }
 
-    await page.waitForURL(/walmart\.com\/(account|home)?/, { timeout: 15000 })
+    await page.waitForURL(/walmart\.com\/(?!account\/signup)/, { timeout: 15000 })
 
     return { success: true, needsVerification: true }
   } catch (err) {

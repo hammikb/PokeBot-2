@@ -89,6 +89,7 @@ export function registerIpcHandlers({
       })
       mainWindow?.webContents?.send(IPC.ACCOUNT_STATUS, {
         id: accountId,
+        email,
         status: 'unverified',
         message: `Account created — check ${email} to verify`
       })

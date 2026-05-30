@@ -62,7 +62,6 @@ export default function Accounts() {
       })
       if (result.success) {
         setRegisterStatus('Registered — check email to verify')
-        setShowForm(false)
         setForm(makeEmptyForm())
         setRegisterOnSite(false)
       } else {
@@ -211,6 +210,7 @@ export default function Accounts() {
           <div className="grid grid-cols-2 gap-3">
             <Field label="First Name">
               <input
+                required={registerOnSite}
                 value={form.shipping.firstName}
                 onChange={(event) => setShipping('firstName', event.target.value)}
                 className={INPUT_CLASS}
@@ -218,6 +218,7 @@ export default function Accounts() {
             </Field>
             <Field label="Last Name">
               <input
+                required={registerOnSite}
                 value={form.shipping.lastName}
                 onChange={(event) => setShipping('lastName', event.target.value)}
                 className={INPUT_CLASS}
