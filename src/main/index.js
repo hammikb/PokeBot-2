@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initDb, getDb } from './db.js'
@@ -8,11 +8,11 @@ import { BrowserPool } from './automation/BrowserPool.js'
 import { NotificationEngine } from './notify/NotificationEngine.js'
 import { TaskManager } from './tasks/TaskManager.js'
 import { registerIpcHandlers } from './ipc.js'
-import { IPC } from '../shared/constants.js'
 
 let mainWindow
 let taskManager
 let encryptionKey = null
+const TEMP_DEV_VAULT_PASSWORD = 'pokebot-dev-vault'
 
 function getSettings() {
   try {
@@ -43,7 +43,7 @@ async function createMainWindow(encryptionKey) {
     backgroundColor: '#0f0f0f',
     center: true,
     webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
+      preload: join(__dirname, '../preload/index.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false
@@ -55,7 +55,7 @@ async function createMainWindow(encryptionKey) {
     mainWindow.maximize()
   })
 
-  registerIpcHandlers({ getDb, accountManager, taskManager, getSettings, mainWindow })
+  registerIpcHandlers({ getDb, accountManager, taskManager, getSettings, mainWindow, browserPool, notificationEngine })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
@@ -69,41 +69,6 @@ async function createMainWindow(encryptionKey) {
   }
 }
 
-async function showUnlockWindow() {
-  return new Promise((resolve) => {
-    const unlockWindow = new BrowserWindow({
-      width: 480,
-      height: 320,
-      resizable: false,
-      center: true,
-      autoHideMenuBar: true,
-      show: false,
-      backgroundColor: '#0f0f0f',
-      webPreferences: {
-        preload: join(__dirname, '../preload/index.js'),
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: false
-      }
-    })
-
-    unlockWindow.on('ready-to-show', () => unlockWindow.show())
-
-    ipcMain.handleOnce(IPC.UNLOCK, (_, password) => {
-      const key = deriveKey(password)
-      unlockWindow.close()
-      resolve(key)
-      return true
-    })
-
-    if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-      unlockWindow.loadURL(process.env['ELECTRON_RENDERER_URL'] + '#/unlock')
-    } else {
-      unlockWindow.loadFile(join(__dirname, '../renderer/index.html'), { hash: '/unlock' })
-    }
-  })
-}
-
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.pokebot2.app')
 
@@ -111,11 +76,11 @@ app.whenReady().then(async () => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  encryptionKey = await showUnlockWindow()
+  encryptionKey = deriveKey(TEMP_DEV_VAULT_PASSWORD)
   await createMainWindow(encryptionKey)
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0 && encryptionKey) {
+    if (BrowserWindow.getAllWindows().length === 0) {
       createMainWindow(encryptionKey)
     }
   })
