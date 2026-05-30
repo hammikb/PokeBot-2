@@ -22,12 +22,12 @@ export default function Dashboard() {
       {/* Top: Live Feed + Active Tasks */}
       <div className="flex gap-3 flex-1 min-h-0">
         {/* Live Feed */}
-        <div className="w-80 bg-[#111] border border-gray-800 rounded p-3 flex flex-col min-h-0">
-          <div className="text-xs text-gray-500 uppercase tracking-widest mb-2">Live Feed</div>
-          <div className="flex-1 overflow-y-auto space-y-1">
-            {feedEvents.length === 0 && <div className="text-gray-600 text-xs">Waiting for drops...</div>}
+        <div className="w-80 bg-[#111] border border-gray-800 rounded p-4 flex flex-col min-h-0">
+          <div className="text-sm text-gray-500 uppercase tracking-widest mb-2">Live Feed</div>
+          <div className="flex-1 overflow-y-auto space-y-2">
+            {feedEvents.length === 0 && <div className="text-gray-600 text-sm">Waiting for drops...</div>}
             {feedEvents.map(e => (
-              <div key={e.id} className="text-xs flex gap-2 items-baseline">
+              <div key={e.id} className="text-sm flex gap-2 items-baseline">
                 <span className="text-gray-600 shrink-0">{new Date(e.timestamp).toLocaleTimeString()}</span>
                 <span className={`shrink-0 ${TYPE_COLOR[e.dropType] || 'text-gray-300'}`}>{e.retailer}</span>
                 <span className="text-gray-200 truncate">{e.productName}</span>
@@ -38,11 +38,11 @@ export default function Dashboard() {
         </div>
 
         {/* Active Tasks */}
-        <div className="flex-1 bg-[#111] border border-gray-800 rounded p-3 flex flex-col min-h-0">
-          <div className="text-xs text-gray-500 uppercase tracking-widest mb-2">Active Tasks</div>
-          <div className="flex-1 overflow-y-auto space-y-1">
+        <div className="flex-1 bg-[#111] border border-gray-800 rounded p-4 flex flex-col min-h-0">
+          <div className="text-sm text-gray-500 uppercase tracking-widest mb-2">Active Tasks</div>
+          <div className="flex-1 overflow-y-auto space-y-2">
             {tasks.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-full text-gray-700 text-xs gap-1 pt-8">
+              <div className="flex flex-col items-center justify-center h-full text-gray-700 text-sm gap-1 pt-8">
                 <span className="text-2xl">⏸</span>
                 <span>No tasks — go to Tasks to create one</span>
               </div>
@@ -51,7 +51,7 @@ export default function Dashboard() {
               const status = taskStatuses[t.id] || t.status || 'idle'
               const accountCount = (() => { try { return JSON.parse(t.account_ids || '[]').length } catch { return 0 } })()
               return (
-                <div key={t.id} className="flex items-center gap-3 bg-[#1a1a1a] px-3 py-2 rounded text-xs">
+                <div key={t.id} className="flex items-center gap-3 bg-[#1a1a1a] px-3 py-2 rounded text-sm">
                   <span className={STATUS_COLOR[status]}>{STATUS_ICON[status] || '○'}</span>
                   <div className="flex-1 min-w-0">
                     <div className="text-gray-200 truncate">{t.retailer} — {t.product_name || t.product_url}</div>
@@ -68,23 +68,23 @@ export default function Dashboard() {
       </div>
 
       {/* Account Status */}
-      <div className="bg-[#111] border border-gray-800 rounded p-3">
-        <div className="text-xs text-gray-500 uppercase tracking-widest mb-2">Account Status</div>
+      <div className="bg-[#111] border border-gray-800 rounded p-4">
+        <div className="text-sm text-gray-500 uppercase tracking-widest mb-2">Account Status</div>
         <div className="flex flex-wrap gap-2">
           {accounts.map(acc => (
-            <div key={acc.id} className="flex items-center gap-2 bg-[#1a1a1a] px-3 py-1.5 rounded text-xs">
+            <div key={acc.id} className="flex items-center gap-2 bg-[#1a1a1a] px-3 py-2 rounded text-sm">
               <span className="text-gray-200">{acc.name}</span>
               <span className="text-gray-500">{acc.retailer}</span>
               {acc.proxy && <span className="text-gray-600">proxy: {acc.proxy.split(':')[0]}</span>}
               <span className="text-green-400">READY</span>
             </div>
           ))}
-          {accounts.length === 0 && <span className="text-gray-600 text-xs">No accounts configured</span>}
+          {accounts.length === 0 && <span className="text-gray-600 text-sm">No accounts configured</span>}
         </div>
       </div>
 
       {/* Drop History */}
-      <div className="bg-[#111] border border-gray-800 rounded px-4 py-2 flex gap-6 text-xs text-gray-400">
+      <div className="bg-[#111] border border-gray-800 rounded px-4 py-3 flex gap-6 text-sm text-gray-400">
         <span>last 24h: <span className="text-white">{last24h.length}</span> drops</span>
         <span className="text-green-400">{wins.length} wins</span>
         <span className="text-yellow-400">{captchas.length} captchas</span>

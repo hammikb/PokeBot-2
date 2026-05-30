@@ -4,7 +4,7 @@ import { useAppStore } from '../store/appStore'
 import { RETAILERS } from '../../../shared/constants'
 
 const SUPPORTED_ACCOUNT_RETAILERS = [RETAILERS.TARGET, RETAILERS.WALMART]
-const INPUT_CLASS = 'w-full bg-[#0f0f0f] border border-gray-700 rounded px-2 py-1.5 text-gray-200'
+const INPUT_CLASS = 'w-full bg-[#0f0f0f] border border-gray-700 rounded px-3 py-2 text-gray-200'
 
 const makeEmptyForm = () => ({
   name: '',
@@ -118,16 +118,16 @@ export default function Accounts() {
     <div className="p-4 space-y-4 overflow-y-auto h-full">
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-xs uppercase tracking-widest text-gray-400">
+          <h2 className="text-sm uppercase tracking-widest text-gray-400">
             Accounts ({accounts.length})
           </h2>
-          <p className="text-gray-600 text-xs mt-1">
+          <p className="text-gray-600 text-sm mt-1">
             Store customer-provided Target and Walmart account details for checkout tasks.
           </p>
         </div>
         <button
           onClick={() => setShowForm((showing) => !showing)}
-          className="text-xs bg-red-600 hover:bg-red-500 px-3 py-1.5 rounded uppercase tracking-wider font-bold"
+          className="text-sm bg-red-600 hover:bg-red-500 px-4 py-2 rounded uppercase tracking-wider font-bold"
         >
           {showForm ? 'Cancel' : '+ Add Account'}
         </button>
@@ -136,7 +136,7 @@ export default function Accounts() {
       {showForm && (
         <form
           onSubmit={submit}
-          className="bg-[#111] border border-gray-800 rounded p-4 space-y-4 text-xs"
+          className="bg-[#111] border border-gray-800 rounded p-4 space-y-5 text-sm"
         >
           <div className="grid grid-cols-2 gap-3">
             <Field label="Account Name">
@@ -290,23 +290,23 @@ export default function Accounts() {
           </div>
 
           {registerStatus && (
-            <div className={`text-xs ${registerStatus.includes('fail') || registerStatus.includes('error') || registerStatus.includes('Already') ? 'text-red-400' : 'text-green-400'}`}>
+            <div className={`text-sm ${registerStatus.includes('fail') || registerStatus.includes('error') || registerStatus.includes('Already') ? 'text-red-400' : 'text-green-400'}`}>
               {registerStatus}
             </div>
           )}
 
           <button
             type="submit"
-            className="w-full bg-red-600 hover:bg-red-500 text-white rounded px-4 py-2 uppercase tracking-wider font-bold text-xs"
+            className="w-full bg-red-600 hover:bg-red-500 text-white rounded px-4 py-2 uppercase tracking-wider font-bold text-sm"
           >
             {registerOnSite ? 'Register on Site' : 'Save Account'}
           </button>
         </form>
       )}
 
-      <section className="bg-[#111] border border-gray-800 rounded p-4 space-y-3 text-xs">
+      <section className="bg-[#111] border border-gray-800 rounded p-4 space-y-4 text-sm">
         <div>
-          <h3 className="text-gray-400 uppercase tracking-widest mb-1">Bulk Import</h3>
+          <h3 className="text-gray-400 uppercase tracking-widest mb-1.5">Bulk Import</h3>
           <p className="text-gray-600">
             CSV format:
             retailer,email,password,first,last,address1,address2,city,state,zip,phone,proxy
@@ -317,14 +317,14 @@ export default function Accounts() {
           onChange={(event) => setBulkRows(event.target.value)}
           rows={4}
           placeholder="target,user@email.com,password,Ash,Ketchum,1 Pallet Town,,Pallet,CA,90210,5551234567,1.2.3.4:8080:user:pass"
-          className="w-full bg-[#0f0f0f] border border-gray-700 rounded px-2 py-1.5 text-gray-200"
+          className="w-full bg-[#0f0f0f] border border-gray-700 rounded px-3 py-2 text-gray-200"
         />
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={importBulkAccounts}
             disabled={!bulkRows.trim()}
-            className="text-xs border border-red-700 text-red-400 hover:border-red-500 disabled:border-gray-800 disabled:text-gray-700 px-3 py-1.5 rounded uppercase tracking-wider font-bold"
+            className="text-sm border border-red-700 text-red-400 hover:border-red-500 disabled:border-gray-800 disabled:text-gray-700 px-4 py-2 rounded uppercase tracking-wider font-bold"
           >
             Import Accounts
           </button>
@@ -332,9 +332,9 @@ export default function Accounts() {
         </div>
       </section>
 
-      <section className="bg-[#111] border border-gray-800 rounded p-4 space-y-3 text-xs">
+      <section className="bg-[#111] border border-gray-800 rounded p-4 space-y-4 text-sm">
         <div>
-          <h3 className="text-gray-400 uppercase tracking-widest mb-1">Bulk Create on Site</h3>
+          <h3 className="text-gray-400 uppercase tracking-widest mb-1.5">Bulk Create on Site</h3>
           <p className="text-gray-600">
             Bot registers each account on Target/Walmart. Same CSV format as bulk import.
           </p>
@@ -344,14 +344,14 @@ export default function Accounts() {
           onChange={(e) => setBulkCreateRows(e.target.value)}
           rows={4}
           placeholder="target,user@email.com,password,Ash,Ketchum,1 Pallet Town,,Pallet,CA,90210,5551234567"
-          className="w-full bg-[#0f0f0f] border border-gray-700 rounded px-2 py-1.5 text-gray-200"
+          className="w-full bg-[#0f0f0f] border border-gray-700 rounded px-3 py-2 text-gray-200"
         />
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={bulkCreateOnSite}
             disabled={!bulkCreateRows.trim()}
-            className="text-xs border border-red-700 text-red-400 hover:border-red-500 disabled:border-gray-800 disabled:text-gray-700 px-3 py-1.5 rounded uppercase tracking-wider font-bold"
+            className="text-sm border border-red-700 text-red-400 hover:border-red-500 disabled:border-gray-800 disabled:text-gray-700 px-4 py-2 rounded uppercase tracking-wider font-bold"
           >
             Create Accounts on Site
           </button>
@@ -365,18 +365,18 @@ export default function Accounts() {
           return (
             <div
               key={account.id}
-              className="bg-[#111] border border-gray-800 rounded px-4 py-3 flex items-center gap-4 text-xs"
+              className="bg-[#111] border border-gray-800 rounded px-4 py-4 flex items-center gap-4 text-sm"
             >
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-gray-200">{account.name}</span>
                   {account.status === 'unverified' && (
-                    <span className="text-yellow-500 border border-yellow-700 rounded px-1 py-0.5 text-xs uppercase tracking-wider">
+                    <span className="text-yellow-500 border border-yellow-700 rounded px-1 py-0.5 text-sm uppercase tracking-wider">
                       unverified
                     </span>
                   )}
                   {account.status === 'verified' && (
-                    <span className="text-green-500 border border-green-700 rounded px-1 py-0.5 text-xs uppercase tracking-wider">
+                    <span className="text-green-500 border border-green-700 rounded px-1 py-0.5 text-sm uppercase tracking-wider">
                       verified
                     </span>
                   )}
@@ -398,7 +398,7 @@ export default function Accounts() {
               {account.status === 'unverified' && (
                 <button
                   onClick={() => setAccountStatus(account.id, 'verified')}
-                  className="text-green-600 hover:text-green-400 shrink-0 text-xs"
+                  className="text-green-600 hover:text-green-400 shrink-0 text-sm"
                 >
                   mark verified
                 </button>
@@ -413,7 +413,7 @@ export default function Accounts() {
           )
         })}
         {accounts.length === 0 && (
-          <div className="text-gray-600 text-xs">No accounts yet. Add one above.</div>
+          <div className="text-gray-600 text-sm">No accounts yet. Add one above.</div>
         )}
       </div>
     </div>
@@ -423,7 +423,7 @@ export default function Accounts() {
 function Field({ label, children }) {
   return (
     <div>
-      <label className="text-gray-500 uppercase tracking-wider block mb-1">{label}</label>
+      <label className="text-gray-500 uppercase tracking-wider block mb-1.5">{label}</label>
       {children}
     </div>
   )

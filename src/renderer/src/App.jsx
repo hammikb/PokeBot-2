@@ -33,9 +33,9 @@ export default function App() {
 
   return (
     <HashRouter>
-      <div className="flex flex-col h-screen bg-[#0f0f0f] text-gray-100 font-mono text-sm">
-        <nav className="flex items-center gap-1 px-4 py-0 bg-[#141414] border-b border-gray-800/60 shrink-0 h-10">
-          <span className="text-red-500 font-bold tracking-widest uppercase text-sm mr-5 select-none">
+      <div className="flex flex-col h-screen bg-[#0f0f0f] text-gray-100 font-mono text-base">
+        <nav className="flex items-center gap-1 px-4 py-0 bg-[#141414] border-b border-gray-800/60 shrink-0 h-12">
+          <span className="text-red-500 font-bold tracking-widest uppercase text-base mr-5 select-none">
             PB2
           </span>
           {[
@@ -50,7 +50,7 @@ export default function App() {
               to={path}
               end={path === '/'}
               className={({ isActive }) =>
-                `px-3 h-full flex items-center uppercase tracking-wider text-xs transition-colors border-b-2 ${
+                `px-3 h-full flex items-center uppercase tracking-wider text-sm transition-colors border-b-2 ${
                   isActive
                     ? 'text-red-400 border-red-500'
                     : 'text-gray-500 border-transparent hover:text-gray-200 hover:border-gray-600'
@@ -60,7 +60,7 @@ export default function App() {
               {label}
             </NavLink>
           ))}
-          <div className="ml-auto flex items-center gap-3 text-xs text-gray-600 select-none">
+          <div className="ml-auto flex items-center gap-3 text-sm text-gray-600 select-none">
             <span className="w-2 h-2 rounded-full bg-gray-700" title="Monitor status" />
             <span>v1.0.0</span>
           </div>
