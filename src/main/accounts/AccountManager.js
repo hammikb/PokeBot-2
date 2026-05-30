@@ -24,25 +24,38 @@ export class AccountManager {
     return getAppPath()
   }
 
-  async create({ name, retailer, username, password, cvv = '', proxy = '', shipping = {} }) {
+  async create({ name, retailer, username, password, cvv = '', proxy = '', shipping = {}, status = 'active' }) {
     const base = await this._getProfileBase()
     const id = randomUUID()
     const profilePath = join(base, id)
-    this._getDb().prepare(`
-      INSERT INTO accounts (id, name, retailer, username, password_enc, cvv_enc, proxy, profile_path, shipping_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id, name, retailer, username,
-      encrypt(password, this._key),
-      cvv ? encrypt(cvv, this._key) : '',
-      proxy, profilePath,
-      JSON.stringify(shipping)
-    )
+    this._getDb()
+      .prepare(
+        `
+    INSERT INTO accounts (id, name, retailer, username, password_enc, cvv_enc, proxy, profile_path, shipping_json, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `
+      )
+      .run(
+        id,
+        name,
+        retailer,
+        username,
+        encrypt(password, this._key),
+        cvv ? encrypt(cvv, this._key) : '',
+        proxy,
+        profilePath,
+        JSON.stringify(shipping),
+        status
+      )
     return id
   }
 
   getAll() {
-    return this._getDb().prepare('SELECT id, name, retailer, username, proxy, profile_path FROM accounts').all()
+    return this._getDb()
+      .prepare(
+        'SELECT id, name, retailer, username, proxy, profile_path, shipping_json, status FROM accounts'
+      )
+      .all()
   }
 
   getDecrypted(id) {
@@ -62,6 +75,10 @@ export class AccountManager {
       if (!allowed.includes(k)) continue
       this._getDb().prepare(`UPDATE accounts SET ${k} = ? WHERE id = ?`).run(v, id)
     }
+  }
+
+  setStatus(id, status) {
+    this._getDb().prepare('UPDATE accounts SET status = ? WHERE id = ?').run(status, id)
   }
 
   delete(id) {
