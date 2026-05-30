@@ -17,14 +17,20 @@ beforeEach(() => {
   key = deriveKey('testpass')
   manager = new AccountManager(getDb, key, tmpdir())
 })
-afterEach(() => { getDb().close(); rmSync(dbPath) })
+afterEach(() => {
+  getDb().close()
+  rmSync(dbPath)
+})
 
 describe('AccountManager', () => {
   it('creates and retrieves account', async () => {
     const id = await manager.create({
-      name: 'Acc1', retailer: 'walmart',
-      username: 'user@test.com', password: 'pass123',
-      cvv: '123', proxy: '1.2.3.4:8080:user:pass'
+      name: 'Acc1',
+      retailer: 'walmart',
+      username: 'user@test.com',
+      password: 'pass123',
+      cvv: '123',
+      proxy: '1.2.3.4:8080:user:pass'
     })
     const accounts = manager.getAll()
     expect(accounts).toHaveLength(1)
@@ -33,13 +39,25 @@ describe('AccountManager', () => {
   })
 
   it('stores password encrypted (not plaintext)', async () => {
-    await manager.create({ name: 'A', retailer: 'target', username: 'u', password: 'mypassword', cvv: '999' })
+    await manager.create({
+      name: 'A',
+      retailer: 'target',
+      username: 'u',
+      password: 'mypassword',
+      cvv: '999'
+    })
     const raw = getDb().prepare('SELECT password_enc FROM accounts').get()
     expect(raw.password_enc).not.toBe('mypassword')
   })
 
   it('decrypts password and cvv on getDecrypted', async () => {
-    const id = await manager.create({ name: 'A', retailer: 'target', username: 'u', password: 'mypassword', cvv: '999' })
+    const id = await manager.create({
+      name: 'A',
+      retailer: 'target',
+      username: 'u',
+      password: 'mypassword',
+      cvv: '999'
+    })
     const dec = manager.getDecrypted(id)
     expect(dec.password).toBe('mypassword')
     expect(dec.cvv).toBe('999')
@@ -50,22 +68,102 @@ describe('AccountManager', () => {
   })
 
   it('deletes account', async () => {
-    const id = await manager.create({ name: 'A', retailer: 'walmart', username: 'u', password: 'p', cvv: '1' })
+    const id = await manager.create({
+      name: 'A',
+      retailer: 'walmart',
+      username: 'u',
+      password: 'p',
+      cvv: '1'
+    })
     manager.delete(id)
     expect(manager.getAll()).toHaveLength(0)
   })
 
   it('getDecrypted does not expose encrypted columns', async () => {
-    const id = await manager.create({ name: 'A', retailer: 'walmart', username: 'u', password: 'secret', cvv: '123' })
+    const id = await manager.create({
+      name: 'A',
+      retailer: 'walmart',
+      username: 'u',
+      password: 'secret',
+      cvv: '123'
+    })
     const dec = manager.getDecrypted(id)
     expect(dec.password_enc).toBeUndefined()
     expect(dec.cvv_enc).toBeUndefined()
   })
 
   it('updates allowed fields', async () => {
-    const id = await manager.create({ name: 'A', retailer: 'walmart', username: 'u', password: 'p', cvv: '1', proxy: 'old-proxy' })
+    const id = await manager.create({
+      name: 'A',
+      retailer: 'walmart',
+      username: 'u',
+      password: 'p',
+      cvv: '1',
+      proxy: 'old-proxy'
+    })
     manager.update(id, { proxy: 'new-proxy' })
     const accounts = manager.getAll()
     expect(accounts[0].proxy).toBe('new-proxy')
+  })
+
+  it('returns saved shipping details for account management', async () => {
+    await manager.create({
+      name: 'Ship',
+      retailer: 'target',
+      username: 'ship@test.com',
+      password: 'p',
+      shipping: {
+        firstName: 'Ash',
+        lastName: 'Ketchum',
+        address1: '1 Pallet Town',
+        city: 'Pallet',
+        state: 'CA',
+        zip: '90210'
+      }
+    })
+
+    const accounts = manager.getAll()
+
+    expect(JSON.parse(accounts[0].shipping_json)).toMatchObject({
+      firstName: 'Ash',
+      address1: '1 Pallet Town',
+      zip: '90210'
+    })
+  })
+
+  it('defaults status to active on create', async () => {
+    const id = await manager.create({
+      name: 'A',
+      retailer: 'target',
+      username: 'u',
+      password: 'p'
+    })
+    const accounts = manager.getAll()
+    expect(accounts[0].status).toBe('active')
+  })
+
+  it('saves custom status on create', async () => {
+    const id = await manager.create({
+      name: 'B',
+      retailer: 'walmart',
+      username: 'u2',
+      password: 'p',
+      status: 'unverified'
+    })
+    const accounts = manager.getAll()
+    expect(accounts[0].status).toBe('unverified')
+  })
+
+  it('setStatus updates account status', async () => {
+    const id = await manager.create({
+      name: 'C',
+      retailer: 'target',
+      username: 'u3',
+      password: 'p',
+      status: 'unverified'
+    })
+    manager.setStatus(id, 'verified')
+    const accounts = manager.getAll()
+    expect(accounts[0].status).toBe('verified')
   })
 })
