@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useAppStore } from '../store/appStore'
 import { RETAILERS, RETAILER_BUY_LIMITS } from '../../../shared/constants'
 
-const CHECKOUT_TEST_RETAILERS = new Set([RETAILERS.WALMART])
+const CHECKOUT_TEST_RETAILERS = new Set([RETAILERS.WALMART, RETAILERS.TARGET])
 const SUPPORTED_TASK_RETAILERS = [RETAILERS.TARGET, RETAILERS.WALMART]
 const DEFAULT_RETAILER = RETAILERS.TARGET
 
