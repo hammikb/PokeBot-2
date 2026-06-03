@@ -7,6 +7,8 @@ const require = createRequire(import.meta.url)
 const log = createModuleLogger('Database')
 
 const TABLE_COLUMNS = {
+  schema_migrations: ['version', 'name', 'applied_at'],
+  rate_limits: ['id', 'retailer', 'endpoint', 'last_request', 'request_count', 'window_start'],
   accounts: [
     'id',
     'name',
