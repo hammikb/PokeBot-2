@@ -14,6 +14,7 @@ export class TargetPoller {
 
   async poll() {
     try {
+      console.log(`[TargetPoller] Polling TCIN ${this.tcin}, isFirstPoll: ${this._isFirstPoll}`)
       const { data } = await axios.get(
         'https://redsky.target.com/redsky_aggregations/v1/web/pdp_client_v1',
         {
@@ -29,6 +30,8 @@ export class TargetPoller {
       const status = product?.fulfillment?.shipping_options?.availability_status
       const price = product?.price?.current_retail
       const name = product?.item?.product_description?.title || 'Target Product'
+      
+      console.log(`[TargetPoller] Status: ${status}, Price: ${price}, Name: ${name}`)
 
       if (status !== 'IN_STOCK') {
         this._wasInStock = false

@@ -33,6 +33,7 @@ export function registerIpcHandlers({
   getDb,
   accountManager,
   taskManager,
+  pokemonFinder,
   getSettings,
   mainWindow,
   browserPool,
@@ -290,6 +291,18 @@ export function registerIpcHandlers({
     taskManager.stopTask(id)
     getDb().prepare('DELETE FROM tasks WHERE id = ?').run(id)
     return true
+  })
+
+  // Pokemon Finder
+  ipcMain.handle('pokemon:getAll', () => pokemonFinder.getAllItems())
+  ipcMain.handle('pokemon:getNew', () => pokemonFinder.getNewItems())
+  ipcMain.handle('pokemon:markSeen', (_, id) => {
+    pokemonFinder.markAsSeen(id)
+    return true
+  })
+  ipcMain.handle('pokemon:scanNow', async () => {
+    const items = await pokemonFinder.scanAll()
+    return items
   })
 
   // Push events to renderer
