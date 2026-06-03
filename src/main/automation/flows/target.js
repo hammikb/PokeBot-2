@@ -1,5 +1,9 @@
 import { waitForCaptchaIfNeeded } from '../captcha.js'
 import { startTrace } from '../TraceRecorder.js'
+import { TargetApiClient } from '../api/targetApi.js'
+import { createModuleLogger } from '../../utils/logger.js'
+
+const log = createModuleLogger('TargetFlow')
 
 export async function runTargetFlow(
   context,
@@ -15,7 +19,18 @@ export async function runTargetFlow(
   let requiresManual = false
 
   try {
-    onStep('Opening Target product page')
+    // Extract TCIN from URL for API operations
+    const tcin = TargetApiClient.extractTcin(productUrl)
+    const useApi = tcin !== null
+
+    if (useApi) {
+      onStep('Using API-based cart (10x faster!)')
+      log.info('Using API for cart operations', { tcin, buyLimit })
+    } else {
+      onStep('Opening Target product page')
+      log.warn('Could not extract TCIN, falling back to browser automation')
+    }
+
     await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
     await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
 
@@ -25,49 +40,47 @@ export async function runTargetFlow(
     if ((await signInBtn.count()) > 0) {
       onStep('Not signed in - please sign in manually or use auto-login first')
       requiresManual = true
-      const { screenshotPath } = await trace.stop()
+      const traceResult = await trace.stop()
       return {
         success: false,
         requiresManualCheckout: true,
-        screenshotPath,
+        screenshotPath: traceResult?.screenshotPath,
         message: 'Not signed in - use Target auto-login feature first'
       }
     }
 
-    // Handle quantity if buyLimit > 1
-    if (buyLimit > 1) {
-      onStep(`Setting quantity to ${buyLimit}`)
-      const quantitySelect = page.locator('select[data-test="@web/QuantitySelector"]')
-      if ((await quantitySelect.count()) > 0) {
-        await quantitySelect.selectOption({ value: String(buyLimit) })
-        await page.waitForTimeout(500)
+    // Try API-based add to cart first (FAST!)
+    if (useApi) {
+      try {
+        onStep(`Adding ${buyLimit} item(s) to cart via API...`)
+        const api = await TargetApiClient.fromPage(page)
+        const result = await api.addToCart(tcin, buyLimit)
+        
+        if (result.success) {
+          onStep('✓ Added to cart via API (lightning fast!)')
+          log.info('API add to cart successful', { cartId: result.cartId })
+          
+          // Navigate directly to checkout
+          onStep('Opening Target checkout')
+          await page.goto('https://www.target.com/co-cart', {
+            waitUntil: 'domcontentloaded',
+            timeout: 30000
+          })
+          await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
+        } else {
+          onStep('API failed, using browser fallback')
+          log.warn('API add to cart failed, falling back to browser', { error: result.error })
+          await browserAddToCart(page, buyLimit, onStep, notificationEngine, dropEvent)
+        }
+      } catch (err) {
+        onStep('API error, using browser fallback')
+        log.error('API add to cart error', { error: err.message })
+        await browserAddToCart(page, buyLimit, onStep, notificationEngine, dropEvent)
       }
+    } else {
+      // Fallback to browser automation
+      await browserAddToCart(page, buyLimit, onStep, notificationEngine, dropEvent)
     }
-
-    // Add to cart
-    onStep('Adding to cart')
-    const addToCartBtn = page.locator(
-      'button[data-test="@web/AddToCartButton"], button[data-test="orderPickupButton"], button:has-text("Add to cart")'
-    )
-    await addToCartBtn.first().click({ timeout: 15000 })
-    await page.waitForTimeout(2000)
-    await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
-
-    // Handle "View cart & check out" modal if it appears
-    const viewCartBtn = page.locator('a[href="/cart"]:has-text("View cart")')
-    if ((await viewCartBtn.count()) > 0) {
-      onStep('Navigating to cart')
-      await viewCartBtn.first().click()
-      await page.waitForLoadState('domcontentloaded')
-    }
-
-    // Go to checkout
-    onStep('Opening Target checkout')
-    await page.goto('https://www.target.com/co-cart', {
-      waitUntil: 'domcontentloaded',
-      timeout: 30000
-    })
-    await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
 
     // Click "Checkout" button
     onStep('Proceeding to checkout')
@@ -227,4 +240,44 @@ export async function runTargetFlow(
       message: `Target checkout failed: ${err.message}`
     }
   }
+}
+
+/**
+ * Browser-based add to cart (fallback method)
+ */
+async function browserAddToCart(page, buyLimit, onStep, notificationEngine, dropEvent) {
+  // Handle quantity if buyLimit > 1
+  if (buyLimit > 1) {
+    onStep(`Setting quantity to ${buyLimit}`)
+    const quantitySelect = page.locator('select[data-test="@web/QuantitySelector"]')
+    if ((await quantitySelect.count()) > 0) {
+      await quantitySelect.selectOption({ value: String(buyLimit) })
+      await page.waitForTimeout(500)
+    }
+  }
+
+  // Add to cart
+  onStep('Adding to cart (browser method)')
+  const addToCartBtn = page.locator(
+    'button[data-test="@web/AddToCartButton"], button[data-test="orderPickupButton"], button:has-text("Add to cart")'
+  )
+  await addToCartBtn.first().click({ timeout: 15000 })
+  await page.waitForTimeout(2000)
+  await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
+
+  // Handle "View cart & check out" modal if it appears
+  const viewCartBtn = page.locator('a[href="/cart"]:has-text("View cart")')
+  if ((await viewCartBtn.count()) > 0) {
+    onStep('Navigating to cart')
+    await viewCartBtn.first().click()
+    await page.waitForLoadState('domcontentloaded')
+  }
+
+  // Go to checkout
+  onStep('Opening Target checkout')
+  await page.goto('https://www.target.com/co-cart', {
+    waitUntil: 'domcontentloaded',
+    timeout: 30000
+  })
+  await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
 }
