@@ -48,3 +48,15 @@ export const DROP_TYPES = {
   QUEUE_OPEN: 'queue_open',
   PRICE_DROP: 'price_drop'
 }
+
+export const TASK_MODES = {
+  AUTO_CHECKOUT: 'auto-checkout',
+  ALERT_ONLY: 'alert-only',
+  TEST_CHECKOUT: 'test-checkout'
+}
+
+export const TASK_MODE_LABELS = {
+  [TASK_MODES.AUTO_CHECKOUT]: 'Auto-Checkout (Buy on restock)',
+  [TASK_MODES.ALERT_ONLY]: 'Alert Only (Notify, no purchase)',
+  [TASK_MODES.TEST_CHECKOUT]: 'Test Mode (Stop before order)'
+}
