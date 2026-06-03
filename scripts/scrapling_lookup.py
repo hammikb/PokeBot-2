@@ -42,7 +42,7 @@ def main():
             dynamic_availability = lookup_dynamic_availability(product_url)
             if dynamic_availability:
                 result["availability"] = dynamic_availability
-        print(json.dumps({"ok": True, "product": result}, ensure_ascii=False))
+        print(json.dumps({"ok": True, "product": result}, ensure_ascii=False), flush=True)
         return 0
     except Exception as exc:
         emit_error(str(exc))
