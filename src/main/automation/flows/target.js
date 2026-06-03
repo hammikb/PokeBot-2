@@ -96,9 +96,9 @@ export async function runTargetFlow(
             cartId: result.cartId 
           })
           
-          // Navigate directly to checkout
-          onStep('Opening Target checkout')
-          await page.goto('https://www.target.com/co-cart', {
+          // ONE-CLICK CHECKOUT: Skip cart page, go straight to checkout
+          onStep('Express checkout (skipping cart page)')
+          await page.goto('https://www.target.com/co-checkout', {
             waitUntil: 'domcontentloaded',
             timeout: 30000
           })
@@ -190,12 +190,13 @@ export async function runTargetFlow(
     if (isTestMode) {
       onStep('TEST MODE: Stopping before final submission')
       requiresManual = true
-      const { screenshotPath } = await trace.stop()
+      const traceResult = await trace.stop()
       return {
         success: true,
         testMode: true,
         requiresManualCheckout: true,
-        screenshotPath,
+        screenshotPath: traceResult?.screenshotPath,
+        tracePath: traceResult?.tracePath,
         message: 'Test checkout ready - review and place order manually'
       }
     }
