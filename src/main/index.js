@@ -2,12 +2,13 @@ import { app, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initDb, getDb } from './db.js'
-import { deriveKey } from './crypto.js'
+import { deriveKeyLegacy } from './crypto.js'
 import { AccountManager } from './accounts/AccountManager.js'
 import { BrowserPool } from './automation/BrowserPool.js'
 import { NotificationEngine } from './notify/NotificationEngine.js'
 import { TaskManager } from './tasks/TaskManager.js'
 import { registerIpcHandlers } from './ipc.js'
+import { logger } from './utils/logger.js'
 
 let mainWindow
 let taskManager
@@ -80,11 +81,16 @@ async function createMainWindow(encryptionKey) {
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.pokebot2.app')
 
+  // Configure logger
+  const logDir = join(app.getPath('userData'), 'logs')
+  logger.setLogDir(logDir)
+  logger.setLevel(is.dev ? 'DEBUG' : 'INFO')
+
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  encryptionKey = deriveKey(TEMP_DEV_VAULT_PASSWORD)
+  encryptionKey = deriveKeyLegacy(TEMP_DEV_VAULT_PASSWORD)
   await createMainWindow(encryptionKey)
 
   app.on('activate', () => {

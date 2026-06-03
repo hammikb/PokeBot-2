@@ -79,10 +79,15 @@ export class AccountManager {
   }
 
   update(id, fields) {
-    const allowed = ['name', 'proxy', 'shipping_json']
+    const allowed = {
+      name: 'name',
+      proxy: 'proxy',
+      shipping_json: 'shipping_json'
+    }
     for (const [k, v] of Object.entries(fields)) {
-      if (!allowed.includes(k)) continue
-      this._getDb().prepare(`UPDATE accounts SET ${k} = ? WHERE id = ?`).run(v, id)
+      const column = allowed[k]
+      if (!column) continue
+      this._getDb().prepare(`UPDATE accounts SET ${column} = ? WHERE id = ?`).run(v, id)
     }
   }
 

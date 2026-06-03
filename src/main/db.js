@@ -1,7 +1,10 @@
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { createRequire } from 'module'
+import { runMigrations } from './db/migrations.js'
+import { createModuleLogger } from './utils/logger.js'
 
 const require = createRequire(import.meta.url)
+const log = createModuleLogger('Database')
 
 const TABLE_COLUMNS = {
   accounts: [
@@ -72,8 +75,19 @@ let db
 
 export function initDb(dbPath) {
   if (db) db.close()
+  log.info('Initializing database', { dbPath })
   db = createSqliteDb(dbPath) || new JsonDb(dbPath)
   db.pragma('journal_mode = WAL')
+  
+  // Run migrations first
+  try {
+    runMigrations(db)
+  } catch (err) {
+    log.error('Migration failed', { error: err.message })
+    throw err
+  }
+  
+  // Legacy schema creation for backward compatibility
   db.exec(`
     CREATE TABLE IF NOT EXISTS accounts (
       id TEXT PRIMARY KEY,
@@ -182,6 +196,8 @@ class JsonDb {
   constructor(dbPath) {
     this.path = getJsonDbPath(dbPath)
     this.tables = loadTables(this.path)
+    this._flushTimer = null
+    this._flushDelay = 1000 // Debounce writes by 1 second
   }
 
   pragma() {}
@@ -191,7 +207,11 @@ class JsonDb {
   }
 
   close() {
-    this._flush()
+    if (this._flushTimer) {
+      clearTimeout(this._flushTimer)
+      this._flushTimer = null
+    }
+    this._flushImmediate()
   }
 
   prepare(sql) {
@@ -199,7 +219,22 @@ class JsonDb {
   }
 
   _flush() {
-    writeFileSync(this.path, JSON.stringify(this.tables, null, 2))
+    // Debounce writes to improve performance
+    if (this._flushTimer) {
+      clearTimeout(this._flushTimer)
+    }
+    this._flushTimer = setTimeout(() => {
+      this._flushImmediate()
+      this._flushTimer = null
+    }, this._flushDelay)
+  }
+
+  _flushImmediate() {
+    try {
+      writeFileSync(this.path, JSON.stringify(this.tables, null, 2))
+    } catch (err) {
+      log.error('Failed to write JSON database', { path: this.path, error: err.message })
+    }
   }
 }
 
