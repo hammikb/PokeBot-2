@@ -96,9 +96,9 @@ export async function runTargetFlow(
             cartId: result.cartId 
           })
           
-          // ONE-CLICK CHECKOUT: Skip cart page, go straight to checkout
-          onStep('Express checkout (skipping cart page)')
-          await page.goto('https://www.target.com/co-checkout', {
+          // Navigate to cart first, then proceed to checkout
+          onStep('Opening Target checkout')
+          await page.goto('https://www.target.com/co-cart', {
             waitUntil: 'domcontentloaded',
             timeout: 30000
           })
