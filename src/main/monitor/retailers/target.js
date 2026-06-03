@@ -39,7 +39,8 @@ export class TargetPoller {
         stderr = result.stderr
       }
       
-      if (stderr) {
+      // Scrapling outputs INFO logs to stderr, only treat actual errors as failures
+      if (stderr && (stderr.includes('ERROR') || stderr.includes('"ok": false'))) {
         try {
           const errorData = JSON.parse(stderr)
           console.error(`[TargetPoller] Scrapling error:`, errorData)
@@ -48,6 +49,7 @@ export class TargetPoller {
         }
         return null
       }
+      // Ignore INFO logs in stderr, continue processing stdout
       
       // Filter out INFO logs, only parse the JSON line
       const jsonLine = stdout.split('\n').find(line => line.trim().startsWith('{'))
