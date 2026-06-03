@@ -9,5 +9,7 @@ export async function sendSmsAlert({ accountSid, authToken, from, to, dropEvent 
       from,
       to
     })
-  } catch {}
+  } catch {
+    // Notification delivery should never break monitoring or checkout.
+  }
 }

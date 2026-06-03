@@ -18,14 +18,26 @@ export class CostcoPoller {
       const $ = cheerio.load(data)
       const addToCartBtn = $('input#add-to-cart-btn, button[id*="add-to-cart"]').first()
       const inStock = addToCartBtn.length > 0 && !addToCartBtn.attr('disabled')
-      const priceText = $('.your-price .value, .price-value').first().text().replace(/[^0-9.]/g, '')
+      const priceText = $('.your-price .value, .price-value')
+        .first()
+        .text()
+        .replace(/[^0-9.]/g, '')
       const price = priceText ? parseFloat(priceText) : null
       const name = $('h1.product-title').first().text().trim() || 'Costco Product'
       const queueEnabled = $('[class*="queue"], [id*="waiting-room"]').length > 0
 
-      if (!inStock) { this._wasInStock = false; return null }
-      if (price == null) { this._wasInStock = false; return null }
-      if (price > this.maxPrice) { this._wasInStock = false; return null }
+      if (!inStock) {
+        this._wasInStock = false
+        return null
+      }
+      if (price == null) {
+        this._wasInStock = false
+        return null
+      }
+      if (price > this.maxPrice) {
+        this._wasInStock = false
+        return null
+      }
       if (this._wasInStock) return null
 
       this._wasInStock = true

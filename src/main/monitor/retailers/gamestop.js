@@ -16,19 +16,40 @@ export class GameStopPoller {
         headers: { 'User-Agent': 'Mozilla/5.0' }
       })
       const $ = cheerio.load(data)
-      const addToCart = $('button.add-to-cart:not([disabled]), button[data-buttonstate="ADD_TO_CART"]').first()
+      const addToCart = $(
+        'button.add-to-cart:not([disabled]), button[data-buttonstate="ADD_TO_CART"]'
+      ).first()
       const inStock = addToCart.length > 0
-      const priceText = $('[itemprop="price"], .price-badge__regular-price').first().text().replace(/[^0-9.]/g, '')
+      const priceText = $('[itemprop="price"], .price-badge__regular-price')
+        .first()
+        .text()
+        .replace(/[^0-9.]/g, '')
       const price = priceText ? parseFloat(priceText) : null
-      const name = $('h1.product-name, h1[itemprop="name"]').first().text().trim() || 'GameStop Product'
+      const name =
+        $('h1.product-name, h1[itemprop="name"]').first().text().trim() || 'GameStop Product'
 
-      if (!inStock) { this._wasInStock = false; return null }
-      if (price == null) { this._wasInStock = false; return null }
-      if (price > this.maxPrice) { this._wasInStock = false; return null }
+      if (!inStock) {
+        this._wasInStock = false
+        return null
+      }
+      if (price == null) {
+        this._wasInStock = false
+        return null
+      }
+      if (price > this.maxPrice) {
+        this._wasInStock = false
+        return null
+      }
       if (this._wasInStock) return null
 
       this._wasInStock = true
-      return createDropEvent({ retailer: 'gamestop', productName: name, productUrl: this.productUrl, dropType: DROP_TYPES.IN_STOCK, price })
+      return createDropEvent({
+        retailer: 'gamestop',
+        productName: name,
+        productUrl: this.productUrl,
+        dropType: DROP_TYPES.IN_STOCK,
+        price
+      })
     } catch {
       return null
     }

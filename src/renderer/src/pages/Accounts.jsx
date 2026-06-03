@@ -26,7 +26,17 @@ const makeEmptyForm = () => ({
 })
 
 export default function Accounts() {
-  const { accounts, createAccount, deleteAccount, settings, registerAccount, setAccountStatus, accountRegistrationStatuses } = useAppStore()
+  const {
+    accounts,
+    createAccount,
+    deleteAccount,
+    settings,
+    registerAccount,
+    setAccountStatus,
+    openAccountSession,
+    checkAccountSession,
+    autoLoginTargetAccount
+  } = useAppStore()
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(makeEmptyForm)
   const [bulkRows, setBulkRows] = useState('')
@@ -35,6 +45,10 @@ export default function Accounts() {
   const [registerStatus, setRegisterStatus] = useState('')
   const [bulkCreateRows, setBulkCreateRows] = useState('')
   const [bulkCreateStatus, setBulkCreateStatus] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [sessionStatus, setSessionStatus] = useState('')
+  const [sessionCheckingId, setSessionCheckingId] = useState('')
+  const [autoLoginId, setAutoLoginId] = useState('')
   const importedProxies = Array.isArray(settings.proxies) ? settings.proxies : []
   const proxyCounts = getProxyCounts(accounts)
 
@@ -52,6 +66,13 @@ export default function Accounts() {
     event.preventDefault()
     const accountData = { ...form, name: form.name || makeAccountName(form) }
     if (registerOnSite) {
+      if (form.retailer === RETAILERS.TARGET) {
+        const pwErr = validateTargetPassword(form.password)
+        if (pwErr) {
+          setRegisterStatus(pwErr)
+          return
+        }
+      }
       setRegisterStatus('Registering...')
       const result = await registerAccount({
         ...accountData,
@@ -65,7 +86,11 @@ export default function Accounts() {
         setForm(makeEmptyForm())
         setRegisterOnSite(false)
       } else {
-        setRegisterStatus(result.alreadyExists ? 'Already registered on site' : result.error || 'Registration failed')
+        setRegisterStatus(
+          result.alreadyExists
+            ? 'Already registered on site'
+            : result.error || 'Registration failed'
+        )
       }
     } else {
       await createAccount(accountData)
@@ -112,6 +137,46 @@ export default function Accounts() {
     }
     setBulkRows('')
     setBulkStatus(`Imported ${rows.length} accounts`)
+  }
+
+  const openSession = async (account) => {
+    setSessionStatus(`Opening saved browser for ${account.name}...`)
+    try {
+      await openAccountSession(account.id)
+      setSessionStatus(
+        `Browser opened for ${account.name}. Log in there once; this account profile will be reused for tasks.`
+      )
+    } catch (err) {
+      setSessionStatus(err.message || 'Could not open account browser')
+    }
+  }
+
+  const checkSession = async (account) => {
+    setSessionCheckingId(account.id)
+    setSessionStatus(`Checking saved Target session for ${account.name}...`)
+    try {
+      const result = await checkAccountSession(account.id)
+      const screenshot = result.screenshotPath ? ` Screenshot: ${result.screenshotPath}` : ''
+      setSessionStatus(`${result.message || result.error || 'Session check finished'}${screenshot}`)
+    } catch (err) {
+      setSessionStatus(err.message || 'Could not check saved session')
+    } finally {
+      setSessionCheckingId('')
+    }
+  }
+
+  const autoLogin = async (account) => {
+    setAutoLoginId(account.id)
+    setSessionStatus(`Running Target auto-login for ${account.name}...`)
+    try {
+      const result = await autoLoginTargetAccount(account.id)
+      const screenshot = result.screenshotPath ? ` Screenshot: ${result.screenshotPath}` : ''
+      setSessionStatus(`${result.message || result.error || 'Auto-login finished'}${screenshot}`)
+    } catch (err) {
+      setSessionStatus(err.message || 'Could not run Target auto-login')
+    } finally {
+      setAutoLoginId('')
+    }
   }
 
   return (
@@ -172,13 +237,25 @@ export default function Accounts() {
               />
             </Field>
             <Field label="Password">
-              <input
-                required
-                type="password"
-                value={form.password}
-                onChange={(event) => setF('password', event.target.value)}
-                className={INPUT_CLASS}
-              />
+              <div className="relative">
+                <input
+                  required
+                  type={showPassword ? 'text' : 'password'}
+                  value={form.password}
+                  onChange={(event) => setF('password', event.target.value)}
+                  className={INPUT_CLASS + ' pr-14'}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-200 text-xs uppercase tracking-wider"
+                >
+                  {showPassword ? 'hide' : 'show'}
+                </button>
+              </div>
+              {registerOnSite && form.retailer === RETAILERS.TARGET && (
+                <TargetPasswordHint password={form.password} />
+              )}
             </Field>
           </div>
 
@@ -290,7 +367,9 @@ export default function Accounts() {
           </div>
 
           {registerStatus && (
-            <div className={`text-sm ${registerStatus.includes('fail') || registerStatus.includes('error') || registerStatus.includes('Already') ? 'text-red-400' : 'text-green-400'}`}>
+            <div
+              className={`text-sm ${registerStatus.includes('fail') || registerStatus.includes('error') || registerStatus.includes('Already') ? 'text-red-400' : 'text-green-400'}`}
+            >
               {registerStatus}
             </div>
           )}
@@ -360,6 +439,11 @@ export default function Accounts() {
       </section>
 
       <div className="space-y-2">
+        {sessionStatus && (
+          <div className="bg-[#111] border border-gray-800 rounded px-4 py-3 text-sm text-gray-500">
+            {sessionStatus}
+          </div>
+        )}
         {accounts.map((account) => {
           const shipping = parseShipping(account.shipping_json)
           return (
@@ -402,6 +486,30 @@ export default function Accounts() {
                 >
                   mark verified
                 </button>
+              )}
+              <button
+                onClick={() => openSession(account)}
+                className="text-blue-500 hover:text-blue-300 shrink-0 text-sm"
+              >
+                open browser
+              </button>
+              {account.retailer === RETAILERS.TARGET && (
+                <>
+                  <button
+                    onClick={() => checkSession(account)}
+                    disabled={sessionCheckingId === account.id}
+                    className="text-green-500 hover:text-green-300 disabled:text-gray-700 shrink-0 text-sm"
+                  >
+                    {sessionCheckingId === account.id ? 'checking...' : 'check login'}
+                  </button>
+                  <button
+                    onClick={() => autoLogin(account)}
+                    disabled={autoLoginId === account.id}
+                    className="text-yellow-500 hover:text-yellow-300 disabled:text-gray-700 shrink-0 text-sm"
+                  >
+                    {autoLoginId === account.id ? 'logging in...' : 'auto login'}
+                  </button>
+                </>
               )}
               <button
                 onClick={() => deleteAccount(account.id)}
@@ -510,4 +618,58 @@ function parseShipping(value) {
 
 function makeAccountName(form) {
   return `${form.retailer}-${form.username}`
+}
+
+// Returns null if valid, error string if invalid
+function validateTargetPassword(pw) {
+  if (!pw || pw.length < 8 || pw.length > 20) return '8–20 characters required'
+  if (/[<> ]/.test(pw)) return 'Cannot contain <, >, or spaces'
+  if (/(.)\1{2,}/.test(pw)) return 'No 3 or more consecutive repeated characters (e.g. aaa, 111)'
+  const types = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^a-zA-Z0-9<> ]/].filter((r) => r.test(pw)).length
+  if (types < 2)
+    return 'Must include at least 2 of: lowercase, uppercase, numbers, special characters'
+  return null
+}
+
+function TargetPasswordHint({ password }) {
+  const length = password.length
+  const lengthOk = length >= 8 && length <= 20
+  const noForbidden = !/[<> ]/.test(password)
+  const noRepeat = !/(.)\1{2,}/.test(password)
+  const types = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^a-zA-Z0-9<> ]/].filter((r) =>
+    r.test(password)
+  ).length
+  const typesOk = types >= 2
+
+  const renderRule = ({ ok, label }) => (
+    <div className={`flex items-center gap-1.5 ${ok ? 'text-green-400' : 'text-red-400'}`}>
+      <span className="shrink-0 font-bold">{ok ? '✓' : '✗'}</span>
+      <span>{label}</span>
+    </div>
+  )
+
+  return (
+    <div className="mt-2 bg-[#0a0a0a] border border-gray-800 rounded px-3 py-2 space-y-1 text-xs">
+      <div className="text-gray-500 uppercase tracking-wider mb-1.5">Password requirements</div>
+      <Rule ok={lengthOk} label="8–20 characters" />
+      {renderRule({
+        ok: typesOk,
+        label: 'At least 2 of: lowercase, uppercase, numbers, special chars'
+      })}
+      {renderRule({
+        ok: noRepeat,
+        label: 'No 3+ consecutive repeated characters (aaa, 111, etc.)'
+      })}
+      {renderRule({ ok: noForbidden, label: 'No spaces, < or >' })}
+    </div>
+  )
+}
+
+function Rule({ ok, label }) {
+  return (
+    <div className={`flex items-center gap-1.5 ${ok ? 'text-green-400' : 'text-red-400'}`}>
+      <span className="shrink-0 font-bold">{ok ? 'âœ“' : 'âœ—'}</span>
+      <span>{label}</span>
+    </div>
+  )
 }

@@ -20,10 +20,12 @@ describe('sendSmsAlert', () => {
       to: '+19999999999',
       dropEvent: { retailer: 'walmart', productName: 'ETB', price: 49.99 }
     })
-    expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({
-      body: expect.stringContaining('walmart'),
-      to: '+19999999999'
-    }))
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining('walmart'),
+        to: '+19999999999'
+      })
+    )
   })
 
   it('does nothing when credentials missing', async () => {
@@ -33,9 +35,14 @@ describe('sendSmsAlert', () => {
 
   it('does not throw on Twilio error', async () => {
     mockCreate.mockRejectedValueOnce(new Error('twilio fail'))
-    await expect(sendSmsAlert({
-      accountSid: 'AC', authToken: 'tok', from: '+1', to: '+2',
-      dropEvent: { retailer: 'walmart', productName: 'ETB', price: 49 }
-    })).resolves.not.toThrow()
+    await expect(
+      sendSmsAlert({
+        accountSid: 'AC',
+        authToken: 'tok',
+        from: '+1',
+        to: '+2',
+        dropEvent: { retailer: 'walmart', productName: 'ETB', price: 49 }
+      })
+    ).resolves.not.toThrow()
   })
 })

@@ -132,7 +132,7 @@ describe('AccountManager', () => {
   })
 
   it('defaults status to active on create', async () => {
-    const id = await manager.create({
+    await manager.create({
       name: 'A',
       retailer: 'target',
       username: 'u',
@@ -143,7 +143,7 @@ describe('AccountManager', () => {
   })
 
   it('saves custom status on create', async () => {
-    const id = await manager.create({
+    await manager.create({
       name: 'B',
       retailer: 'walmart',
       username: 'u2',

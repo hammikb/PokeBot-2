@@ -3,8 +3,12 @@ import { MonitorEngine } from '../../../src/main/monitor/MonitorEngine.js'
 
 describe('MonitorEngine', () => {
   let engine
-  beforeEach(() => { engine = new MonitorEngine() })
-  afterEach(() => { engine.stopAll() })
+  beforeEach(() => {
+    engine = new MonitorEngine()
+  })
+  afterEach(() => {
+    engine.stopAll()
+  })
 
   it('starts with no active tasks', () => {
     expect(engine.getActiveTasks()).toHaveLength(0)
@@ -29,7 +33,7 @@ describe('MonitorEngine', () => {
     const handler = vi.fn()
     engine.on('drop', handler)
     engine.addTask({ id: 'task3', poller: mockPoller, intervalMs: 50 })
-    await new Promise(r => setTimeout(r, 120))
+    await new Promise((r) => setTimeout(r, 120))
     expect(handler).toHaveBeenCalledWith(dropEvent)
   })
 })

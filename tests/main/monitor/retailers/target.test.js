@@ -4,17 +4,29 @@ import axios from 'axios'
 
 vi.mock('axios')
 
-const MOCK_IN_STOCK = { data: { data: { product: {
-  fulfillment: { shipping_options: { availability_status: 'IN_STOCK' } },
-  price: { current_retail: 49.99 },
-  item: { product_description: { title: 'Pokemon ETB' } }
-}}}}
+const MOCK_IN_STOCK = {
+  data: {
+    data: {
+      product: {
+        fulfillment: { shipping_options: { availability_status: 'IN_STOCK' } },
+        price: { current_retail: 49.99 },
+        item: { product_description: { title: 'Pokemon ETB' } }
+      }
+    }
+  }
+}
 
-const MOCK_OUT = { data: { data: { product: {
-  fulfillment: { shipping_options: { availability_status: 'UNAVAILABLE' } },
-  price: { current_retail: 49.99 },
-  item: { product_description: { title: 'Pokemon ETB' } }
-}}}}
+const MOCK_OUT = {
+  data: {
+    data: {
+      product: {
+        fulfillment: { shipping_options: { availability_status: 'UNAVAILABLE' } },
+        price: { current_retail: 49.99 },
+        item: { product_description: { title: 'Pokemon ETB' } }
+      }
+    }
+  }
+}
 
 describe('TargetPoller', () => {
   let poller

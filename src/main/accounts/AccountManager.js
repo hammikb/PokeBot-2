@@ -24,7 +24,16 @@ export class AccountManager {
     return getAppPath()
   }
 
-  async create({ name, retailer, username, password, cvv = '', proxy = '', shipping = {}, status = 'active' }) {
+  async create({
+    name,
+    retailer,
+    username,
+    password,
+    cvv = '',
+    proxy = '',
+    shipping = {},
+    status = 'active'
+  }) {
     const base = await this._getProfileBase()
     const id = randomUUID()
     const profilePath = join(base, id)

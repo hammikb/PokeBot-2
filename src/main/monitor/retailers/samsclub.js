@@ -25,13 +25,28 @@ export class SamsClubPoller {
       const price = product?.price?.finalPrice?.amount
       const name = product?.name || "Sam's Club Product"
 
-      if (!inStock) { this._wasInStock = false; return null }
-      if (price == null) { this._wasInStock = false; return null }
-      if (price > this.maxPrice) { this._wasInStock = false; return null }
+      if (!inStock) {
+        this._wasInStock = false
+        return null
+      }
+      if (price == null) {
+        this._wasInStock = false
+        return null
+      }
+      if (price > this.maxPrice) {
+        this._wasInStock = false
+        return null
+      }
       if (this._wasInStock) return null
 
       this._wasInStock = true
-      return createDropEvent({ retailer: 'samsclub', productName: name, productUrl: this.productUrl, dropType: DROP_TYPES.IN_STOCK, price })
+      return createDropEvent({
+        retailer: 'samsclub',
+        productName: name,
+        productUrl: this.productUrl,
+        dropType: DROP_TYPES.IN_STOCK,
+        price
+      })
     } catch {
       return null
     }

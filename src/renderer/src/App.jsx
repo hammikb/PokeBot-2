@@ -5,23 +5,34 @@ import Dashboard from './pages/Dashboard'
 import Tasks from './pages/Tasks'
 import Accounts from './pages/Accounts'
 import Proxies from './pages/Proxies'
+import Catalog from './pages/Catalog'
 import Settings from './pages/Settings'
 import { IPC } from '../../shared/constants'
 
 export default function App() {
-  const { loadTasks, loadAccounts, loadSettings, pushFeedEvent, setTaskStatus, setAccountRegistrationStatus } = useAppStore()
+  const {
+    loadTasks,
+    loadAccounts,
+    loadCatalog,
+    loadSettings,
+    pushFeedEvent,
+    setTaskStatus,
+    setAccountRegistrationStatus
+  } = useAppStore()
 
   useEffect(() => {
     const ipc = window.electron?.ipcRenderer
     loadTasks()
     loadAccounts()
+    loadCatalog()
     loadSettings()
     if (ipc) {
       ipc.on(IPC.FEED_EVENT, (_event, data) => pushFeedEvent(data))
       ipc.on(IPC.TASK_STATUS, (_event, { taskId, status }) => setTaskStatus(taskId, status))
       ipc.on(IPC.ACCOUNT_STATUS, (_event, data) => {
         loadAccounts()
-        if (data?.email) setAccountRegistrationStatus(data.email, { state: 'success', message: data.message })
+        if (data?.email)
+          setAccountRegistrationStatus(data.email, { state: 'success', message: data.message })
       })
     }
     return () => {
@@ -29,7 +40,15 @@ export default function App() {
       ipc?.removeAllListeners(IPC.TASK_STATUS)
       ipc?.removeAllListeners(IPC.ACCOUNT_STATUS)
     }
-  }, [])
+  }, [
+    loadTasks,
+    loadAccounts,
+    loadCatalog,
+    loadSettings,
+    pushFeedEvent,
+    setTaskStatus,
+    setAccountRegistrationStatus
+  ])
 
   return (
     <HashRouter>
@@ -41,6 +60,7 @@ export default function App() {
           {[
             ['/', 'Dashboard'],
             ['/tasks', 'Tasks'],
+            ['/catalog', 'Catalog'],
             ['/accounts', 'Accounts'],
             ['/proxies', 'Proxies'],
             ['/settings', 'Settings']
@@ -69,6 +89,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/tasks" element={<Tasks />} />
+            <Route path="/catalog" element={<Catalog />} />
             <Route path="/accounts" element={<Accounts />} />
             <Route path="/proxies" element={<Proxies />} />
             <Route path="/settings" element={<Settings />} />

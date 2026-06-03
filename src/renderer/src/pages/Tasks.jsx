@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useAppStore } from '../store/appStore'
 import { RETAILERS, RETAILER_BUY_LIMITS } from '../../../shared/constants'
 
-const CHECKOUT_TEST_RETAILERS = new Set([RETAILERS.WALMART, RETAILERS.TARGET])
+const CHECKOUT_TEST_RETAILERS = new Set([RETAILERS.WALMART])
 const SUPPORTED_TASK_RETAILERS = [RETAILERS.TARGET, RETAILERS.WALMART]
 const DEFAULT_RETAILER = RETAILERS.TARGET
 
@@ -22,40 +22,50 @@ export default function Tasks() {
   const {
     tasks,
     taskStatuses,
+    taskReadiness,
     accounts,
     startTask,
+    testTask,
     stopTask,
     deleteTask,
     createTask,
     updateTask,
-    lookupProduct
+    catalogItems,
+    saveTaskTestResult
   } = useAppStore()
   const [showBuilder, setShowBuilder] = useState(false)
   const [editingTaskId, setEditingTaskId] = useState(null)
-  const [productLookup, setProductLookup] = useState({ loading: false, error: '', product: null })
   const [form, setForm] = useState(makeDefaultForm)
+  const [selectedCatalogId, setSelectedCatalogId] = useState('')
+  const [builderMessage, setBuilderMessage] = useState('')
+  const [taskActionMessage, setTaskActionMessage] = useState('')
 
   const setF = (k, v) => setForm((f) => ({ ...f, [k]: v }))
   const supportsTestCheckout = CHECKOUT_TEST_RETAILERS.has(form.retailer)
+  const matchingAccounts = accounts.filter((account) => account.retailer === form.retailer)
 
-  const retailerFromUrl = (productUrl) => {
-    try {
-      const hostname = new URL(productUrl).hostname
-      if (hostname.includes('target.com')) return RETAILERS.TARGET
-      if (hostname.includes('walmart.com')) return RETAILERS.WALMART
-    } catch {
-      return null
-    }
-    return null
-  }
+  const selectCatalogItem = (id) => {
+    setSelectedCatalogId(id)
+    const item = catalogItems.find((catalogItem) => catalogItem.id === id)
+    if (!item) return
 
-  const setProductUrl = (productUrl) => {
-    const retailer = retailerFromUrl(productUrl)
     setForm((f) => ({
       ...f,
-      productUrl,
-      retailer: retailer || f.retailer,
-      buyLimit: retailer ? RETAILER_BUY_LIMITS[retailer] : f.buyLimit
+      retailer: item.retailer,
+      productUrl: item.product_url,
+      productName: item.title,
+      productImageUrl: item.image_url || '',
+      accountIds: f.accountIds.filter((accountId) =>
+        accounts.some((account) => account.id === accountId && account.retailer === item.retailer)
+      ),
+      buyLimit: RETAILER_BUY_LIMITS[item.retailer] || f.buyLimit,
+      maxPrice:
+        f.maxPrice ||
+        (item.msrp != null
+          ? item.msrp.toString()
+          : item.current_price != null
+            ? item.current_price.toString()
+            : '')
     }))
   }
 
@@ -63,6 +73,9 @@ export default function Tasks() {
     setForm((f) => ({
       ...f,
       retailer,
+      accountIds: f.accountIds.filter((accountId) =>
+        accounts.some((account) => account.id === accountId && account.retailer === retailer)
+      ),
       buyLimit: RETAILER_BUY_LIMITS[retailer],
       mode: CHECKOUT_TEST_RETAILERS.has(retailer) ? f.mode : 'monitor-and-buy'
     }))
@@ -79,40 +92,24 @@ export default function Tasks() {
     setShowBuilder(false)
     setEditingTaskId(null)
     setForm(makeDefaultForm())
-    setProductLookup({ loading: false, error: '', product: null })
-  }
-
-  const applyProduct = (product) => {
-    setForm((f) => ({
-      ...f,
-      retailer: product.retailer || f.retailer,
-      productName: product.productName || f.productName,
-      productImageUrl: product.imageUrl || f.productImageUrl,
-      buyLimit: RETAILER_BUY_LIMITS[product.retailer] || f.buyLimit,
-      maxPrice: f.maxPrice || (product.price != null ? product.price.toString() : '')
-    }))
-    setProductLookup({ loading: false, error: '', product })
-  }
-
-  const fetchProduct = async () => {
-    const productUrl = form.productUrl.trim()
-    if (!productUrl) return
-
-    setProductLookup((state) => ({ ...state, loading: true, error: '' }))
-    try {
-      const product = await lookupProduct(productUrl)
-      applyProduct(product)
-    } catch (err) {
-      setProductLookup({
-        loading: false,
-        error: err.message || 'Could not look up product',
-        product: null
-      })
-    }
+    setSelectedCatalogId('')
+    setBuilderMessage('')
   }
 
   const submit = async (e) => {
     e.preventDefault()
+    if (!/^https?:\/\//i.test(form.productUrl.trim())) {
+      setBuilderMessage('Choose a saved catalog product before creating the task.')
+      setSelectedCatalogId('')
+      return
+    }
+    if (form.accountIds.length === 0) {
+      setBuilderMessage(
+        `Choose at least one ${form.retailer} account. Use Accounts > open browser first if it needs a saved login session.`
+      )
+      return
+    }
+
     const payload = {
       ...form,
       buyLimit: parseInt(form.buyLimit, 10),
@@ -133,6 +130,8 @@ export default function Tasks() {
       accountIds = []
     }
 
+    const matchingCatalogItem = catalogItems.find((item) => item.product_url === task.product_url)
+
     setForm({
       retailer: task.retailer || DEFAULT_RETAILER,
       productUrl: task.product_url || '',
@@ -144,15 +143,55 @@ export default function Tasks() {
       intervalMs: task.interval_ms || 4000,
       mode: task.mode || 'monitor-and-buy'
     })
-    setProductLookup({ loading: false, error: '', product: null })
+    setSelectedCatalogId(matchingCatalogItem?.id || '')
+    setBuilderMessage(
+      matchingCatalogItem ? '' : 'This existing task is not linked to a current catalog item.'
+    )
     setEditingTaskId(task.id)
     setShowBuilder(true)
+  }
+
+  const runCheckoutTest = async (task) => {
+    if (!CHECKOUT_TEST_RETAILERS.has(task.retailer)) {
+      setTaskActionMessage(
+        `${task.retailer} checkout automation is reset. This task can monitor only for now.`
+      )
+      return
+    }
+    const accountCount = getTaskAccountCount(task)
+    if (accountCount === 0) {
+      setTaskActionMessage('Edit this task and select at least one account before running a test.')
+      return
+    }
+    setTaskActionMessage(`Running checkout test for ${task.product_name || 'task'}...`)
+    try {
+      const result = await testTask(task.id)
+      await saveTaskTestResult(task.id, result)
+      if (result.success) {
+        setTaskActionMessage(
+          'Checkout test reached the stop point. Browser stays open at Place order.'
+        )
+      } else {
+        const error = result.results?.find((entry) => entry.error)?.error || 'Checkout test failed'
+        setTaskActionMessage(error)
+      }
+    } catch (err) {
+      setTaskActionMessage(err.message || 'Checkout test failed')
+    }
   }
 
   return (
     <div className="p-4 space-y-4 overflow-y-auto h-full">
       <div className="flex justify-between items-center">
-        <h2 className="text-sm uppercase tracking-widest text-gray-400">Tasks ({tasks.length})</h2>
+        <div>
+          <h2 className="text-sm uppercase tracking-widest text-gray-400">
+            Tasks ({tasks.length})
+          </h2>
+          <p className="text-gray-600 text-sm mt-1">
+            Build tasks from Catalog items. Target is monitor-only while checkout is rebuilt;
+            Walmart can still run checkout tests.
+          </p>
+        </div>
         <button
           onClick={() => (showBuilder ? resetBuilder() : setShowBuilder(true))}
           className="text-sm bg-red-600 hover:bg-red-500 px-4 py-2 rounded uppercase tracking-wider font-bold"
@@ -160,6 +199,12 @@ export default function Tasks() {
           {showBuilder ? 'Cancel' : '+ New Task'}
         </button>
       </div>
+
+      {taskActionMessage && (
+        <div className="bg-[#111] border border-gray-800 rounded px-4 py-3 text-sm text-gray-400">
+          {taskActionMessage}
+        </div>
+      )}
 
       {showBuilder && (
         <form
@@ -171,34 +216,29 @@ export default function Tasks() {
           )}
 
           <div>
-            <label className="text-gray-500 uppercase tracking-wider block mb-1.5">Product URL</label>
-            <input
-              required
+            <label className="text-gray-500 uppercase tracking-wider block mb-1.5">
+              Product Catalog Item
+            </label>
+            <select
               autoFocus
-              value={form.productUrl}
-              onChange={(e) => setProductUrl(e.target.value)}
-              onBlur={fetchProduct}
-              placeholder="Paste a Target or Walmart product URL"
+              value={selectedCatalogId}
+              onChange={(e) => selectCatalogItem(e.target.value)}
               className="w-full bg-[#0f0f0f] border border-gray-700 rounded px-3 py-2 text-gray-200"
-            />
-            <div className="flex items-center justify-between mt-1 gap-3">
-              <span className="text-gray-600">
-                {productLookup.loading
-                  ? 'Loading product...'
-                  : productLookup.error || productLookup.product?.formattedPrice || ''}
-              </span>
-              <button
-                type="button"
-                onClick={fetchProduct}
-                disabled={productLookup.loading || !form.productUrl.trim()}
-                className="text-gray-400 hover:text-gray-200 disabled:text-gray-700 uppercase tracking-wider"
-              >
-                Fetch
-              </button>
+            >
+              <option value="">Choose a saved product...</option>
+              {catalogItems.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.retailer.toUpperCase()} - {item.title}
+                </option>
+              ))}
+            </select>
+            <div className="text-gray-600 mt-1">
+              {builderMessage ||
+                'Add products from the Catalog tab first, then choose accounts for this retailer.'}
             </div>
           </div>
 
-          {(productLookup.product || form.productImageUrl) && (
+          {(form.productUrl || form.productImageUrl) && (
             <div className="flex gap-3 bg-[#0f0f0f] border border-gray-800 rounded p-3">
               {form.productImageUrl && (
                 <img
@@ -211,20 +251,17 @@ export default function Tasks() {
                 <div className="text-gray-200 font-bold truncate">
                   {form.productName || 'Product found'}
                 </div>
-                <div className="text-gray-500 mt-1">
-                  {productLookup.product?.brand || form.retailer}
-                  {productLookup.product?.category ? ` / ${productLookup.product.category}` : ''}
-                </div>
-                <div className="text-gray-500 mt-1">
-                  {productLookup.product?.availability || 'Product info loaded'}
-                </div>
+                <div className="text-gray-500 mt-1">{form.retailer}</div>
+                <div className="text-gray-500 mt-1 truncate">{form.productUrl}</div>
               </div>
             </div>
           )}
 
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="text-gray-500 uppercase tracking-wider block mb-1.5">Retailer</label>
+              <label className="text-gray-500 uppercase tracking-wider block mb-1.5">
+                Retailer
+              </label>
               <select
                 value={form.retailer}
                 onChange={(e) => setRetailer(e.target.value)}
@@ -238,7 +275,9 @@ export default function Tasks() {
               </select>
             </div>
             <div>
-              <label className="text-gray-500 uppercase tracking-wider block mb-1.5">Buy Limit</label>
+              <label className="text-gray-500 uppercase tracking-wider block mb-1.5">
+                Buy Limit
+              </label>
               <input
                 type="number"
                 min="1"
@@ -273,7 +312,9 @@ export default function Tasks() {
               disabled={!supportsTestCheckout}
               className="w-full bg-[#0f0f0f] border border-gray-700 rounded px-3 py-2 text-gray-200 disabled:text-gray-600 disabled:border-gray-800"
             >
-              <option value="monitor-and-buy">Auto buy</option>
+              <option value="monitor-and-buy">
+                {supportsTestCheckout ? 'Monitor and buy' : 'Monitor only'}
+              </option>
               <option value="test-checkout">Test checkout</option>
             </select>
           </div>
@@ -292,7 +333,7 @@ export default function Tasks() {
           <div>
             <label className="text-gray-500 uppercase tracking-wider block mb-1.5">Accounts</label>
             <div className="flex flex-wrap gap-2">
-              {accounts.map((account) => (
+              {matchingAccounts.map((account) => (
                 <button
                   type="button"
                   key={account.id}
@@ -306,8 +347,11 @@ export default function Tasks() {
                   {account.name}
                 </button>
               ))}
-              {accounts.length === 0 && (
-                <span className="text-gray-600">No accounts - add one first</span>
+              {matchingAccounts.length === 0 && (
+                <span className="text-gray-600">
+                  No {form.retailer} accounts. Add one in Accounts, then open its browser and log in
+                  once.
+                </span>
               )}
             </div>
           </div>
@@ -324,69 +368,86 @@ export default function Tasks() {
       <div className="space-y-3">
         {tasks.map((task) => {
           const status = taskStatuses[task.id] || task.status || 'idle'
-          const accountCount = (() => {
-            try {
-              return JSON.parse(task.account_ids || '[]').length
-            } catch {
-              return 0
-            }
-          })()
+          const accountCount = getTaskAccountCount(task)
           return (
             <div
               key={task.id}
-              className="bg-[#111] border border-gray-800 rounded px-4 py-4 flex items-center gap-4 text-sm"
+              className="bg-[#111] border border-gray-800 rounded px-4 py-4 text-sm space-y-3"
             >
-              <span
-                className={`w-2 h-2 rounded-full shrink-0 ${status === 'monitoring' ? 'bg-green-400' : status === 'error' ? 'bg-red-400' : 'bg-gray-600'}`}
-              />
-              <div className="flex-1 min-w-0">
-                <div className="text-gray-200">
-                  {task.retailer} - {task.product_name || 'Product'}
-                </div>
-                <div className="text-gray-600 truncate">{task.product_url}</div>
-              </div>
-              {task.product_image_url && (
-                <img
-                  src={task.product_image_url}
-                  alt={task.product_name || 'Product'}
-                  className="w-10 h-10 object-contain bg-white rounded shrink-0"
+              <div className="flex items-center gap-4">
+                <span
+                  className={`w-2 h-2 rounded-full shrink-0 ${status === 'monitoring' ? 'bg-green-400' : status === 'error' ? 'bg-red-400' : 'bg-gray-600'}`}
                 />
-              )}
-              <span className="text-gray-500 shrink-0">{accountCount} accts</span>
-              {task.mode === 'test-checkout' && (
-                <span className="text-yellow-400 shrink-0">test</span>
-              )}
-              <span className="text-gray-500 shrink-0">limit {task.buy_limit || 1}</span>
-              <span className="text-gray-500 shrink-0">${task.max_price ?? 'inf'}</span>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => editTask(task)}
-                  className="text-blue-400 hover:text-blue-200"
-                >
-                  edit
-                </button>
-                {status === 'idle' || status === 'error' ? (
-                  <button
-                    onClick={() => startTask(task.id)}
-                    className="text-green-500 hover:text-green-300"
-                  >
-                    start
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => stopTask(task.id)}
-                    className="text-yellow-500 hover:text-yellow-300"
-                  >
-                    stop
-                  </button>
+                <div className="flex-1 min-w-0">
+                  <div className="text-gray-200">
+                    {task.retailer} - {task.product_name || 'Product'}
+                  </div>
+                  <div className="text-gray-600 truncate">{task.product_url}</div>
+                </div>
+                {task.product_image_url && (
+                  <img
+                    src={task.product_image_url}
+                    alt={task.product_name || 'Product'}
+                    className="w-10 h-10 object-contain bg-white rounded shrink-0"
+                  />
                 )}
-                <button
-                  onClick={() => deleteTask(task.id)}
-                  className="text-red-600 hover:text-red-400"
-                >
-                  delete
-                </button>
+                <span className="text-gray-500 shrink-0">{accountCount} accts</span>
+                {task.mode === 'test-checkout' && (
+                  <span className="text-yellow-400 shrink-0">test</span>
+                )}
+                <span className="text-gray-500 shrink-0">limit {task.buy_limit || 1}</span>
+                <span className="text-gray-500 shrink-0">${task.max_price ?? 'inf'}</span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => editTask(task)}
+                    className="text-blue-400 hover:text-blue-200"
+                  >
+                    edit
+                  </button>
+                  <button
+                    onClick={() => runCheckoutTest(task)}
+                    disabled={accountCount === 0 || !CHECKOUT_TEST_RETAILERS.has(task.retailer)}
+                    title={
+                      accountCount === 0
+                        ? 'Edit task and select an account first'
+                        : CHECKOUT_TEST_RETAILERS.has(task.retailer)
+                          ? 'Run safe checkout test'
+                          : 'Checkout automation is reset for this retailer'
+                    }
+                    className="text-orange-400 hover:text-orange-200 disabled:text-gray-700"
+                  >
+                    test
+                  </button>
+                  {status === 'idle' || status === 'error' ? (
+                    <button
+                      onClick={() => startTask(task.id)}
+                      disabled={accountCount === 0}
+                      title={
+                        accountCount === 0
+                          ? 'Edit task and select an account first'
+                          : 'Start monitoring'
+                      }
+                      className="text-green-500 hover:text-green-300 disabled:text-gray-700"
+                    >
+                      start
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => stopTask(task.id)}
+                      className="text-yellow-500 hover:text-yellow-300"
+                    >
+                      stop
+                    </button>
+                  )}
+                  <button
+                    onClick={() => deleteTask(task.id)}
+                    className="text-red-600 hover:text-red-400"
+                  >
+                    delete
+                  </button>
+                </div>
               </div>
+              {renderReadinessBar(taskReadiness[task.id])}
             </div>
           )
         })}
@@ -396,4 +457,35 @@ export default function Tasks() {
       </div>
     </div>
   )
+}
+
+function renderReadinessBar(readiness) {
+  const checks = readiness?.checks || []
+  if (checks.length === 0) {
+    return <div className="text-gray-700 text-xs">Readiness check loading...</div>
+  }
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {checks.map((check) => (
+        <span
+          key={check.label}
+          title={check.message}
+          className={`border rounded px-2 py-1 text-xs uppercase tracking-wider ${
+            check.ok ? 'border-green-900 text-green-400' : 'border-yellow-900 text-yellow-400'
+          }`}
+        >
+          {check.ok ? 'ok' : 'todo'} {check.label}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function getTaskAccountCount(task) {
+  try {
+    return JSON.parse(task.account_ids || '[]').length
+  } catch {
+    return 0
+  }
 }

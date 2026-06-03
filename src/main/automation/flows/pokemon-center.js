@@ -7,11 +7,16 @@ export async function runPokemonCenterFlow(context, { productUrl, notificationEn
     await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
     await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
 
-    const queueBtn = page.locator('button:has-text("Join Queue"), button:has-text("Enter Queue"), button:has-text("Join the Queue"), #btn-queue')
-    if (await queueBtn.count() > 0) {
+    const queueBtn = page.locator(
+      'button:has-text("Join Queue"), button:has-text("Enter Queue"), button:has-text("Join the Queue"), #btn-queue'
+    )
+    if ((await queueBtn.count()) > 0) {
       await queueBtn.first().click()
       await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
-      await page.waitForSelector('button:has-text("Add to Cart"):not([disabled]), button:has-text("Add to cart"):not([disabled])', { timeout: 600000 })
+      await page.waitForSelector(
+        'button:has-text("Add to Cart"):not([disabled]), button:has-text("Add to cart"):not([disabled])',
+        { timeout: 600000 }
+      )
     }
 
     requiresManual = true
@@ -26,7 +31,11 @@ export async function runPokemonCenterFlow(context, { productUrl, notificationEn
     return { success: false, error: err.message }
   } finally {
     if (!requiresManual) {
-      try { await page.close() } catch {}
+      try {
+        await page.close()
+      } catch {
+        // Best effort cleanup; manual checkout state has already been decided.
+      }
     }
   }
 }

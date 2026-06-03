@@ -13,20 +13,26 @@ export class WalmartPoller {
 
   async poll() {
     try {
-      const { data } = await axios.get(
-        `https://www.walmart.com/ip/${this.itemId}`,
-        {
-          headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' },
-          params: { 'modules': 'item' }
-        }
-      )
+      const { data } = await axios.get(`https://www.walmart.com/ip/${this.itemId}`, {
+        headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0' },
+        params: { modules: 'item' }
+      })
       const status = data?.availabilityStatus
       const price = data?.priceInfo?.currentPrice?.price
       const name = data?.name || 'Walmart Product'
 
-      if (status !== 'IN_STOCK') { this._wasInStock = false; return null }
-      if (price == null) { this._wasInStock = false; return null }
-      if (price > this.maxPrice) { this._wasInStock = false; return null }
+      if (status !== 'IN_STOCK') {
+        this._wasInStock = false
+        return null
+      }
+      if (price == null) {
+        this._wasInStock = false
+        return null
+      }
+      if (price > this.maxPrice) {
+        this._wasInStock = false
+        return null
+      }
       if (this._wasInStock) return null
 
       this._wasInStock = true

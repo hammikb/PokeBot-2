@@ -55,7 +55,15 @@ async function createMainWindow(encryptionKey) {
     mainWindow.maximize()
   })
 
-  registerIpcHandlers({ getDb, accountManager, taskManager, getSettings, mainWindow, browserPool, notificationEngine })
+  registerIpcHandlers({
+    getDb,
+    accountManager,
+    taskManager,
+    getSettings,
+    mainWindow,
+    browserPool,
+    notificationEngine
+  })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])

@@ -9,10 +9,12 @@ const CAPTCHA_SELECTORS = [
 async function isCaptchaPresent(page) {
   try {
     return await page.evaluate((selectors) => {
-      return selectors.some(sel => !!document.querySelector(sel)) ||
+      return (
+        selectors.some((sel) => !!document.querySelector(sel)) ||
         document.title.toLowerCase().includes('captcha') ||
         document.title.toLowerCase().includes('robot') ||
         document.title.toLowerCase().includes('access denied')
+      )
     }, CAPTCHA_SELECTORS)
   } catch {
     return false
@@ -33,10 +35,12 @@ export async function waitForCaptchaIfNeeded(page, notificationEngine, dropEvent
   try {
     await page.waitForFunction(
       (selectors) => {
-        return !selectors.some(sel => !!document.querySelector(sel)) &&
+        return (
+          !selectors.some((sel) => !!document.querySelector(sel)) &&
           !document.title.toLowerCase().includes('captcha') &&
           !document.title.toLowerCase().includes('robot') &&
           !document.title.toLowerCase().includes('access denied')
+        )
       },
       CAPTCHA_SELECTORS,
       { timeout: 300000, polling: 2000 }

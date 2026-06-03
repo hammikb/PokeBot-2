@@ -7,11 +7,16 @@ export async function runCostcoFlow(context, { productUrl, notificationEngine, d
     await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
     await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
 
-    const queueBtn = page.locator('button:has-text("Join Queue"), button:has-text("Enter Waiting Room"), [class*="waiting-room"] button')
-    if (await queueBtn.count() > 0) {
+    const queueBtn = page.locator(
+      'button:has-text("Join Queue"), button:has-text("Enter Waiting Room"), [class*="waiting-room"] button'
+    )
+    if ((await queueBtn.count()) > 0) {
       await queueBtn.first().click()
       await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
-      await page.waitForSelector('#add-to-cart-btn:not([disabled]), button:has-text("Add to Cart"):not([disabled])', { timeout: 600000 })
+      await page.waitForSelector(
+        '#add-to-cart-btn:not([disabled]), button:has-text("Add to Cart"):not([disabled])',
+        { timeout: 600000 }
+      )
     }
 
     requiresManual = true
@@ -26,7 +31,11 @@ export async function runCostcoFlow(context, { productUrl, notificationEngine, d
     return { success: false, error: err.message }
   } finally {
     if (!requiresManual) {
-      try { await page.close() } catch {}
+      try {
+        await page.close()
+      } catch {
+        // Best effort cleanup; manual checkout state has already been decided.
+      }
     }
   }
 }

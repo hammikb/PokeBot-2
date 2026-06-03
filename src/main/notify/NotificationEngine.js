@@ -11,7 +11,13 @@ export class NotificationEngine {
     const s = this._getSettings()
     await Promise.allSettled([
       sendDiscordAlert({ webhookUrl: s.discordWebhook, dropEvent }),
-      sendSmsAlert({ accountSid: s.twilioSid, authToken: s.twilioToken, from: s.twilioFrom, to: s.twilioTo, dropEvent }),
+      sendSmsAlert({
+        accountSid: s.twilioSid,
+        authToken: s.twilioToken,
+        from: s.twilioFrom,
+        to: s.twilioTo,
+        dropEvent
+      }),
       sendDesktopAlert(dropEvent)
     ])
   }

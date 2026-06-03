@@ -42,6 +42,29 @@ const TABLE_COLUMNS = {
     'result',
     'account_id',
     'timestamp'
+  ],
+  product_catalog: [
+    'id',
+    'retailer',
+    'retailer_item_id',
+    'id_type',
+    'product_url',
+    'title',
+    'brand',
+    'category',
+    'image_url',
+    'msrp',
+    'current_price',
+    'formatted_current_price',
+    'availability',
+    'seller',
+    'retailer_owned_listing',
+    'fresh_stock_confidence',
+    'tags_json',
+    'status',
+    'last_checked_at',
+    'created_at',
+    'updated_at'
   ]
 }
 
@@ -93,6 +116,30 @@ export function initDb(dbPath) {
       result TEXT,
       account_id TEXT,
       timestamp INTEGER DEFAULT (strftime('%s','now'))
+    );
+    CREATE TABLE IF NOT EXISTS product_catalog (
+      id TEXT PRIMARY KEY,
+      retailer TEXT NOT NULL,
+      retailer_item_id TEXT NOT NULL,
+      id_type TEXT NOT NULL,
+      product_url TEXT NOT NULL,
+      title TEXT NOT NULL,
+      brand TEXT,
+      category TEXT,
+      image_url TEXT,
+      msrp REAL,
+      current_price REAL,
+      formatted_current_price TEXT,
+      availability TEXT,
+      seller TEXT,
+      retailer_owned_listing INTEGER,
+      fresh_stock_confidence TEXT,
+      tags_json TEXT NOT NULL,
+      status TEXT NOT NULL,
+      last_checked_at INTEGER,
+      created_at INTEGER DEFAULT (strftime('%s','now')),
+      updated_at INTEGER DEFAULT (strftime('%s','now')),
+      UNIQUE(retailer, retailer_item_id)
     );
   `)
 
@@ -255,8 +302,11 @@ class JsonStatement {
 }
 
 function loadTables(path) {
-  if (existsSync(path)) return JSON.parse(readFileSync(path, 'utf8'))
-  return Object.fromEntries(Object.keys(TABLE_COLUMNS).map((table) => [table, []]))
+  const tables = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {}
+  for (const table of Object.keys(TABLE_COLUMNS)) {
+    tables[table] ||= []
+  }
+  return tables
 }
 
 function getJsonDbPath(dbPath) {
@@ -290,4 +340,9 @@ function applyDefaults(table, row) {
     row.created_at ??= now
   }
   if (table === 'drop_history') row.timestamp ??= now
+  if (table === 'product_catalog') {
+    row.created_at ??= now
+    row.updated_at ??= now
+    row.status ??= 'active'
+  }
 }

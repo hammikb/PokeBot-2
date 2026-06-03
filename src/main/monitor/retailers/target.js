@@ -16,7 +16,11 @@ export class TargetPoller {
       const { data } = await axios.get(
         'https://redsky.target.com/redsky_aggregations/v1/web/pdp_client_v1',
         {
-          params: { key: 'ff457966e64d5e877fdbad070f276d18ecec4a01', tcin: this.tcin, store_id: '3991' },
+          params: {
+            key: 'ff457966e64d5e877fdbad070f276d18ecec4a01',
+            tcin: this.tcin,
+            store_id: '3991'
+          },
           headers: { 'User-Agent': 'Mozilla/5.0' }
         }
       )
@@ -25,13 +29,28 @@ export class TargetPoller {
       const price = product?.price?.current_retail
       const name = product?.item?.product_description?.title || 'Target Product'
 
-      if (status !== 'IN_STOCK') { this._wasInStock = false; return null }
-      if (price == null) { this._wasInStock = false; return null }
-      if (price > this.maxPrice) { this._wasInStock = false; return null }
+      if (status !== 'IN_STOCK') {
+        this._wasInStock = false
+        return null
+      }
+      if (price == null) {
+        this._wasInStock = false
+        return null
+      }
+      if (price > this.maxPrice) {
+        this._wasInStock = false
+        return null
+      }
       if (this._wasInStock) return null
 
       this._wasInStock = true
-      return createDropEvent({ retailer: 'target', productName: name, productUrl: this.productUrl, dropType: DROP_TYPES.IN_STOCK, price })
+      return createDropEvent({
+        retailer: 'target',
+        productName: name,
+        productUrl: this.productUrl,
+        dropType: DROP_TYPES.IN_STOCK,
+        price
+      })
     } catch {
       return null
     }

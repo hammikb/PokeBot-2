@@ -14,8 +14,9 @@ function makePage({ errorText = null, waitForUrlResolves = true } = {}) {
     async goto(url) {
       this.lastUrl = url
     },
+    async waitForLoadState() {},
     locator(selector) {
-      return makeLocator(page, selector, errorText)
+      return makeLocator(page, selector, { errorText })
     },
     async waitForURL() {
       if (!waitForUrlResolves) throw new Error('URL did not change')
@@ -27,13 +28,17 @@ function makePage({ errorText = null, waitForUrlResolves = true } = {}) {
   return page
 }
 
-function makeLocator(page, selector, errorText) {
-  // Matches the error locator: '[class*="error-text"], [class*="ErrorText"], [role="alert"]'
+function makeLocator(page, selector, { errorText }) {
   const isErrorEl = /error-text|ErrorText|role="alert"/.test(selector)
+  const isPhone = /phone|tel/.test(selector)
   return {
-    first() { return this },
+    first() {
+      return this
+    },
+    async waitFor() {},
     async count() {
       if (isErrorEl) return errorText ? 1 : 0
+      if (isPhone) return 1
       return 1
     },
     async fill(value) {
@@ -49,7 +54,11 @@ function makeLocator(page, selector, errorText) {
 }
 
 function makeContext(page) {
-  return { async newPage() { return page } }
+  return {
+    async newPage() {
+      return page
+    }
+  }
 }
 
 const baseArgs = {
@@ -71,11 +80,11 @@ describe('runWalmartRegistration', () => {
   it('fills all fields including phone', async () => {
     const page = makePage()
     await runWalmartRegistration(makeContext(page), baseArgs)
-    expect(page.fills.some(f => f.value === 'test@example.com')).toBe(true)
-    expect(page.fills.some(f => f.value === 'SecurePass1!')).toBe(true)
-    expect(page.fills.some(f => f.value === 'Ash')).toBe(true)
-    expect(page.fills.some(f => f.value === 'Ketchum')).toBe(true)
-    expect(page.fills.some(f => f.value === '5551234567')).toBe(true)
+    expect(page.fills.some((f) => f.value === 'test@example.com')).toBe(true)
+    expect(page.fills.some((f) => f.value === 'SecurePass1!')).toBe(true)
+    expect(page.fills.some((f) => f.value === 'Ash')).toBe(true)
+    expect(page.fills.some((f) => f.value === 'Ketchum')).toBe(true)
+    expect(page.fills.some((f) => f.value === '5551234567')).toBe(true)
   })
 
   it('returns success with needsVerification on registration', async () => {

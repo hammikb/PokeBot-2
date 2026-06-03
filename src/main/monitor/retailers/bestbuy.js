@@ -13,24 +13,40 @@ export class BestBuyPoller {
 
   async poll() {
     try {
-      const { data } = await axios.get(
-        `https://www.bestbuy.com/api/tcfb/model.json`,
-        {
-          params: { paths: `[["shop","buttonstate","v5","item","skus","${this.sku}","conditions","NONE","destinationZip","55423","storeId","281","context","cyp","addAll","false"]]` },
-          headers: { 'User-Agent': 'Mozilla/5.0' }
-        }
-      )
-      const val = data?.jsonGraph?.shop?.buttonstate?.v5?.item?.skus?.[this.sku]?.conditions?.NONE?.destinationZip?.['55423']?.storeId?.['281']?.context?.cyp?.addAll?.['false']?.value
+      const { data } = await axios.get(`https://www.bestbuy.com/api/tcfb/model.json`, {
+        params: {
+          paths: `[["shop","buttonstate","v5","item","skus","${this.sku}","conditions","NONE","destinationZip","55423","storeId","281","context","cyp","addAll","false"]]`
+        },
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      })
+      const val =
+        data?.jsonGraph?.shop?.buttonstate?.v5?.item?.skus?.[this.sku]?.conditions?.NONE
+          ?.destinationZip?.['55423']?.storeId?.['281']?.context?.cyp?.addAll?.['false']?.value
       const purchasable = val?.buttonState === 'ADD_TO_CART'
       const price = val?.price
 
-      if (!purchasable) { this._wasInStock = false; return null }
-      if (price == null) { this._wasInStock = false; return null }
-      if (price > this.maxPrice) { this._wasInStock = false; return null }
+      if (!purchasable) {
+        this._wasInStock = false
+        return null
+      }
+      if (price == null) {
+        this._wasInStock = false
+        return null
+      }
+      if (price > this.maxPrice) {
+        this._wasInStock = false
+        return null
+      }
       if (this._wasInStock) return null
 
       this._wasInStock = true
-      return createDropEvent({ retailer: 'bestbuy', productName: 'Best Buy Product', productUrl: this.productUrl, dropType: DROP_TYPES.IN_STOCK, price })
+      return createDropEvent({
+        retailer: 'bestbuy',
+        productName: 'Best Buy Product',
+        productUrl: this.productUrl,
+        dropType: DROP_TYPES.IN_STOCK,
+        price
+      })
     } catch {
       return null
     }

@@ -13,16 +13,18 @@ export class PokemonCenterPoller {
 
   async poll() {
     try {
-      const { data } = await axios.get(
-        `https://www.pokemoncenter.com/api/products/${this.sku}`,
-        { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' } }
-      )
+      const { data } = await axios.get(`https://www.pokemoncenter.com/api/products/${this.sku}`, {
+        headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }
+      })
       const inStock = data?.availability === 'InStock'
       const price = data?.price
       const name = data?.name || 'Pokemon Center Product'
       const queueEnabled = data?.queueEnabled === true
 
-      if (!inStock) { this._wasInStock = false; return null }
+      if (!inStock) {
+        this._wasInStock = false
+        return null
+      }
       if (price == null) return null
       if (price > this.maxPrice) return null
       if (this._wasInStock) return null

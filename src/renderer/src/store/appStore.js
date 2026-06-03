@@ -4,15 +4,25 @@ import { IPC } from '../../../shared/constants.js'
 function invoke(channel, ...args) {
   const ipc = window.electron?.ipcRenderer
   if (!ipc) throw new Error(`IPC not available (channel: ${channel}) — running outside Electron?`)
-  return ipc.invoke(channel, ...args)
+  return ipc.invoke(channel, ...args).catch((err) => {
+    if (/No handler registered/.test(err.message || '')) {
+      throw new Error(
+        `Electron main process has not loaded ${channel} yet. Fully stop the app and restart npm run dev.`
+      )
+    }
+    throw err
+  })
 }
 
 export const useAppStore = create((set, get) => ({
   tasks: [],
   accounts: [],
+  catalogItems: [],
+  catalogMessage: '',
   settings: {},
   feedEvents: [],
   taskStatuses: {},
+  taskReadiness: {},
   accountRegistrationStatuses: {},
   proxyTestResults: {},
   proxyTestRunState: 'idle',
@@ -21,10 +31,23 @@ export const useAppStore = create((set, get) => ({
   loadTasks: async () => {
     const tasks = await invoke(IPC.TASKS_GET)
     set({ tasks })
+    get().loadTaskReadiness()
+  },
+  loadTaskReadiness: async () => {
+    const taskReadiness = await invoke(IPC.TASKS_READINESS)
+    set({ taskReadiness })
   },
   loadAccounts: async () => {
     const accounts = await invoke(IPC.ACCOUNTS_GET)
     set({ accounts })
+  },
+  loadCatalog: async () => {
+    try {
+      const catalogItems = await invoke(IPC.CATALOG_GET)
+      set({ catalogItems, catalogMessage: '' })
+    } catch (err) {
+      set({ catalogItems: [], catalogMessage: err.message })
+    }
   },
   loadSettings: async () => {
     const settings = await invoke(IPC.SETTINGS_GET)
@@ -41,7 +64,15 @@ export const useAppStore = create((set, get) => ({
     await invoke(IPC.TASKS_UPDATE, id, data)
     get().loadTasks()
   },
-  lookupProduct: async (productUrl) => invoke(IPC.PRODUCTS_LOOKUP, productUrl),
+  addCatalogUrl: async (productUrl) => {
+    const item = await invoke(IPC.CATALOG_ADD_URL, productUrl)
+    await get().loadCatalog()
+    return item
+  },
+  deleteCatalogItem: async (id) => {
+    await invoke(IPC.CATALOG_DELETE, id)
+    get().loadCatalog()
+  },
   downloadProxies: async (url) => invoke(IPC.PROXIES_DOWNLOAD, url),
   testProxy: async (proxy) => invoke(IPC.PROXIES_TEST, proxy),
   runProxyTest: async (proxy) => {
@@ -119,6 +150,27 @@ export const useAppStore = create((set, get) => ({
   startTask: async (id) => {
     await invoke(IPC.TASKS_START, id)
   },
+  testTask: async (id) => invoke(IPC.TASKS_TEST, id),
+  saveTaskTestResult: async (id, result) => {
+    const taskTestResults = {
+      ...(get().settings.taskTestResults || {}),
+      [id]: {
+        success: result.success === true,
+        testedAt: new Date().toISOString(),
+        error: result.success
+          ? ''
+          : result.results?.find((entry) => entry.error)?.error || 'Test failed'
+      }
+    }
+    set((state) => ({
+      settings: {
+        ...state.settings,
+        taskTestResults
+      }
+    }))
+    await invoke(IPC.SETTINGS_SET, 'taskTestResults', taskTestResults)
+    await get().loadTaskReadiness()
+  },
   stopTask: async (id) => {
     await invoke(IPC.TASKS_STOP, id)
   },
@@ -152,7 +204,12 @@ export const useAppStore = create((set, get) => ({
           ...s.accountRegistrationStatuses,
           [data.email]: result.success
             ? { state: 'success', message: 'Registered — check email to verify' }
-            : { state: 'error', message: result.alreadyExists ? 'Already registered' : result.error || 'Registration failed' }
+            : {
+                state: 'error',
+                message: result.alreadyExists
+                  ? 'Already registered'
+                  : result.error || 'Registration failed'
+              }
         }
       }))
       if (result.success) get().loadAccounts()
@@ -171,6 +228,17 @@ export const useAppStore = create((set, get) => ({
   setAccountStatus: async (id, status) => {
     await invoke(IPC.ACCOUNTS_SET_STATUS, id, status)
     get().loadAccounts()
+  },
+  openAccountSession: async (id) => invoke(IPC.ACCOUNTS_OPEN_SESSION, id),
+  checkAccountSession: async (id) => {
+    const result = await invoke(IPC.ACCOUNTS_CHECK_SESSION, id)
+    await get().loadAccounts()
+    return result
+  },
+  autoLoginTargetAccount: async (id) => {
+    const result = await invoke(IPC.ACCOUNTS_AUTO_LOGIN, id)
+    await get().loadAccounts()
+    return result
   },
 
   setAccountRegistrationStatus: (email, data) =>

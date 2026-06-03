@@ -12,7 +12,9 @@ export class MonitorEngine extends EventEmitter {
       try {
         const event = await poller.poll()
         if (event) this.emit('drop', event)
-      } catch {}
+      } catch {
+        // Poll failures should not stop future monitor ticks.
+      }
     }
     run()
     this._timers.set(id, setInterval(run, intervalMs))
@@ -20,7 +22,10 @@ export class MonitorEngine extends EventEmitter {
 
   removeTask(id) {
     const timer = this._timers.get(id)
-    if (timer) { clearInterval(timer); this._timers.delete(id) }
+    if (timer) {
+      clearInterval(timer)
+      this._timers.delete(id)
+    }
   }
 
   stopAll() {

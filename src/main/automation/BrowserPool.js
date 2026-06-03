@@ -8,7 +8,11 @@ export class BrowserPool {
   }
 
   async launch(accountId, { profilePath, proxy }) {
-    if (this._active.has(accountId)) return this._active.get(accountId)
+    if (this._active.has(accountId)) {
+      const context = this._active.get(accountId)
+      if (isContextOpen(context)) return context
+      this._active.delete(accountId)
+    }
     if (this._active.size >= this._maxConcurrent) {
       throw new Error(`Browser pool at max capacity (${this._maxConcurrent})`)
     }
@@ -34,13 +38,20 @@ export class BrowserPool {
 
     const context = await chromium.launchPersistentContext(profilePath, contextOptions)
     this._active.set(accountId, context)
+    context.on?.('close', () => {
+      if (this._active.get(accountId) === context) this._active.delete(accountId)
+    })
     return context
   }
 
   async close(accountId) {
     const ctx = this._active.get(accountId)
     if (ctx) {
-      try { await ctx.close() } catch {}
+      try {
+        await ctx.close()
+      } catch {
+        // Best effort cleanup; the browser may already be closed.
+      }
       this._active.delete(accountId)
     }
   }
@@ -55,5 +66,13 @@ export class BrowserPool {
 
   isAtCapacity() {
     return this._active.size >= this._maxConcurrent
+  }
+}
+
+function isContextOpen(context) {
+  try {
+    return Boolean(context?.browser?.())
+  } catch {
+    return false
   }
 }

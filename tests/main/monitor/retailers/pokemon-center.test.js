@@ -7,7 +7,10 @@ vi.mock('axios')
 describe('PokemonCenterPoller', () => {
   let poller
   beforeEach(() => {
-    poller = new PokemonCenterPoller({ productUrl: 'https://www.pokemoncenter.com/product/pokemon-etb/290-80551', maxPrice: 60 })
+    poller = new PokemonCenterPoller({
+      productUrl: 'https://www.pokemoncenter.com/product/pokemon-etb/290-80551',
+      maxPrice: 60
+    })
   })
 
   it('returns null when out of stock', async () => {
@@ -16,7 +19,9 @@ describe('PokemonCenterPoller', () => {
   })
 
   it('returns in_stock drop event when available', async () => {
-    axios.get.mockResolvedValue({ data: { availability: 'InStock', price: 49.99, name: 'Pokemon ETB', queueEnabled: false } })
+    axios.get.mockResolvedValue({
+      data: { availability: 'InStock', price: 49.99, name: 'Pokemon ETB', queueEnabled: false }
+    })
     const result = await poller.poll()
     expect(result).not.toBeNull()
     expect(result.retailer).toBe('pokemon-center')
@@ -24,7 +29,9 @@ describe('PokemonCenterPoller', () => {
   })
 
   it('returns queue_open when queue enabled', async () => {
-    axios.get.mockResolvedValue({ data: { availability: 'InStock', price: 49.99, name: 'Pokemon ETB', queueEnabled: true } })
+    axios.get.mockResolvedValue({
+      data: { availability: 'InStock', price: 49.99, name: 'Pokemon ETB', queueEnabled: true }
+    })
     const result = await poller.poll()
     expect(result.dropType).toBe('queue_open')
   })

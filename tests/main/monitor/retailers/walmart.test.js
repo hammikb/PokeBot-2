@@ -14,12 +14,20 @@ describe('WalmartPoller', () => {
   })
 
   it('returns null when out of stock', async () => {
-    axios.get.mockResolvedValue({ data: { availabilityStatus: 'OUT_OF_STOCK', priceInfo: { currentPrice: { price: 49.99 } } } })
+    axios.get.mockResolvedValue({
+      data: { availabilityStatus: 'OUT_OF_STOCK', priceInfo: { currentPrice: { price: 49.99 } } }
+    })
     expect(await poller.poll()).toBeNull()
   })
 
   it('returns drop event when in stock under max price', async () => {
-    axios.get.mockResolvedValue({ data: { availabilityStatus: 'IN_STOCK', priceInfo: { currentPrice: { price: 49.99 } }, name: 'Pokemon ETB' } })
+    axios.get.mockResolvedValue({
+      data: {
+        availabilityStatus: 'IN_STOCK',
+        priceInfo: { currentPrice: { price: 49.99 } },
+        name: 'Pokemon ETB'
+      }
+    })
     const result = await poller.poll()
     expect(result).not.toBeNull()
     expect(result.retailer).toBe('walmart')
@@ -28,7 +36,9 @@ describe('WalmartPoller', () => {
   })
 
   it('returns null when price exceeds max', async () => {
-    axios.get.mockResolvedValue({ data: { availabilityStatus: 'IN_STOCK', priceInfo: { currentPrice: { price: 70 } } } })
+    axios.get.mockResolvedValue({
+      data: { availabilityStatus: 'IN_STOCK', priceInfo: { currentPrice: { price: 70 } } }
+    })
     expect(await poller.poll()).toBeNull()
   })
 
@@ -38,7 +48,13 @@ describe('WalmartPoller', () => {
   })
 
   it('returns null on second poll when already in stock (dedup)', async () => {
-    axios.get.mockResolvedValue({ data: { availabilityStatus: 'IN_STOCK', priceInfo: { currentPrice: { price: 49.99 } }, name: 'Pokemon ETB' } })
+    axios.get.mockResolvedValue({
+      data: {
+        availabilityStatus: 'IN_STOCK',
+        priceInfo: { currentPrice: { price: 49.99 } },
+        name: 'Pokemon ETB'
+      }
+    })
     const first = await poller.poll()
     expect(first).not.toBeNull()
     const second = await poller.poll()
@@ -46,13 +62,27 @@ describe('WalmartPoller', () => {
   })
 
   it('fires again after restock (out-of-stock resets dedup flag)', async () => {
-    axios.get.mockResolvedValue({ data: { availabilityStatus: 'IN_STOCK', priceInfo: { currentPrice: { price: 49.99 } }, name: 'Pokemon ETB' } })
+    axios.get.mockResolvedValue({
+      data: {
+        availabilityStatus: 'IN_STOCK',
+        priceInfo: { currentPrice: { price: 49.99 } },
+        name: 'Pokemon ETB'
+      }
+    })
     await poller.poll() // first drop fires
 
-    axios.get.mockResolvedValue({ data: { availabilityStatus: 'OUT_OF_STOCK', priceInfo: { currentPrice: { price: 49.99 } } } })
+    axios.get.mockResolvedValue({
+      data: { availabilityStatus: 'OUT_OF_STOCK', priceInfo: { currentPrice: { price: 49.99 } } }
+    })
     await poller.poll() // goes out of stock, resets flag
 
-    axios.get.mockResolvedValue({ data: { availabilityStatus: 'IN_STOCK', priceInfo: { currentPrice: { price: 49.99 } }, name: 'Pokemon ETB' } })
+    axios.get.mockResolvedValue({
+      data: {
+        availabilityStatus: 'IN_STOCK',
+        priceInfo: { currentPrice: { price: 49.99 } },
+        name: 'Pokemon ETB'
+      }
+    })
     const restock = await poller.poll() // back in stock, should fire again
     expect(restock).not.toBeNull()
   })

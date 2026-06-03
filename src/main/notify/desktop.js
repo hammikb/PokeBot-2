@@ -7,7 +7,9 @@ async function loadNotification() {
   try {
     const { Notification } = await import('electron')
     _Notification = Notification
-  } catch {}
+  } catch {
+    // Desktop notifications are optional outside Electron.
+  }
   return _Notification
 }
 
@@ -20,5 +22,7 @@ export async function sendDesktopAlert(dropEvent) {
       body: `${dropEvent.retailer} — $${dropEvent.price ?? '?'} — ${dropEvent.dropType}`
     })
     n.show()
-  } catch {}
+  } catch {
+    // Notification delivery should never break monitoring or checkout.
+  }
 }
