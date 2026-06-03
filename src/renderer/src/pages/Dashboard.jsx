@@ -29,6 +29,7 @@ export default function Dashboard() {
   const last24h = feedEvents.filter((e) => now - e.timestamp < 86400000)
   const wins = last24h.filter((e) => e.productName?.includes('ORDER CONFIRMED'))
   const captchas = last24h.filter((e) => e.dropType === 'captcha')
+  const alerts = feedEvents.filter((e) => e.productName?.includes('🔔 ALERT:'))
 
   return (
     <div className="flex flex-col h-full p-3 gap-3 overflow-hidden">
@@ -130,6 +131,28 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Recent Alerts */}
+      {alerts.length > 0 && (
+        <div className="bg-[#111] border border-yellow-800 rounded p-4">
+          <div className="text-sm text-yellow-400 uppercase tracking-widest mb-2 flex items-center gap-2">
+            <span>🔔</span>
+            <span>Recent Alerts ({alerts.length})</span>
+          </div>
+          <div className="space-y-2 max-h-32 overflow-y-auto">
+            {alerts.slice(0, 10).map((e) => (
+              <div key={e.id} className="text-sm flex gap-2 items-baseline bg-yellow-900/10 px-3 py-2 rounded">
+                <span className="text-gray-600 shrink-0">
+                  {new Date(e.timestamp).toLocaleTimeString()}
+                </span>
+                <span className="text-yellow-400 shrink-0">{e.retailer}</span>
+                <span className="text-gray-200 truncate">{e.productName}</span>
+                {e.price != null && <span className="text-gray-400 shrink-0">${e.price}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Drop History */}
       <div className="bg-[#111] border border-gray-800 rounded px-4 py-3 flex gap-6 text-sm text-gray-400">
         <span>
@@ -137,6 +160,7 @@ export default function Dashboard() {
         </span>
         <span className="text-green-400">{wins.length} wins</span>
         <span className="text-yellow-400">{captchas.length} captchas</span>
+        <span className="text-yellow-400">{alerts.length} alerts</span>
       </div>
     </div>
   )
