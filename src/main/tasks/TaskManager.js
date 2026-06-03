@@ -12,6 +12,7 @@ import { BestBuyPoller } from '../monitor/retailers/bestbuy.js'
 import { CostcoPoller } from '../monitor/retailers/costco.js'
 import { GameStopPoller } from '../monitor/retailers/gamestop.js'
 import { SamsClubPoller } from '../monitor/retailers/samsclub.js'
+import { RetryManager } from '../utils/retryManager.js'
 
 const POLLERS = {
   walmart: WalmartPoller,
@@ -153,21 +154,69 @@ export class TaskManager extends EventEmitter {
     const account = this._accountManager.getDecrypted(accountId)
     if (!account) return { accountId, success: false, error: 'Account not found' }
 
+    // Create retry manager for this checkout
+    const retryManager = new RetryManager({
+      maxRetries: 3,
+      initialDelay: 2000,
+      maxDelay: 10000
+    })
+
     try {
-      const context = await this._pool.launch(accountId, {
-        profilePath: account.profile_path,
-        proxy: account.proxy
-      })
-      const result = await flow(context, {
-        productUrl: dropEvent.productUrl,
-        cvv: account.cvv,
-        account,
-        notificationEngine: this._notify,
-        dropEvent,
-        mode: task.mode,
-        buyLimit: task.buy_limit,
-        onStep: (message) => this._emitCheckoutStep(dropEvent, account, message)
-      })
+      // Wrap the entire checkout flow in retry logic
+      const result = await retryManager.retry(
+        async (attempt) => {
+          if (attempt > 1) {
+            this._emitCheckoutStep(dropEvent, account, `Retry attempt ${attempt}/3`)
+          }
+
+          const context = await this._pool.launch(accountId, {
+            profilePath: account.profile_path,
+            proxy: account.proxy
+          })
+
+          try {
+            return await flow(context, {
+              productUrl: dropEvent.productUrl,
+              cvv: account.cvv,
+              account,
+              notificationEngine: this._notify,
+              dropEvent,
+              mode: task.mode,
+              buyLimit: task.buy_limit,
+              onStep: (message) => this._emitCheckoutStep(dropEvent, account, message)
+            })
+          } catch (err) {
+            // Close context on error before retrying
+            await this._pool.close(accountId)
+            throw err
+          }
+        },
+        {
+          onRetry: ({ delay, error }) => {
+            this._emitCheckoutStep(
+              dropEvent,
+              account,
+              `Checkout failed (${error}), retrying in ${delay}ms...`
+            )
+          },
+          shouldRetry: (err) => {
+            // Retry on network errors and timeouts, but not on validation errors
+            const retryableErrors = [
+              'network',
+              'timeout',
+              'ECONNREFUSED',
+              'ECONNRESET',
+              'ETIMEDOUT',
+              'Target page, context or browser has been closed'
+            ]
+            return retryableErrors.some(
+              (keyword) =>
+                err.message?.toLowerCase().includes(keyword.toLowerCase()) ||
+                err.code?.includes(keyword)
+            )
+          }
+        }
+      )
       const resultLabel = result.testMode
         ? 'TEST CHECKOUT READY'
         : result.success
