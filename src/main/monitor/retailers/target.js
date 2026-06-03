@@ -106,6 +106,51 @@ export class TargetPoller {
         isFirstCheck
       })
     } catch (err) {
+      // Check if this is just INFO logs in stderr (not a real error)
+      if (err.stderr && !err.stderr.includes('ERROR') && !err.stderr.includes('"ok": false')) {
+        // This is just INFO logs, try to parse stdout
+        try {
+          const jsonLine = err.stdout?.split('\n').find(line => line.trim().startsWith('{'))
+          if (jsonLine) {
+            const result = JSON.parse(jsonLine)
+            if (result.ok) {
+              // Successfully parsed despite stderr INFO logs
+              const product = result.product
+              const status = product.availability
+              const price = product.price
+              const name = product.productName
+              
+              console.log(`[TargetPoller] Status: ${status}, Price: ${price}, Name: ${name}`)
+
+              if (status !== 'IN_STOCK' || price == null || price > this.maxPrice) {
+                this._wasInStock = false
+                this._isFirstPoll = false
+                return null
+              }
+              
+              if (this._wasInStock && !this._isFirstPoll) {
+                return null
+              }
+
+              this._wasInStock = true
+              const isFirstCheck = this._isFirstPoll
+              this._isFirstPoll = false
+              
+              return createDropEvent({
+                retailer: 'target',
+                productName: name,
+                productUrl: this.productUrl,
+                dropType: DROP_TYPES.IN_STOCK,
+                price,
+                isFirstCheck
+              })
+            }
+          }
+        } catch {
+          // Fall through to error logging
+        }
+      }
+      
       console.error(`[TargetPoller] Error for TCIN ${this.tcin}:`, {
         message: err.message,
         stderr: err.stderr,
