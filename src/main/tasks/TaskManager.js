@@ -102,10 +102,27 @@ export class TaskManager extends EventEmitter {
     const task = [...this._tasks.values()].find((t) => t.product_url === dropEvent.productUrl)
     if (!task) return
 
+    // Handle based on task mode
+    if (task.mode === 'alert-only') {
+      // Just notify, don't checkout
+      await this._notify.fire({
+        ...dropEvent,
+        productName: `🔔 ALERT: ${dropEvent.productName} is in stock!`,
+        dropType: 'in_stock'
+      })
+      return
+    }
+
     const flow = FLOWS[dropEvent.retailer]
     if (!flow) return
 
-    await this._runFlowsForTask(task, dropEvent)
+    // For test-checkout mode, ensure mode is passed through
+    if (task.mode === 'test-checkout') {
+      await this._runFlowsForTask({ ...task, mode: 'test-checkout' }, dropEvent)
+    } else {
+      // auto-checkout mode
+      await this._runFlowsForTask(task, dropEvent)
+    }
   }
 
   async _runFlowsForTask(task, dropEvent) {
