@@ -1,10 +1,5 @@
 import { waitForCaptchaIfNeeded } from '../captcha.js'
 import { startTrace } from '../TraceRecorder.js'
-import {
-  ensureTargetSignedIn,
-  fillTargetShipping,
-  fillTargetPayment
-} from './target-page-utils.js'
 
 export async function runTargetFlow(
   context,
@@ -24,8 +19,20 @@ export async function runTargetFlow(
     await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
     await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
 
-    // Ensure signed in
-    await ensureTargetSignedIn(page, account, notificationEngine, dropEvent, onStep, productUrl)
+    // Check if signed in
+    onStep('Checking Target sign-in status')
+    const signInBtn = page.locator('a:has-text("Sign in"), button:has-text("Sign in")')
+    if ((await signInBtn.count()) > 0) {
+      onStep('Not signed in - please sign in manually or use auto-login first')
+      requiresManual = true
+      const { screenshotPath } = await trace.stop()
+      return {
+        success: false,
+        requiresManualCheckout: true,
+        screenshotPath,
+        message: 'Not signed in - use Target auto-login feature first'
+      }
+    }
 
     // Handle quantity if buyLimit > 1
     if (buyLimit > 1) {
@@ -76,18 +83,9 @@ export async function runTargetFlow(
     // Wait for checkout page to load
     await page.waitForTimeout(2000)
 
-    // Handle shipping address
-    onStep('Verifying shipping address')
-    const shippingSection = page.locator('[data-test="shipping-address-section"]')
-    if ((await shippingSection.count()) > 0) {
-      const editShippingBtn = page.locator('button:has-text("Edit"), button:has-text("Change")')
-      if ((await editShippingBtn.count()) > 0) {
-        onStep('Updating shipping address')
-        await editShippingBtn.first().click()
-        await page.waitForTimeout(1000)
-        await fillTargetShipping(page, account.shipping_json ? JSON.parse(account.shipping_json) : {})
-      }
-    }
+    // Shipping address should already be saved in Target account
+    onStep('Using saved shipping address')
+    await page.waitForTimeout(1000)
 
     // Continue to payment
     onStep('Continuing to payment')
@@ -112,14 +110,18 @@ export async function runTargetFlow(
       await page.waitForTimeout(500)
     }
 
-    // If no payment method, try to add one
+    // If no payment method, require manual intervention
     const addPaymentBtn = page.locator('button:has-text("Add payment"), button:has-text("Add card")')
     if ((await addPaymentBtn.count()) > 0) {
-      onStep('Adding payment method')
-      await addPaymentBtn.first().click()
-      await page.waitForTimeout(1000)
-      await fillTargetPayment(page, cvv)
+      onStep('Payment method required - please add manually')
       requiresManual = true
+      const { screenshotPath } = await trace.stop()
+      return {
+        success: false,
+        requiresManualCheckout: true,
+        screenshotPath,
+        message: 'Payment method not saved - add in Target account first'
+      }
     }
 
     // Continue to review order
