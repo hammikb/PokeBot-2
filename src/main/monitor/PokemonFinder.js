@@ -118,7 +118,7 @@ export class PokemonFinder extends EventEmitter {
     try {
       log.info('Scanning Target for Pokemon items...')
       
-      // Target search API
+      // Target search API with advanced bot detection bypass
       const { data } = await axios.get(
         'https://redsky.target.com/redsky_aggregations/v1/web/plp_search_v2',
         {
@@ -129,11 +129,25 @@ export class PokemonFinder extends EventEmitter {
             offset: 0,
             page: '/s/pokemon+cards',
             pricing_store_id: '3991',
-            useragent: 'Mozilla/5.0',
             visitor_id: Math.random().toString(36).substring(7),
             keyword: 'pokemon cards'
           },
-          headers: { 'User-Agent': 'Mozilla/5.0' }
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Referer': 'https://www.target.com/s/pokemon+cards',
+            'Origin': 'https://www.target.com',
+            'Connection': 'keep-alive',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-site',
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"'
+          },
+          timeout: 15000
         }
       )
 
