@@ -40,12 +40,23 @@ export class TargetPoller {
       }
       
       if (stderr) {
-        const errorData = JSON.parse(stderr)
-        console.error(`[TargetPoller] Scrapling error:`, errorData)
+        try {
+          const errorData = JSON.parse(stderr)
+          console.error(`[TargetPoller] Scrapling error:`, errorData)
+        } catch {
+          console.error(`[TargetPoller] Scrapling stderr:`, stderr)
+        }
         return null
       }
       
-      const result = JSON.parse(stdout)
+      // Filter out INFO logs, only parse the JSON line
+      const jsonLine = stdout.split('\n').find(line => line.trim().startsWith('{'))
+      if (!jsonLine) {
+        console.error(`[TargetPoller] No JSON found in output:`, stdout)
+        return null
+      }
+      
+      const result = JSON.parse(jsonLine)
       if (!result.ok) {
         console.error(`[TargetPoller] Scrapling failed:`, result.error)
         return null
