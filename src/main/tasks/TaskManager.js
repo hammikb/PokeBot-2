@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto'
 import { EventEmitter } from 'events'
 import { MonitorEngine } from '../monitor/MonitorEngine.js'
 import { runWalmartFlow } from '../automation/flows/walmart.js'
+import { runTargetFlow } from '../automation/flows/target.js'
 import { runPokemonCenterFlow } from '../automation/flows/pokemon-center.js'
 import { runCostcoFlow } from '../automation/flows/costco.js'
 import { WalmartPoller } from '../monitor/retailers/walmart.js'
@@ -24,6 +25,7 @@ const POLLERS = {
 
 const FLOWS = {
   walmart: runWalmartFlow,
+  target: runTargetFlow,
   'pokemon-center': runPokemonCenterFlow,
   costco: runCostcoFlow
 }
