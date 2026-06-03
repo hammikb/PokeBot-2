@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useAppStore } from '../store/appStore'
-import { RETAILERS, RETAILER_BUY_LIMITS } from '../../../shared/constants'
+import { RETAILERS, RETAILER_BUY_LIMITS, TASK_MODES, TASK_MODE_LABELS } from '../../../shared/constants'
 
 const CHECKOUT_TEST_RETAILERS = new Set([RETAILERS.WALMART, RETAILERS.TARGET])
 const SUPPORTED_TASK_RETAILERS = [RETAILERS.TARGET, RETAILERS.WALMART]
@@ -15,7 +15,7 @@ const makeDefaultForm = () => ({
   maxPrice: '',
   accountIds: [],
   intervalMs: 4000,
-  mode: 'monitor-and-buy'
+  mode: TASK_MODES.AUTO_CHECKOUT
 })
 
 export default function Tasks() {
@@ -307,16 +307,19 @@ export default function Tasks() {
           <div>
             <label className="text-gray-500 uppercase tracking-wider block mb-1.5">Mode</label>
             <select
-              value={supportsTestCheckout ? form.mode : 'monitor-and-buy'}
+              value={form.mode}
               onChange={(e) => setF('mode', e.target.value)}
-              disabled={!supportsTestCheckout}
-              className="w-full bg-[#0f0f0f] border border-gray-700 rounded px-3 py-2 text-gray-200 disabled:text-gray-600 disabled:border-gray-800"
+              className="w-full bg-[#0f0f0f] border border-gray-700 rounded px-3 py-2 text-gray-200"
             >
-              <option value="monitor-and-buy">
-                {supportsTestCheckout ? 'Monitor and buy' : 'Monitor only'}
-              </option>
-              <option value="test-checkout">Test checkout</option>
+              <option value={TASK_MODES.AUTO_CHECKOUT}>🚀 Auto-Checkout (Buy on restock)</option>
+              <option value={TASK_MODES.ALERT_ONLY}>🔔 Alert Only (Notify, no purchase)</option>
+              <option value={TASK_MODES.TEST_CHECKOUT}>🧪 Test Mode (Stop before order)</option>
             </select>
+            <div className="text-gray-600 mt-1">
+              {form.mode === TASK_MODES.AUTO_CHECKOUT && 'Automatically purchases when in stock'}
+              {form.mode === TASK_MODES.ALERT_ONLY && 'Sends notification only, no purchase'}
+              {form.mode === TASK_MODES.TEST_CHECKOUT && 'Runs checkout but stops before placing order'}
+            </div>
           </div>
 
           <div>
