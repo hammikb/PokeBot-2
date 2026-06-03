@@ -49,16 +49,52 @@ export async function runTargetFlow(
       }
     }
 
-    // Try API-based add to cart first (FAST!)
+    // Try browser-based API first (FAST and reliable!)
     if (useApi) {
       try {
         onStep(`Adding ${buyLimit} item(s) to cart via API...`)
-        const api = await TargetApiClient.fromPage(page)
-        const result = await api.addToCart(tcin, buyLimit)
+        
+        // Execute fetch API inside the browser context (has all cookies/auth)
+        const result = await page.evaluate(async ({ tcin, quantity }) => {
+          try {
+            const response = await fetch('https://carts.target.com/web_checkouts/v1/cart_items', {
+              method: 'POST',
+              credentials: 'include',  // Include cookies
+              headers: {
+                'Content-Type': 'application/json',
+                'x-application-name': 'web'
+              },
+              body: JSON.stringify({
+                cart_type: 'REGULAR',
+                channel_id: '10',
+                shopping_context: 'DIGITAL',
+                cart_item: {
+                  tcin: tcin,
+                  quantity: quantity,
+                  item_channel_id: '10'
+                }
+              })
+            })
+            
+            if (!response.ok) {
+              const text = await response.text()
+              return { success: false, error: `HTTP ${response.status}: ${text.substring(0, 100)}` }
+            }
+            
+            const data = await response.json()
+            return { success: true, cartId: data.cart_id, cartItem: data.cart_item }
+          } catch (err) {
+            return { success: false, error: err.message }
+          }
+        }, { tcin, quantity: buyLimit })
         
         if (result.success) {
           onStep('✓ Added to cart via API (lightning fast!)')
-          log.info('API add to cart successful', { cartId: result.cartId })
+          log.info('Browser-based API add to cart successful', { 
+            tcin, 
+            quantity: buyLimit,
+            cartId: result.cartId 
+          })
           
           // Navigate directly to checkout
           onStep('Opening Target checkout')
@@ -69,12 +105,12 @@ export async function runTargetFlow(
           await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
         } else {
           onStep('API failed, using browser fallback')
-          log.warn('API add to cart failed, falling back to browser', { error: result.error })
+          log.warn('Browser-based API failed, falling back to clicking', { error: result.error })
           await browserAddToCart(page, buyLimit, onStep, notificationEngine, dropEvent)
         }
       } catch (err) {
         onStep('API error, using browser fallback')
-        log.error('API add to cart error', { error: err.message })
+        log.error('Browser-based API error', { error: err.message })
         await browserAddToCart(page, buyLimit, onStep, notificationEngine, dropEvent)
       }
     } else {
