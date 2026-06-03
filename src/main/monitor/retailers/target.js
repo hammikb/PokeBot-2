@@ -20,10 +20,24 @@ export class TargetPoller {
       console.log(`[TargetPoller] Polling TCIN ${this.tcin}, isFirstPoll: ${this._isFirstPoll}`)
       
       // Use Scrapling to bypass bot detection
-      const { stdout, stderr } = await execAsync(
-        `python scripts/scrapling_lookup.py "${this.productUrl}"`,
-        { timeout: 30000 }
-      )
+      // Try python3 first, fallback to python
+      let stdout, stderr
+      try {
+        const result = await execAsync(
+          `python3 scripts/scrapling_lookup.py "${this.productUrl}"`,
+          { timeout: 30000, shell: true }
+        )
+        stdout = result.stdout
+        stderr = result.stderr
+      } catch {
+        // Fallback to python command
+        const result = await execAsync(
+          `python scripts/scrapling_lookup.py "${this.productUrl}"`,
+          { timeout: 30000, shell: true }
+        )
+        stdout = result.stdout
+        stderr = result.stderr
+      }
       
       if (stderr) {
         const errorData = JSON.parse(stderr)
