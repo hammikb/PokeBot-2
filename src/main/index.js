@@ -9,8 +9,10 @@ import { NotificationEngine } from './notify/NotificationEngine.js'
 import { TaskManager } from './tasks/TaskManager.js'
 import { createPokemonFinder } from './monitor/PokemonFinder.js'
 import { ProfileWarmup } from './automation/profileWarmup.js'
+import { progressStreamer } from './utils/progressStreamer.js'
 import { registerIpcHandlers } from './ipc.js'
 import { logger } from './utils/logger.js'
+import { IPC } from './shared/constants.js'
 
 let mainWindow
 let taskManager
@@ -56,6 +58,23 @@ async function createMainWindow(encryptionKey) {
   })
   // Start scanning every 30 minutes
   pokemonFinder.startScanning(30)
+
+  // Forward progress stream events to renderer
+  progressStreamer.on('stream:start', (data) => {
+    mainWindow?.webContents?.send(IPC.PROGRESS_STREAM_START, data)
+  })
+  progressStreamer.on('stream:step', (data) => {
+    mainWindow?.webContents?.send(IPC.PROGRESS_STREAM_STEP, data)
+  })
+  progressStreamer.on('stream:update', (data) => {
+    mainWindow?.webContents?.send(IPC.PROGRESS_STREAM_UPDATE, data)
+  })
+  progressStreamer.on('stream:success', (data) => {
+    mainWindow?.webContents?.send(IPC.PROGRESS_STREAM_SUCCESS, data)
+  })
+  progressStreamer.on('stream:error', (data) => {
+    mainWindow?.webContents?.send(IPC.PROGRESS_STREAM_ERROR, data)
+  })
 
   mainWindow = new BrowserWindow({
     width: 1400,

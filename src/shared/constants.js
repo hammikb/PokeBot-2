@@ -36,7 +36,12 @@ export const IPC = {
   ACCOUNTS_OPEN_SESSION: 'accounts:open-session',
   ACCOUNTS_CHECK_SESSION: 'accounts:check-session',
   ACCOUNTS_AUTO_LOGIN: 'accounts:auto-login',
-  ACCOUNTS_WARMUP: 'accounts:warmup'
+  ACCOUNTS_WARMUP: 'accounts:warmup',
+  PROGRESS_STREAM_START: 'progress:stream:start',
+  PROGRESS_STREAM_STEP: 'progress:stream:step',
+  PROGRESS_STREAM_UPDATE: 'progress:stream:update',
+  PROGRESS_STREAM_SUCCESS: 'progress:stream:success',
+  PROGRESS_STREAM_ERROR: 'progress:stream:error'
 }
 
 export const RETAILER_BUY_LIMITS = {
