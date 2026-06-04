@@ -48,6 +48,7 @@ export default function Accounts() {
   const [showPassword, setShowPassword] = useState(false)
   const [sessionStatus, setSessionStatus] = useState('')
   const [sessionCheckingId, setSessionCheckingId] = useState('')
+  const [warmupId, setWarmupId] = useState('')
   const [autoLoginId, setAutoLoginId] = useState('')
   const importedProxies = Array.isArray(settings.proxies) ? settings.proxies : []
   const proxyCounts = getProxyCounts(accounts)
@@ -176,6 +177,19 @@ export default function Accounts() {
       setSessionStatus(err.message || 'Could not run Target auto-login')
     } finally {
       setAutoLoginId('')
+    }
+  }
+
+  const warmupProfile = async (account) => {
+    setWarmupId(account.id)
+    setSessionStatus(`Warming up profile for ${account.name} (3 minutes of automated browsing)...`)
+    try {
+      const result = await window.api.invoke('accounts:warmup', account.id)
+      setSessionStatus(result.success ? result.message : `Warmup failed: ${result.error}`)
+    } catch (err) {
+      setSessionStatus(err.message || 'Could not warm up profile')
+    } finally {
+      setWarmupId('')
     }
   }
 
@@ -493,6 +507,15 @@ export default function Accounts() {
               >
                 open browser
               </button>
+              {account.retailer === RETAILERS.WALMART && (
+                <button
+                  onClick={() => warmupProfile(account)}
+                  disabled={warmupId === account.id}
+                  className="text-purple-500 hover:text-purple-300 disabled:text-gray-700 shrink-0 text-sm"
+                >
+                  {warmupId === account.id ? 'warming up...' : 'warm up (3min)'}
+                </button>
+              )}
               {account.retailer === RETAILERS.TARGET && (
                 <>
                   <button
