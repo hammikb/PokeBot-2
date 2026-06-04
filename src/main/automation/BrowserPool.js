@@ -62,7 +62,30 @@ export class BrowserPool {
 
     const contextOptions = {
       headless: false,
-      args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
+      args: [
+        '--no-sandbox',
+        '--disable-blink-features=AutomationControlled',
+        '--disable-dev-shm-usage',
+        '--disable-setuid-sandbox',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--password-store=basic',
+        '--disable-background-networking',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-breakpad',
+        '--disable-component-extensions-with-background-pages',
+        '--disable-features=TranslateUI',
+        '--disable-ipc-flooding-protection',
+        '--disable-renderer-backgrounding',
+        '--force-color-profile=srgb',
+        '--metrics-recording-only',
+        '--mute-audio',
+        '--disable-hang-monitor',
+        '--disable-prompt-on-repost',
+        '--disable-sync',
+        '--enable-features=NetworkService,NetworkServiceInProcess'
+      ],
       ignoreDefaultArgs: ['--enable-automation']
     }
 
@@ -78,8 +101,40 @@ export class BrowserPool {
     }
 
     try {
-      log.info('Launching browser context', { accountId })
+      log.info('Launching browser context with enhanced stealth', { accountId })
       const context = await chromium.launchPersistentContext(profilePath, contextOptions)
+      
+      // Inject anti-detection scripts on every page
+      await context.addInitScript(() => {
+        // Remove webdriver property
+        Object.defineProperty(navigator, 'webdriver', {
+          get: () => undefined
+        })
+        
+        // Fix chrome object
+        window.chrome = {
+          runtime: {}
+        }
+        
+        // Fix permissions
+        const originalQuery = window.navigator.permissions.query
+        window.navigator.permissions.query = (parameters) => (
+          parameters.name === 'notifications' ?
+            Promise.resolve({ state: Notification.permission }) :
+            originalQuery(parameters)
+        )
+        
+        // Fix plugins
+        Object.defineProperty(navigator, 'plugins', {
+          get: () => [1, 2, 3, 4, 5]
+        })
+        
+        // Fix languages
+        Object.defineProperty(navigator, 'languages', {
+          get: () => ['en-US', 'en']
+        })
+      })
+      
       this._active.set(accountId, context)
       this._updateActivity(accountId)
       context.on?.('close', () => {
