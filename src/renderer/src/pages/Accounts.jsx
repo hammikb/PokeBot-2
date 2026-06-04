@@ -184,7 +184,7 @@ export default function Accounts() {
     setWarmupId(account.id)
     setSessionStatus(`Warming up profile for ${account.name} (3 minutes of automated browsing)...`)
     try {
-      const result = await window.api.invoke('accounts:warmup', account.id)
+      const result = await window.electron.ipcRenderer.invoke('accounts:warmup', account.id)
       setSessionStatus(result.success ? result.message : `Warmup failed: ${result.error}`)
     } catch (err) {
       setSessionStatus(err.message || 'Could not warm up profile')
