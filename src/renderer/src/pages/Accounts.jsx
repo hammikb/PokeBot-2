@@ -48,7 +48,6 @@ export default function Accounts() {
   const [showPassword, setShowPassword] = useState(false)
   const [sessionStatus, setSessionStatus] = useState('')
   const [sessionCheckingId, setSessionCheckingId] = useState('')
-  const [warmupId, setWarmupId] = useState('')
   const [autoLoginId, setAutoLoginId] = useState('')
   const importedProxies = Array.isArray(settings.proxies) ? settings.proxies : []
   const proxyCounts = getProxyCounts(accounts)
@@ -141,11 +140,11 @@ export default function Accounts() {
   }
 
   const openSession = async (account) => {
-    setSessionStatus(`Opening saved browser for ${account.name}...`)
+    setSessionStatus(`Opening browser for ${account.name}... Browse naturally to warm up the profile!`)
     try {
       await openAccountSession(account.id)
       setSessionStatus(
-        `Browser opened for ${account.name}. Log in there once; this account profile will be reused for tasks.`
+        `Browser opened for ${account.name}. Browse naturally for 2-3 minutes to warm up the profile, then log in. This profile will be reused for tasks.`
       )
     } catch (err) {
       setSessionStatus(err.message || 'Could not open account browser')
@@ -177,19 +176,6 @@ export default function Accounts() {
       setSessionStatus(err.message || 'Could not run Target auto-login')
     } finally {
       setAutoLoginId('')
-    }
-  }
-
-  const warmupProfile = async (account) => {
-    setWarmupId(account.id)
-    setSessionStatus(`Warming up profile for ${account.name} (3 minutes of automated browsing)...`)
-    try {
-      const result = await window.electron.ipcRenderer.invoke('accounts:warmup', account.id)
-      setSessionStatus(result.success ? result.message : `Warmup failed: ${result.error}`)
-    } catch (err) {
-      setSessionStatus(err.message || 'Could not warm up profile')
-    } finally {
-      setWarmupId('')
     }
   }
 
@@ -504,18 +490,10 @@ export default function Accounts() {
               <button
                 onClick={() => openSession(account)}
                 className="text-blue-500 hover:text-blue-300 shrink-0 text-sm"
+                title="Open browser to manually warm up profile (browse for 2-3 min, then log in)"
               >
-                open browser
+                open & warm up
               </button>
-              {account.retailer === RETAILERS.WALMART && (
-                <button
-                  onClick={() => warmupProfile(account)}
-                  disabled={warmupId === account.id}
-                  className="text-purple-500 hover:text-purple-300 disabled:text-gray-700 shrink-0 text-sm"
-                >
-                  {warmupId === account.id ? 'warming up...' : 'warm up (3min)'}
-                </button>
-              )}
               {account.retailer === RETAILERS.TARGET && (
                 <>
                   <button
