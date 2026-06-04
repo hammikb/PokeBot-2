@@ -116,7 +116,7 @@ async function createMainWindow(encryptionKey) {
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
-    mainWindow.webContents.openDevTools()
+    // mainWindow.webContents.openDevTools() // Disabled - press F12 to open if needed
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
     const { autoUpdater } = await import('electron-updater')
