@@ -34,6 +34,7 @@ export function registerIpcHandlers({
   accountManager,
   taskManager,
   pokemonFinder,
+  profileWarmup,
   getSettings,
   mainWindow,
   browserPool,
@@ -206,6 +207,30 @@ export function registerIpcHandlers({
     if (result.success) accountManager.setStatus(account.id, 'verified')
     return result
   })
+  
+  // Profile Warmup
+  ipcMain.handle(IPC.ACCOUNTS_WARMUP, async (_, id, options) => {
+    const account = accountManager.getDecrypted(id)
+    if (!account) throw new Error('Account not found')
+    if (account.retailer !== 'walmart') {
+      throw new Error('Profile warmup is currently only supported for Walmart accounts')
+    }
+    
+    const result = await profileWarmup.warmupWalmartProfile(account, options)
+    
+    // Notify renderer of progress
+    mainWindow?.webContents?.send(IPC.FEED_EVENT, {
+      id: randomUUID(),
+      retailer: 'walmart',
+      productName: `Profile Warmup: ${account.name}`,
+      dropType: 'profile_warmup',
+      message: result.success ? result.message : `Failed: ${result.error}`,
+      createdAt: new Date().toISOString()
+    })
+    
+    return result
+  })
+  
   // Tasks
   ipcMain.handle(IPC.TASKS_GET, () => getDb().prepare('SELECT * FROM tasks').all())
   ipcMain.handle(IPC.TASKS_READINESS, () => {

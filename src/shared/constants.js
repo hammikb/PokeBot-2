@@ -35,7 +35,8 @@ export const IPC = {
   ACCOUNTS_SET_STATUS: 'accounts:set-status',
   ACCOUNTS_OPEN_SESSION: 'accounts:open-session',
   ACCOUNTS_CHECK_SESSION: 'accounts:check-session',
-  ACCOUNTS_AUTO_LOGIN: 'accounts:auto-login'
+  ACCOUNTS_AUTO_LOGIN: 'accounts:auto-login',
+  ACCOUNTS_WARMUP: 'accounts:warmup'
 }
 
 export const RETAILER_BUY_LIMITS = {
