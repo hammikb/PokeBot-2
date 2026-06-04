@@ -1,6 +1,10 @@
+import { SmartRetry } from './smartRetry.js'
 import { createModuleLogger } from './logger.js'
 
 const log = createModuleLogger('RetryManager')
+
+// Smart retry instance for advanced retry logic
+const smartRetry = new SmartRetry()
 
 /**
  * Smart retry manager with exponential backoff
@@ -106,6 +110,27 @@ export class RetryManager {
       ...options,
       shouldRetry: (err) => isTimeoutError(err)
     })
+  }
+
+  /**
+   * Use smart retry with failure analysis
+   * Returns detailed analysis of failures
+   */
+  async smartRetry(fn, options = {}) {
+    const result = await smartRetry.execute(fn, {
+      maxRetries: options.maxRetries || this.maxRetries,
+      baseDelay: options.initialDelay || this.initialDelay,
+      maxDelay: options.maxDelay || this.maxDelay
+    })
+
+    if (!result.success) {
+      const error = new Error(result.error)
+      error.retryAnalysis = result.analysis
+      error.failures = result.failures
+      throw error
+    }
+
+    return result.result
   }
 }
 
