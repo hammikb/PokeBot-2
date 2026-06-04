@@ -25,7 +25,7 @@ export async function runWalmartFlow(
     let usedHybrid = false
     
     if (itemId) {
-      onStep('Attempting fast API add-to-cart (10-20x faster!)')
+      onStep(`Attempting fast API add-to-cart (itemId: ${itemId})`)
       const hybridResult = await hybridWalmartCheckout(page, { itemId, quantity: 1 })
       
       if (hybridResult.success) {
@@ -33,8 +33,10 @@ export async function runWalmartFlow(
         usedHybrid = true
         await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
       } else if (hybridResult.fallbackToBrowser) {
-        onStep('API failed, falling back to browser method')
+        onStep(`API failed: ${hybridResult.error || 'unknown'}, falling back to browser`)
       }
+    } else {
+      onStep(`Could not extract item ID from URL, using browser method`)
     }
     
     // Fallback to browser if API didn't work
