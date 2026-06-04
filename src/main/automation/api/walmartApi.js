@@ -208,8 +208,15 @@ export class WalmartApiClient {
    */
   static extractItemId(url) {
     // Walmart URLs: https://www.walmart.com/ip/product-name/123456789
+    // Also handles longer IDs like: /ip/product-name/15718673510
     const match = url.match(/\/ip\/[^/]+\/(\d+)/)
-    return match ? match[1] : null
+    if (match) {
+      return match[1]
+    }
+    
+    // Fallback: try to extract any number at the end of the URL
+    const endMatch = url.match(/\/(\d+)\/?$/)
+    return endMatch ? endMatch[1] : null
   }
 
   _getHeaders() {
