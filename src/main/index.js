@@ -10,7 +10,7 @@ import { TaskManager } from './tasks/TaskManager.js'
 import { createPokemonFinder } from './monitor/PokemonFinder.js'
 import { ProfileWarmup } from './automation/profileWarmup.js'
 import { progressStreamer } from './utils/progressStreamer.js'
-import { ConfigManager } from './config/configManager.js'
+// import { ConfigManager } from './config/configManager.js'
 import { registerIpcHandlers } from './ipc.js'
 import { logger } from './utils/logger.js'
 import { IPC } from '../shared/constants.js'
@@ -39,10 +39,11 @@ async function createMainWindow(encryptionKey) {
   const browserPool = new BrowserPool({ maxConcurrent: settings.maxConcurrent || 3 })
   const notificationEngine = new NotificationEngine(getSettings)
   const profileWarmup = new ProfileWarmup(browserPool)
-  const configManager = new ConfigManager()
+  // const configManager = new ConfigManager()
+  const configManager = null // Temporarily disabled
   taskManager = new TaskManager({ accountManager, notificationEngine, browserPool, getDb })
   
-  // Initialize Pokemon Finder
+  // Initialize Pokemon Finder (disabled for now)
   pokemonFinder = createPokemonFinder(getDb)
   pokemonFinder.on('newItems', (items) => {
     // Send notification for new Pokemon items
@@ -58,8 +59,8 @@ async function createMainWindow(encryptionKey) {
     // Notify renderer
     mainWindow?.webContents?.send('pokemon:newItems', items)
   })
-  // Start scanning every 30 minutes
-  pokemonFinder.startScanning(30)
+  // Start scanning every 30 minutes - DISABLED
+  // pokemonFinder.startScanning(30)
 
   // Forward progress stream events to renderer
   progressStreamer.on('stream:start', (data) => {

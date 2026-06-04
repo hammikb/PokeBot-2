@@ -319,18 +319,18 @@ export function registerIpcHandlers({
     return true
   })
 
-  // Config Management
-  ipcMain.handle(IPC.CONFIG_EXPORT, async () => {
-    return await configManager.exportToConfig(getDb, accountManager)
-  })
+  // Config Management - Temporarily disabled
+  // ipcMain.handle(IPC.CONFIG_EXPORT, async () => {
+  //   return await configManager.exportToConfig(getDb, accountManager)
+  // })
   
-  ipcMain.handle(IPC.CONFIG_IMPORT, async (_, filePath) => {
-    return await configManager.importFromConfig(filePath, getDb, accountManager)
-  })
+  // ipcMain.handle(IPC.CONFIG_IMPORT, async (_, filePath) => {
+  //   return await configManager.importFromConfig(filePath, getDb, accountManager)
+  // })
   
-  ipcMain.handle(IPC.CONFIG_CREATE_EXAMPLE, () => {
-    return configManager.createExampleConfig()
-  })
+  // ipcMain.handle(IPC.CONFIG_CREATE_EXAMPLE, () => {
+  //   return configManager.createExampleConfig()
+  // })
 
   // Pokemon Finder
   ipcMain.handle('pokemon:getAll', () => pokemonFinder.getAllItems())
