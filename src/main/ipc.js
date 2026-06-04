@@ -35,6 +35,7 @@ export function registerIpcHandlers({
   taskManager,
   pokemonFinder,
   profileWarmup,
+  configManager,
   getSettings,
   mainWindow,
   browserPool,
@@ -316,6 +317,19 @@ export function registerIpcHandlers({
     taskManager.stopTask(id)
     getDb().prepare('DELETE FROM tasks WHERE id = ?').run(id)
     return true
+  })
+
+  // Config Management
+  ipcMain.handle(IPC.CONFIG_EXPORT, async () => {
+    return await configManager.exportToConfig(getDb, accountManager)
+  })
+  
+  ipcMain.handle(IPC.CONFIG_IMPORT, async (_, filePath) => {
+    return await configManager.importFromConfig(filePath, getDb, accountManager)
+  })
+  
+  ipcMain.handle(IPC.CONFIG_CREATE_EXAMPLE, () => {
+    return configManager.createExampleConfig()
   })
 
   // Pokemon Finder

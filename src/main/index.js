@@ -10,6 +10,7 @@ import { TaskManager } from './tasks/TaskManager.js'
 import { createPokemonFinder } from './monitor/PokemonFinder.js'
 import { ProfileWarmup } from './automation/profileWarmup.js'
 import { progressStreamer } from './utils/progressStreamer.js'
+import { ConfigManager } from './config/configManager.js'
 import { registerIpcHandlers } from './ipc.js'
 import { logger } from './utils/logger.js'
 import { IPC } from './shared/constants.js'
@@ -38,6 +39,7 @@ async function createMainWindow(encryptionKey) {
   const browserPool = new BrowserPool({ maxConcurrent: settings.maxConcurrent || 3 })
   const notificationEngine = new NotificationEngine(getSettings)
   const profileWarmup = new ProfileWarmup(browserPool)
+  const configManager = new ConfigManager()
   taskManager = new TaskManager({ accountManager, notificationEngine, browserPool, getDb })
   
   // Initialize Pokemon Finder
@@ -104,6 +106,7 @@ async function createMainWindow(encryptionKey) {
     taskManager,
     pokemonFinder,
     profileWarmup,
+    configManager,
     getSettings,
     mainWindow,
     browserPool,

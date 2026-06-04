@@ -41,7 +41,10 @@ export const IPC = {
   PROGRESS_STREAM_STEP: 'progress:stream:step',
   PROGRESS_STREAM_UPDATE: 'progress:stream:update',
   PROGRESS_STREAM_SUCCESS: 'progress:stream:success',
-  PROGRESS_STREAM_ERROR: 'progress:stream:error'
+  PROGRESS_STREAM_ERROR: 'progress:stream:error',
+  CONFIG_EXPORT: 'config:export',
+  CONFIG_IMPORT: 'config:import',
+  CONFIG_CREATE_EXAMPLE: 'config:create-example'
 }
 
 export const RETAILER_BUY_LIMITS = {
