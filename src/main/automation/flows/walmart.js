@@ -1,6 +1,6 @@
 import { waitForCaptchaIfNeeded } from '../captcha.js'
 import { startTrace } from '../TraceRecorder.js'
-import { hybridWalmartCheckout, WalmartApiClient } from '../api/walmartApi.js'
+import { WalmartApiClient } from '../api/walmartApi.js'
 
 export async function runWalmartFlow(
   context,
@@ -20,20 +20,29 @@ export async function runWalmartFlow(
     await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
     await ensureWalmartSignedIn(page, account, notificationEngine, dropEvent, onStep, productUrl)
 
-    // Try fast API add-to-cart first (10-20x faster!)
+    // Try fast API add-to-cart first (Bird Bot method - 10-20x faster!)
     const itemId = WalmartApiClient.extractItemId(productUrl)
     let usedHybrid = false
     
     if (itemId) {
-      onStep(`Attempting fast API add-to-cart (itemId: ${itemId})`)
-      const hybridResult = await hybridWalmartCheckout(page, { itemId, quantity: 1 })
+      onStep(`Attempting fast API add-to-cart with Bird Bot method (itemId: ${itemId})`)
       
-      if (hybridResult.success) {
-        onStep(`✓ Added to cart via API in <500ms! (${hybridResult.method})`)
+      // Get API client with cookies from page
+      const api = await WalmartApiClient.fromPage(page)
+      const addResult = await api.addToCart(itemId, 1, itemId, productUrl)
+      
+      if (addResult.success) {
+        onStep(`✓ Added to cart via API using Bird Bot method!`)
         usedHybrid = true
+        
+        // Navigate to checkout
+        await page.goto('https://www.walmart.com/checkout', {
+          waitUntil: 'domcontentloaded',
+          timeout: 30000
+        })
         await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
-      } else if (hybridResult.fallbackToBrowser) {
-        onStep(`API failed: ${hybridResult.error || 'unknown'}, falling back to browser`)
+      } else {
+        onStep(`API failed: ${addResult.error || 'unknown'}, falling back to browser`)
       }
     } else {
       onStep(`Could not extract item ID from URL, using browser method`)

@@ -30,30 +30,22 @@ export class WalmartApiClient {
    * Add item to cart using Walmart API (SUPER FAST!)
    * This is the key speed improvement - bypasses all browser rendering
    */
-  async addToCart(itemId, quantity = 1, offerId = null) {
+  async addToCart(itemId, quantity = 1, offerId = null, productUrl = null) {
     try {
-      log.info('Adding to cart via API', { itemId, quantity })
+      log.info('Adding to cart via API (Bird Bot method)', { itemId, quantity })
+      
+      // Use Bird Bot's exact format
+      const body = {
+        offerId: offerId || itemId.toString(),
+        quantity
+      }
       
       // Walmart's cart API endpoint
       const response = await axios.post(
         'https://www.walmart.com/api/v3/cart/guest/:CID/items',
+        body,
         {
-          items: [
-            {
-              itemId: itemId.toString(),
-              quantity,
-              offerId: offerId || itemId.toString(),
-              productTypeId: '1' // Standard product
-            }
-          ]
-        },
-        {
-          headers: {
-            ...this._getHeaders(),
-            'Content-Type': 'application/json',
-            'WM_SEC.AUTH_TOKEN': this.cookies['auth'] || '',
-            'WM_QOS.CORRELATION_ID': this._generateCorrelationId()
-          }
+          headers: this._getHeaders(productUrl)
         }
       )
 
@@ -219,21 +211,22 @@ export class WalmartApiClient {
     return endMatch ? endMatch[1] : null
   }
 
-  _getHeaders() {
+  _getHeaders(productUrl = null) {
     const cookieString = Object.entries(this.cookies)
       .map(([key, value]) => `${key}=${value}`)
       .join('; ')
 
     return {
       'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.69 Safari/537.36',
       Accept: 'application/json',
+      'Accept-Encoding': 'gzip, deflate, br',
       'Accept-Language': 'en-US,en;q=0.9',
+      'Content-Type': 'application/json',
       Cookie: cookieString,
-      Referer: 'https://www.walmart.com/',
+      Referer: productUrl || 'https://www.walmart.com/',
       Origin: 'https://www.walmart.com',
-      'WM_PAGE_URL': 'https://www.walmart.com/',
-      'WM_MP': 'true'
+      'wm_vertical_id': '0'
     }
   }
 
