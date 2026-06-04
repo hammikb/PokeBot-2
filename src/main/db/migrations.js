@@ -99,6 +99,44 @@ const migrations = [
         );
       `)
     }
+  },
+  {
+    version: 3,
+    name: 'add_payment_and_shipping',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS payment_methods (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          card_number_enc TEXT NOT NULL,
+          expiry_month TEXT NOT NULL,
+          expiry_year TEXT NOT NULL,
+          cvv_enc TEXT NOT NULL,
+          billing_address1 TEXT,
+          billing_address2 TEXT,
+          billing_city TEXT,
+          billing_state TEXT,
+          billing_zip TEXT,
+          billing_phone TEXT,
+          created_at TEXT NOT NULL
+        );
+        
+        CREATE TABLE IF NOT EXISTS shipping_addresses (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          first_name TEXT NOT NULL,
+          last_name TEXT NOT NULL,
+          address1 TEXT NOT NULL,
+          address2 TEXT,
+          city TEXT NOT NULL,
+          state TEXT NOT NULL,
+          zip TEXT NOT NULL,
+          phone TEXT,
+          is_default INTEGER DEFAULT 0,
+          created_at TEXT NOT NULL
+        );
+      `)
+    }
   }
 ]
 
