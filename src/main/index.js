@@ -13,7 +13,7 @@ import { progressStreamer } from './utils/progressStreamer.js'
 import { ConfigManager } from './config/configManager.js'
 import { registerIpcHandlers } from './ipc.js'
 import { logger } from './utils/logger.js'
-import { IPC } from './shared/constants.js'
+import { IPC } from '../shared/constants.js'
 
 let mainWindow
 let taskManager
