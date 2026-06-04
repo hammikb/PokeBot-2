@@ -76,7 +76,15 @@ def normalize_product(product_url, page, html, text):
         first_value(
             nested(product_data, "offers", "price"),
             nested(product_data, "priceInfo", "currentPrice", "price"),
-            first_text(page, ['[data-test*="price"]::text', '[class*="price"]::text']),
+            nested(product_data, "price", "current", "value"),
+            nested(product_data, "item", "product_price", "current_retail"),
+            first_text(page, [
+                '[data-test="product-price"]::text',
+                '[data-test*="price"]::text',
+                'span[class*="Price"]::text',
+                '[class*="price"]::text',
+                'meta[property="product:price:amount"]::attr(content)',
+            ]),
         )
     )
     formatted_price = first_value(

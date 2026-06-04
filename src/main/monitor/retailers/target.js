@@ -76,12 +76,8 @@ export class TargetPoller {
         this._isFirstPoll = false
         return null
       }
-      if (price == null) {
-        this._wasInStock = false
-        this._isFirstPoll = false
-        return null
-      }
-      if (price > this.maxPrice) {
+      // Only check maxPrice if price is available
+      if (price != null && price > this.maxPrice) {
         this._wasInStock = false
         this._isFirstPoll = false
         return null
@@ -122,7 +118,13 @@ export class TargetPoller {
               
               console.log(`[TargetPoller] Status: ${status}, Price: ${price}, Name: ${name}`)
 
-              if (status !== 'IN_STOCK' || price == null || price > this.maxPrice) {
+              if (status !== 'IN_STOCK') {
+                this._wasInStock = false
+                this._isFirstPoll = false
+                return null
+              }
+              // Only check maxPrice if price is available
+              if (price != null && price > this.maxPrice) {
                 this._wasInStock = false
                 this._isFirstPoll = false
                 return null
