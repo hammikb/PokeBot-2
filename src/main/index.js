@@ -10,6 +10,8 @@ import { TaskManager } from './tasks/TaskManager.js'
 import { createPokemonFinder } from './monitor/PokemonFinder.js'
 import { ProfileWarmup } from './automation/profileWarmup.js'
 import { progressStreamer } from './utils/progressStreamer.js'
+import { PaymentManager } from './payments/PaymentManager.js'
+import { ShippingManager } from './shipping/ShippingManager.js'
 // import { ConfigManager } from './config/configManager.js'
 import { registerIpcHandlers } from './ipc.js'
 import { logger } from './utils/logger.js'
@@ -35,6 +37,8 @@ async function createMainWindow(encryptionKey) {
   initDb(dbPath)
 
   const accountManager = new AccountManager(getDb, encryptionKey)
+  const paymentManager = new PaymentManager(getDb, encryptionKey)
+  const shippingManager = new ShippingManager(getDb)
   const settings = getSettings()
   const browserPool = new BrowserPool({ maxConcurrent: settings.maxConcurrent || 3 })
   const notificationEngine = new NotificationEngine(getSettings)
@@ -104,6 +108,8 @@ async function createMainWindow(encryptionKey) {
   registerIpcHandlers({
     getDb,
     accountManager,
+    paymentManager,
+    shippingManager,
     taskManager,
     pokemonFinder,
     profileWarmup,

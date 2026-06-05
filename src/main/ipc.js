@@ -32,6 +32,8 @@ const TASK_UPDATE_COLUMNS = {
 export function registerIpcHandlers({
   getDb,
   accountManager,
+  paymentManager,
+  shippingManager,
   taskManager,
   pokemonFinder,
   profileWarmup,
@@ -316,6 +318,34 @@ export function registerIpcHandlers({
   ipcMain.handle(IPC.TASKS_DELETE, (_, id) => {
     taskManager.stopTask(id)
     getDb().prepare('DELETE FROM tasks WHERE id = ?').run(id)
+    return true
+  })
+
+  // Payment Methods
+  ipcMain.handle(IPC.PAYMENTS_GET, () => paymentManager.getAll())
+  ipcMain.handle(IPC.PAYMENTS_CREATE, (_, data) => paymentManager.create(data))
+  ipcMain.handle(IPC.PAYMENTS_UPDATE, (_, id, fields) => {
+    paymentManager.update(id, fields)
+    return true
+  })
+  ipcMain.handle(IPC.PAYMENTS_DELETE, (_, id) => {
+    paymentManager.delete(id)
+    return true
+  })
+
+  // Shipping Addresses
+  ipcMain.handle(IPC.SHIPPING_GET, () => shippingManager.getAll())
+  ipcMain.handle(IPC.SHIPPING_CREATE, (_, data) => shippingManager.create(data))
+  ipcMain.handle(IPC.SHIPPING_UPDATE, (_, id, fields) => {
+    shippingManager.update(id, fields)
+    return true
+  })
+  ipcMain.handle(IPC.SHIPPING_DELETE, (_, id) => {
+    shippingManager.delete(id)
+    return true
+  })
+  ipcMain.handle(IPC.SHIPPING_SET_DEFAULT, (_, id) => {
+    shippingManager.setDefault(id)
     return true
   })
 

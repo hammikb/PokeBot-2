@@ -44,7 +44,16 @@ export const IPC = {
   PROGRESS_STREAM_ERROR: 'progress:stream:error',
   CONFIG_EXPORT: 'config:export',
   CONFIG_IMPORT: 'config:import',
-  CONFIG_CREATE_EXAMPLE: 'config:create-example'
+  CONFIG_CREATE_EXAMPLE: 'config:create-example',
+  PAYMENTS_GET: 'payments:get',
+  PAYMENTS_CREATE: 'payments:create',
+  PAYMENTS_UPDATE: 'payments:update',
+  PAYMENTS_DELETE: 'payments:delete',
+  SHIPPING_GET: 'shipping:get',
+  SHIPPING_CREATE: 'shipping:create',
+  SHIPPING_UPDATE: 'shipping:update',
+  SHIPPING_DELETE: 'shipping:delete',
+  SHIPPING_SET_DEFAULT: 'shipping:set-default'
 }
 
 export const RETAILER_BUY_LIMITS = {
