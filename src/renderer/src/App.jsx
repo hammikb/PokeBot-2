@@ -7,6 +7,8 @@ import Accounts from './pages/Accounts'
 import Proxies from './pages/Proxies'
 import Catalog from './pages/Catalog'
 import Settings from './pages/Settings'
+import PaymentMethods from './pages/PaymentMethods'
+import ShippingAddresses from './pages/ShippingAddresses'
 import { IPC } from '../../shared/constants'
 
 export default function App() {
@@ -62,6 +64,8 @@ export default function App() {
             ['/tasks', 'Tasks'],
             ['/catalog', 'Catalog'],
             ['/accounts', 'Accounts'],
+            ['/payments', 'Payments'],
+            ['/shipping', 'Shipping'],
             ['/proxies', 'Proxies'],
             ['/settings', 'Settings']
           ].map(([path, label]) => (
@@ -91,6 +95,8 @@ export default function App() {
             <Route path="/tasks" element={<Tasks />} />
             <Route path="/catalog" element={<Catalog />} />
             <Route path="/accounts" element={<Accounts />} />
+            <Route path="/payments" element={<PaymentMethods />} />
+            <Route path="/shipping" element={<ShippingAddresses />} />
             <Route path="/proxies" element={<Proxies />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
