@@ -12,6 +12,7 @@ import { ProfileWarmup } from './automation/profileWarmup.js'
 import { progressStreamer } from './utils/progressStreamer.js'
 import { PaymentManager } from './payments/PaymentManager.js'
 import { ShippingManager } from './shipping/ShippingManager.js'
+import { ThumbnailCache } from './thumbnails/ThumbnailCache.js'
 // import { ConfigManager } from './config/configManager.js'
 import { registerIpcHandlers } from './ipc.js'
 import { logger } from './utils/logger.js'
@@ -39,6 +40,7 @@ async function createMainWindow(encryptionKey) {
   const accountManager = new AccountManager(getDb, encryptionKey)
   const paymentManager = new PaymentManager(getDb, encryptionKey)
   const shippingManager = new ShippingManager(getDb)
+  const thumbnailCache = new ThumbnailCache()
   const settings = getSettings()
   const browserPool = new BrowserPool({ maxConcurrent: settings.maxConcurrent || 3 })
   const notificationEngine = new NotificationEngine(getSettings)
@@ -110,6 +112,7 @@ async function createMainWindow(encryptionKey) {
     accountManager,
     paymentManager,
     shippingManager,
+    thumbnailCache,
     taskManager,
     pokemonFinder,
     profileWarmup,

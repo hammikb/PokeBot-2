@@ -137,6 +137,34 @@ const migrations = [
         );
       `)
     }
+  },
+  {
+    version: 4,
+    name: 'add_thumbnails_and_alerts',
+    up: (db) => {
+      db.exec(`
+        -- Add thumbnail_path column to tasks
+        ALTER TABLE tasks ADD COLUMN thumbnail_path TEXT;
+        
+        -- Create alert history table for acknowledgment system
+        CREATE TABLE IF NOT EXISTS alert_history (
+          id TEXT PRIMARY KEY,
+          task_id TEXT,
+          alert_type TEXT NOT NULL,
+          product_name TEXT,
+          product_url TEXT,
+          price REAL,
+          seen INTEGER DEFAULT 0,
+          acknowledged_at INTEGER,
+          created_at INTEGER DEFAULT (strftime('%s','now')),
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+        
+        CREATE INDEX IF NOT EXISTS idx_alert_history_task ON alert_history(task_id);
+        CREATE INDEX IF NOT EXISTS idx_alert_history_seen ON alert_history(seen);
+        CREATE INDEX IF NOT EXISTS idx_alert_history_created ON alert_history(created_at);
+      `)
+    }
   }
 ]
 
