@@ -17,6 +17,8 @@ function invoke(channel, ...args) {
 export const useAppStore = create((set, get) => ({
   tasks: [],
   accounts: [],
+  paymentMethods: [],
+  shippingAddresses: [],
   catalogItems: [],
   catalogMessage: '',
   settings: {},
@@ -251,7 +253,47 @@ export const useAppStore = create((set, get) => ({
   },
   pushFeedEvent: (event) => set((s) => ({ feedEvents: [event, ...s.feedEvents].slice(0, 200) })),
   setTaskStatus: (taskId, status) =>
-    set((s) => ({ taskStatuses: { ...s.taskStatuses, [taskId]: status } }))
+    set((s) => ({ taskStatuses: { ...s.taskStatuses, [taskId]: status } })),
+
+  // Payment Methods
+  loadPaymentMethods: async () => {
+    const paymentMethods = await invoke(IPC.PAYMENTS_GET)
+    set({ paymentMethods })
+  },
+  createPaymentMethod: async (data) => {
+    await invoke(IPC.PAYMENTS_CREATE, data)
+    get().loadPaymentMethods()
+  },
+  updatePaymentMethod: async (id, fields) => {
+    await invoke(IPC.PAYMENTS_UPDATE, id, fields)
+    get().loadPaymentMethods()
+  },
+  deletePaymentMethod: async (id) => {
+    await invoke(IPC.PAYMENTS_DELETE, id)
+    get().loadPaymentMethods()
+  },
+
+  // Shipping Addresses
+  loadShippingAddresses: async () => {
+    const shippingAddresses = await invoke(IPC.SHIPPING_GET)
+    set({ shippingAddresses })
+  },
+  createShippingAddress: async (data) => {
+    await invoke(IPC.SHIPPING_CREATE, data)
+    get().loadShippingAddresses()
+  },
+  updateShippingAddress: async (id, fields) => {
+    await invoke(IPC.SHIPPING_UPDATE, id, fields)
+    get().loadShippingAddresses()
+  },
+  deleteShippingAddress: async (id) => {
+    await invoke(IPC.SHIPPING_DELETE, id)
+    get().loadShippingAddresses()
+  },
+  setDefaultShippingAddress: async (id) => {
+    await invoke(IPC.SHIPPING_SET_DEFAULT, id)
+    get().loadShippingAddresses()
+  }
 }))
 
 function toProxyStatus(result) {
