@@ -35,14 +35,24 @@ export async function runWalmartFlow(
       )
     }
 
-    // Add to cart
+    // Add to cart with human-like behavior
     onStep('Clicking Add to cart')
     const atcBtn = page.locator('button[data-automation-id="atc"], button:has-text("Add to cart")')
+    
+    // Hover before clicking (more human-like)
+    await atcBtn.first().hover()
+    await page.waitForTimeout(300 + Math.random() * 500) // Random delay 300-800ms
+    
     await atcBtn.first().click({ timeout: 15000 })
     await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
 
-    // Wait a moment for cart to update
-    await page.waitForTimeout(2000)
+    // Wait for cart to update with random delay (more human-like)
+    onStep('Waiting for cart to update')
+    await page.waitForTimeout(2000 + Math.random() * 1000) // Random 2-3s
+
+    // Scroll a bit (human behavior)
+    await page.evaluate(() => window.scrollBy(0, 100))
+    await page.waitForTimeout(500 + Math.random() * 500)
 
     // Go to checkout
     onStep('Opening checkout')
@@ -51,6 +61,9 @@ export async function runWalmartFlow(
       timeout: 30000
     })
     await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
+    
+    // Wait for checkout page to fully load
+    await page.waitForTimeout(1500 + Math.random() * 1000) // Random 1.5-2.5s
 
     // Enter CVV
     onStep('Checking CVV field')
