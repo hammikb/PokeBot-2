@@ -1,10 +1,9 @@
 import { waitForCaptchaIfNeeded } from '../captcha.js'
 import { startTrace } from '../TraceRecorder.js'
-import { WalmartApiClient } from '../api/walmartApi.js'
 
 export async function runWalmartFlow(
   context,
-  { productUrl, cvv, account, notificationEngine, dropEvent, mode, buyLimit = 1, onStep = () => {} }
+  { productUrl, cvv, account, notificationEngine, dropEvent, mode, onStep = () => {} }
 ) {
   const page = await context.newPage()
   const trace = await startTrace(context, {
@@ -20,66 +19,38 @@ export async function runWalmartFlow(
     await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
     await ensureWalmartSignedIn(page, account, notificationEngine, dropEvent, onStep, productUrl)
 
-    // Try fast API add-to-cart first (Bird Bot method - 10-20x faster!)
-    const itemId = WalmartApiClient.extractItemId(productUrl)
-    let usedHybrid = false
-    
-    if (itemId) {
-      onStep(`Attempting fast API add-to-cart with Bird Bot method (itemId: ${itemId})`)
-      
-      // Get API client with cookies from page
-      const api = await WalmartApiClient.fromPage(page)
-      const addResult = await api.addToCart(itemId, buyLimit, itemId, productUrl)
-      
-      if (addResult.success) {
-        onStep(`✓ Added to cart via API using Bird Bot method!`)
-        usedHybrid = true
-        
-        // Navigate to checkout
-        await page.goto('https://www.walmart.com/checkout', {
-          waitUntil: 'domcontentloaded',
-          timeout: 30000
-        })
-        await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
-      } else {
-        onStep(`API failed: ${addResult.error || 'unknown'}, falling back to browser`)
-      }
-    } else {
-      onStep(`Could not extract item ID from URL, using browser method`)
-    }
-    
-    // Fallback to browser if API didn't work
-    if (!usedHybrid) {
-      // Check for queue first
-      onStep('Checking Walmart queue')
-      const queueBtn = page.locator(
-        'button:has-text("Join Waitlist"), button:has-text("Get In Line"), button:has-text("Join queue")'
+    // Check for queue first
+    onStep('Checking Walmart queue')
+    const queueBtn = page.locator(
+      'button:has-text("Join Waitlist"), button:has-text("Get In Line"), button:has-text("Join queue")'
+    )
+    if ((await queueBtn.count()) > 0) {
+      onStep('Joining Walmart queue')
+      await queueBtn.first().click()
+      await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
+      // Wait up to 10 minutes to exit queue
+      await page.waitForSelector(
+        '[class*="add-to-cart"]:not([disabled]), button[data-automation-id="atc"]:not([disabled])',
+        { timeout: 600000 }
       )
-      if ((await queueBtn.count()) > 0) {
-        onStep('Joining Walmart queue')
-        await queueBtn.first().click()
-        await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
-        // Wait up to 10 minutes to exit queue
-        await page.waitForSelector(
-          '[class*="add-to-cart"]:not([disabled]), button[data-automation-id="atc"]:not([disabled])',
-          { timeout: 600000 }
-        )
-      }
-
-      // Add to cart (browser method)
-      onStep('Clicking Add to cart (browser method)')
-      const atcBtn = page.locator('button[data-automation-id="atc"], button:has-text("Add to cart")')
-      await atcBtn.first().click({ timeout: 15000 })
-      await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
-
-      // Go to checkout
-      onStep('Opening checkout')
-      await page.goto('https://www.walmart.com/checkout', {
-        waitUntil: 'domcontentloaded',
-        timeout: 30000
-      })
-      await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
     }
+
+    // Add to cart
+    onStep('Clicking Add to cart')
+    const atcBtn = page.locator('button[data-automation-id="atc"], button:has-text("Add to cart")')
+    await atcBtn.first().click({ timeout: 15000 })
+    await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
+
+    // Wait a moment for cart to update
+    await page.waitForTimeout(2000)
+
+    // Go to checkout
+    onStep('Opening checkout')
+    await page.goto('https://www.walmart.com/checkout', {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000
+    })
+    await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
 
     // Enter CVV
     onStep('Checking CVV field')
