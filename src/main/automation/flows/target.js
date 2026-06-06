@@ -34,20 +34,31 @@ export async function runTargetFlow(
     await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
     await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
 
-    // Check if signed in
+    // Check if signed in by looking for account indicator
     onStep('Checking Target sign-in status')
-    const signInBtn = page.locator('a:has-text("Sign in"), button:has-text("Sign in")')
-    if ((await signInBtn.count()) > 0) {
+    
+    // Wait a moment for page to load
+    await page.waitForTimeout(1000)
+    
+    // Check for account/profile elements (indicates signed in)
+    const accountIndicators = page.locator('[data-test="@web/AccountLink"], [data-test="accountNav-signedIn"], a[href*="/account"], button:has-text("Hi,"), span:has-text("Hi,")')
+    const isSignedIn = (await accountIndicators.count()) > 0
+    
+    if (!isSignedIn) {
       onStep('Not signed in - please sign in manually or use auto-login first')
       requiresManual = true
+      await trace.capture(page)
       const traceResult = await trace.stop()
       return {
         success: false,
         requiresManualCheckout: true,
         screenshotPath: traceResult?.screenshotPath,
+        tracePath: traceResult?.tracePath,
         message: 'Not signed in - use Target auto-login feature first'
       }
     }
+    
+    onStep('Signed in to Target')
 
     // Try browser-based API first (FAST and reliable!)
     if (useApi) {
