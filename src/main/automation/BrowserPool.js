@@ -1,4 +1,4 @@
-import { chromium } from 'playwright'
+import { chromium } from 'patchright'
 import { mkdirSync } from 'fs'
 import { createModuleLogger } from '../utils/logger.js'
 
