@@ -1,4 +1,4 @@
-import { chromium } from 'playwright'
+import { chromium } from 'patchright'
 
 const BLOCK_PATTERNS = [
   /captcha/i,

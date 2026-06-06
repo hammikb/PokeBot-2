@@ -1,4 +1,4 @@
-import { request } from 'playwright'
+import { request } from 'patchright'
 
 const RETAILER_TEST_URLS = {
   target: 'https://www.target.com/',
