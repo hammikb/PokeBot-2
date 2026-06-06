@@ -4,7 +4,7 @@ import { WalmartApiClient } from '../api/walmartApi.js'
 
 export async function runWalmartFlow(
   context,
-  { productUrl, cvv, account, notificationEngine, dropEvent, mode, onStep = () => {} }
+  { productUrl, cvv, account, notificationEngine, dropEvent, mode, buyLimit = 1, onStep = () => {} }
 ) {
   const page = await context.newPage()
   const trace = await startTrace(context, {
@@ -29,7 +29,7 @@ export async function runWalmartFlow(
       
       // Get API client with cookies from page
       const api = await WalmartApiClient.fromPage(page)
-      const addResult = await api.addToCart(itemId, 1, itemId, productUrl)
+      const addResult = await api.addToCart(itemId, buyLimit, itemId, productUrl)
       
       if (addResult.success) {
         onStep(`✓ Added to cart via API using Bird Bot method!`)
