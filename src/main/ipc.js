@@ -34,6 +34,7 @@ export function registerIpcHandlers({
   accountManager,
   paymentManager,
   shippingManager,
+  thumbnailCache,
   taskManager,
   pokemonFinder,
   profileWarmup,
@@ -346,6 +347,36 @@ export function registerIpcHandlers({
   })
   ipcMain.handle(IPC.SHIPPING_SET_DEFAULT, (_, id) => {
     shippingManager.setDefault(id)
+    return true
+  })
+
+  // Thumbnails
+  ipcMain.handle('thumbnails:download', async (_, imageUrl) => {
+    return await thumbnailCache.downloadThumbnail(imageUrl)
+  })
+  ipcMain.handle('thumbnails:get', async (_, imageUrl) => {
+    return thumbnailCache.getThumbnailPath(imageUrl)
+  })
+  ipcMain.handle('thumbnails:clear', async () => {
+    await thumbnailCache.clearCache()
+    return true
+  })
+
+  // Alerts
+  ipcMain.handle('alerts:getHistory', () => {
+    return getDb().prepare('SELECT * FROM alert_history ORDER BY created_at DESC LIMIT 100').all()
+  })
+  ipcMain.handle('alerts:markSeen', (_, id) => {
+    getDb()
+      .prepare('UPDATE alert_history SET seen = 1, acknowledged_at = ? WHERE id = ?')
+      .run(Math.floor(Date.now() / 1000), id)
+    return true
+  })
+  ipcMain.handle('alerts:getUnseen', () => {
+    return getDb().prepare('SELECT * FROM alert_history WHERE seen = 0 ORDER BY created_at DESC').all()
+  })
+  ipcMain.handle('alerts:clearHistory', () => {
+    getDb().prepare('DELETE FROM alert_history').run()
     return true
   })
 
