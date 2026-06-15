@@ -15,6 +15,9 @@ import { runTargetAutoLogin } from './automation/flows/target-auto-login.js'
 import { runTargetRegistration } from './automation/flows/register-target.js'
 import { runWalmartRegistration } from './automation/flows/register-walmart.js'
 import { buildTaskReadiness } from './tasks/TaskReadiness.js'
+import { encrypt, decrypt } from './crypto.js'
+import { SupabaseClient } from './supabase/SupabaseClient.js'
+import { pushCatalogItemToSupabase } from './supabase/catalogPublish.js'
 
 const SUPPORTED_TASK_RETAILERS = new Set(['target', 'walmart'])
 const TASK_UPDATE_COLUMNS = {
@@ -42,7 +45,8 @@ export function registerIpcHandlers({
   getSettings,
   mainWindow,
   browserPool,
-  notificationEngine
+  notificationEngine,
+  encryptionKey
 }) {
   // Settings
   ipcMain.handle(IPC.SETTINGS_GET, () => getSettings())
@@ -52,6 +56,36 @@ export function registerIpcHandlers({
       .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
       .run(key, JSON.stringify(value))
     return true
+  })
+
+  // Monitor mode (local vs supabase)
+  ipcMain.handle(IPC.MONITOR_SET_MODE, async (_, mode) => {
+    const next = mode === 'supabase' ? 'supabase' : 'local'
+    getDb()
+      .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+      .run('monitorMode', JSON.stringify(next))
+    await taskManager.setMonitorMode(next)
+    return next
+  })
+
+  // Store the bot's Supabase password encrypted at rest (never plaintext).
+  ipcMain.handle(IPC.SUPABASE_SET_PASSWORD, (_, password) => {
+    const enc = encrypt(String(password ?? ''), encryptionKey)
+    getDb()
+      .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+      .run('supabasePasswordEnc', JSON.stringify(enc))
+    return true
+  })
+
+  // Publish a local catalog item to the Supabase products table.
+  ipcMain.handle(IPC.CATALOG_PUSH_SUPABASE, async (_, id) => {
+    const item = getDb().prepare('SELECT * FROM product_catalog WHERE id = ?').get(id)
+    if (!item) throw new Error('Catalog item not found')
+    const s = getSettings()
+    const password = s.supabasePasswordEnc ? decrypt(s.supabasePasswordEnc, encryptionKey) : ''
+    const sc = new SupabaseClient({ url: s.supabaseUrl, key: s.supabaseKey })
+    await sc.signIn(s.supabaseEmail, password)
+    return pushCatalogItemToSupabase({ client: sc.client, item })
   })
 
   // Accounts

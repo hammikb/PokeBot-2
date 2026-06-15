@@ -47,7 +47,14 @@ async function createMainWindow(encryptionKey) {
   const profileWarmup = new ProfileWarmup(browserPool)
   // const configManager = new ConfigManager()
   const configManager = null // Temporarily disabled
-  taskManager = new TaskManager({ accountManager, notificationEngine, browserPool, getDb })
+  taskManager = new TaskManager({
+    accountManager,
+    notificationEngine,
+    browserPool,
+    getDb,
+    getSettings,
+    encryptionKey
+  })
   
   // Initialize Pokemon Finder (disabled for now)
   pokemonFinder = createPokemonFinder(getDb)
@@ -118,6 +125,7 @@ async function createMainWindow(encryptionKey) {
     profileWarmup,
     configManager,
     getSettings,
+    encryptionKey,
     mainWindow,
     browserPool,
     notificationEngine
