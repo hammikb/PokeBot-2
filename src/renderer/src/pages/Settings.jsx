@@ -14,19 +14,9 @@ const FIELDS = [
   { key: 'maxConcurrent', label: 'Max Concurrent Browsers', type: 'number', placeholder: '3' }
 ]
 
+// URL + publishable key are baked into the app (src/main/supabase/config.js).
+// Users only provide login credentials.
 const SUPABASE_FIELDS = [
-  {
-    key: 'supabaseUrl',
-    label: 'Supabase URL',
-    type: 'text',
-    placeholder: 'https://jbnnouwhesexfllninwb.supabase.co'
-  },
-  {
-    key: 'supabaseKey',
-    label: 'Supabase Publishable Key',
-    type: 'text',
-    placeholder: 'sb_publishable_...'
-  },
   { key: 'supabaseEmail', label: 'Bot Email', type: 'text', placeholder: 'bot@example.com' }
 ]
 
@@ -107,7 +97,9 @@ export default function Settings() {
             }}
             className="w-full bg-[#111] border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:border-red-500 outline-none transition-colors"
           />
-          <div className="text-gray-600 text-sm mt-1">Stored encrypted. Leave blank to keep current.</div>
+          <div className="text-gray-600 text-sm mt-1">
+            Stored encrypted. Leave blank to keep current.
+          </div>
         </div>
       )}
 

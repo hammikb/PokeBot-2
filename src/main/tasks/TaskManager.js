@@ -17,8 +17,8 @@ import { RetryManager } from '../utils/retryManager.js'
 import { extractProductKey } from '../products/productKey.js'
 import { SupabaseClient } from '../supabase/SupabaseClient.js'
 import { SupabaseMonitorSource } from '../monitor/SupabaseMonitorSource.js'
+import { SUPABASE_URL, SUPABASE_KEY } from '../supabase/config.js'
 import { decrypt } from '../crypto.js'
-
 
 const POLLERS = {
   walmart: WalmartPoller,
@@ -83,7 +83,7 @@ export class TaskManager extends EventEmitter {
     const password = s.supabasePasswordEnc
       ? decrypt(s.supabasePasswordEnc, this._encryptionKey)
       : ''
-    const sc = new SupabaseClient({ url: s.supabaseUrl, key: s.supabaseKey })
+    const sc = new SupabaseClient({ url: SUPABASE_URL, key: SUPABASE_KEY })
     await sc.signIn(s.supabaseEmail, password)
     return new SupabaseMonitorSource({ client: sc.client })
   }
@@ -136,8 +136,7 @@ export class TaskManager extends EventEmitter {
     // Target uses the shared MonitorBrowserContext (one window, one tab per product).
     // Other retailers fall back to browserPool (one context per product) until
     // they are updated to support monitorContext.
-    const monitorContext =
-      taskRow.retailer === 'target' ? this._getMonitorContext('target') : null
+    const monitorContext = taskRow.retailer === 'target' ? this._getMonitorContext('target') : null
 
     const poller = new PollerClass({
       productUrl: taskRow.product_url,

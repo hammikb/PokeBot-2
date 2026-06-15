@@ -18,6 +18,7 @@ import { buildTaskReadiness } from './tasks/TaskReadiness.js'
 import { encrypt, decrypt } from './crypto.js'
 import { SupabaseClient } from './supabase/SupabaseClient.js'
 import { pushCatalogItemToSupabase } from './supabase/catalogPublish.js'
+import { SUPABASE_URL, SUPABASE_KEY } from './supabase/config.js'
 
 const SUPPORTED_TASK_RETAILERS = new Set(['target', 'walmart'])
 const TASK_UPDATE_COLUMNS = {
@@ -83,7 +84,7 @@ export function registerIpcHandlers({
     if (!item) throw new Error('Catalog item not found')
     const s = getSettings()
     const password = s.supabasePasswordEnc ? decrypt(s.supabasePasswordEnc, encryptionKey) : ''
-    const sc = new SupabaseClient({ url: s.supabaseUrl, key: s.supabaseKey })
+    const sc = new SupabaseClient({ url: SUPABASE_URL, key: SUPABASE_KEY })
     await sc.signIn(s.supabaseEmail, password)
     return pushCatalogItemToSupabase({ client: sc.client, item })
   })
@@ -245,7 +246,7 @@ export function registerIpcHandlers({
     if (result.success) accountManager.setStatus(account.id, 'verified')
     return result
   })
-  
+
   // Profile Warmup
   ipcMain.handle(IPC.ACCOUNTS_WARMUP, async (_, id, options) => {
     const account = accountManager.getDecrypted(id)
@@ -253,9 +254,9 @@ export function registerIpcHandlers({
     if (account.retailer !== 'walmart') {
       throw new Error('Profile warmup is currently only supported for Walmart accounts')
     }
-    
+
     const result = await profileWarmup.warmupWalmartProfile(account, options)
-    
+
     // Notify renderer of progress
     mainWindow?.webContents?.send(IPC.FEED_EVENT, {
       id: randomUUID(),
@@ -265,10 +266,10 @@ export function registerIpcHandlers({
       message: result.success ? result.message : `Failed: ${result.error}`,
       createdAt: new Date().toISOString()
     })
-    
+
     return result
   })
-  
+
   // Tasks
   ipcMain.handle(IPC.TASKS_GET, () => getDb().prepare('SELECT * FROM tasks').all())
   ipcMain.handle(IPC.TASKS_READINESS, () => {
@@ -407,7 +408,9 @@ export function registerIpcHandlers({
     return true
   })
   ipcMain.handle('alerts:getUnseen', () => {
-    return getDb().prepare('SELECT * FROM alert_history WHERE seen = 0 ORDER BY created_at DESC').all()
+    return getDb()
+      .prepare('SELECT * FROM alert_history WHERE seen = 0 ORDER BY created_at DESC')
+      .all()
   })
   ipcMain.handle('alerts:clearHistory', () => {
     getDb().prepare('DELETE FROM alert_history').run()
@@ -418,11 +421,11 @@ export function registerIpcHandlers({
   // ipcMain.handle(IPC.CONFIG_EXPORT, async () => {
   //   return await configManager.exportToConfig(getDb, accountManager)
   // })
-  
+
   // ipcMain.handle(IPC.CONFIG_IMPORT, async (_, filePath) => {
   //   return await configManager.importFromConfig(filePath, getDb, accountManager)
   // })
-  
+
   // ipcMain.handle(IPC.CONFIG_CREATE_EXAMPLE, () => {
   //   return configManager.createExampleConfig()
   // })
