@@ -251,6 +251,14 @@ export const useAppStore = create((set, get) => ({
     await invoke(IPC.SETTINGS_SET, key, value)
     get().loadSettings()
   },
+  setMonitorMode: async (mode) => {
+    await invoke(IPC.MONITOR_SET_MODE, mode)
+    await get().loadSettings()
+  },
+  setSupabasePassword: async (password) => {
+    await invoke(IPC.SUPABASE_SET_PASSWORD, password)
+  },
+  pushCatalogToSupabase: async (id) => invoke(IPC.CATALOG_PUSH_SUPABASE, id),
   pushFeedEvent: (event) => set((s) => ({ feedEvents: [event, ...s.feedEvents].slice(0, 200) })),
   setTaskStatus: (taskId, status) =>
     set((s) => ({ taskStatuses: { ...s.taskStatuses, [taskId]: status } })),

@@ -3,7 +3,7 @@ import { useAppStore } from '../store/appStore'
 import { RETAILER_BUY_LIMITS } from '../../../shared/constants'
 
 export default function Catalog() {
-  const { catalogItems, catalogMessage, addCatalogUrl, deleteCatalogItem, createTask } =
+  const { catalogItems, catalogMessage, addCatalogUrl, deleteCatalogItem, createTask, pushCatalogToSupabase } =
     useAppStore()
   const [productUrl, setProductUrl] = useState('')
   const [status, setStatus] = useState('')
@@ -25,6 +25,19 @@ export default function Catalog() {
       )
     } catch (err) {
       setStatus(err.message || 'Could not add catalog item')
+    }
+  }
+
+  const publishToSupabase = async (item) => {
+    setBusyId(item.id)
+    setStatus('Publishing to PokeAlert...')
+    try {
+      const result = await pushCatalogToSupabase(item.id)
+      setStatus(`Published to PokeAlert (product ${result.productId}). The monitor will watch it.`)
+    } catch (err) {
+      setStatus(err.message || 'Could not publish to PokeAlert')
+    } finally {
+      setBusyId('')
     }
   }
 
@@ -132,6 +145,26 @@ export default function Catalog() {
               >
                 create task
               </button>
+              <button
+                type="button"
+                onClick={() => publishToSupabase(item)}
+                disabled={busyId === item.id}
+                className="text-purple-400 hover:text-purple-200 disabled:text-gray-700 uppercase tracking-wider"
+              >
+                publish to pokealert
+              </button>
+              <a
+                href={item.product_url}
+                target="_blank"
+                rel="noreferrer"
+                className={`uppercase tracking-wider ${
+                  item.product_url
+                    ? 'text-blue-400 hover:text-blue-200'
+                    : 'text-gray-700 pointer-events-none'
+                }`}
+              >
+                open link
+              </a>
               <button
                 type="button"
                 onClick={() => deleteCatalogItem(item.id)}
