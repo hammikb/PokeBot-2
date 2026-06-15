@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto'
 import { EventEmitter } from 'events'
 import { MonitorEngine } from '../monitor/MonitorEngine.js'
+import { MonitorBrowserContext } from '../monitor/MonitorBrowserContext.js'
 import { runWalmartFlow } from '../automation/flows/walmart.js'
 import { runTargetFlow } from '../automation/flows/target.js'
 import { runPokemonCenterFlow } from '../automation/flows/pokemon-center.js'
@@ -13,6 +14,11 @@ import { CostcoPoller } from '../monitor/retailers/costco.js'
 import { GameStopPoller } from '../monitor/retailers/gamestop.js'
 import { SamsClubPoller } from '../monitor/retailers/samsclub.js'
 import { RetryManager } from '../utils/retryManager.js'
+import { extractProductKey } from '../products/productKey.js'
+import { SupabaseClient } from '../supabase/SupabaseClient.js'
+import { SupabaseMonitorSource } from '../monitor/SupabaseMonitorSource.js'
+import { decrypt } from '../crypto.js'
+
 
 const POLLERS = {
   walmart: WalmartPoller,
@@ -32,38 +38,160 @@ const FLOWS = {
 }
 
 export class TaskManager extends EventEmitter {
-  constructor({ accountManager, notificationEngine, browserPool, getDb }) {
+  constructor({
+    accountManager,
+    notificationEngine,
+    browserPool,
+    getDb,
+    getSettings = () => ({}),
+    encryptionKey = null,
+    createSupabaseSource = null
+  }) {
     super()
     this._accountManager = accountManager
     this._notify = notificationEngine
     this._pool = browserPool
     this._getDb = getDb
+    this._getSettings = getSettings
+    this._encryptionKey = encryptionKey
     this._monitor = new MonitorEngine()
     this._monitor.on('drop', (event) => this._onDrop(event))
     this._tasks = new Map()
+
+    // One shared browser context per retailer — Guppy's exact approach:
+    // one Chrome window (off-screen) with one tab per monitored product.
+    // All tabs share the same Akamai cookies → trust accumulates faster.
+    this._monitorContexts = new Map() // retailer → MonitorBrowserContext
+    this._supabaseSource = null
+    this._supabaseSourcePromise = null
+    this._createSupabaseSource = createSupabaseSource || (() => this._buildSupabaseSource())
+  }
+
+  _getMonitorContext(retailer) {
+    if (!this._pool) return null
+    if (!this._monitorContexts.has(retailer)) {
+      this._monitorContexts.set(
+        retailer,
+        new MonitorBrowserContext({ browserPool: this._pool, retailer })
+      )
+    }
+    return this._monitorContexts.get(retailer)
+  }
+
+  async _buildSupabaseSource() {
+    const s = this._getSettings()
+    const password = s.supabasePasswordEnc
+      ? decrypt(s.supabasePasswordEnc, this._encryptionKey)
+      : ''
+    const sc = new SupabaseClient({ url: s.supabaseUrl, key: s.supabaseKey })
+    await sc.signIn(s.supabaseEmail, password)
+    return new SupabaseMonitorSource({ client: sc.client })
+  }
+
+  async _getSupabaseSource() {
+    if (this._supabaseSource) return this._supabaseSource
+    if (!this._supabaseSourcePromise) {
+      this._supabaseSourcePromise = Promise.resolve(this._createSupabaseSource()).then((source) => {
+        source.on('drop', (event) => this._onDrop(event))
+        source.on('notice', (notice) =>
+          this.emit('drop', {
+            retailer: 'catalog',
+            productName: `ℹ️ ${notice.message}`,
+            productUrl: notice.productUrl,
+            dropType: 'supabase_notice'
+          })
+        )
+        this._supabaseSource = source
+        return source
+      })
+    }
+    return this._supabaseSourcePromise
   }
 
   startTask(taskRow) {
     if (this._tasks.has(taskRow.id)) return
+    const mode = this._getSettings().monitorMode || 'local'
+
+    if (mode === 'supabase') {
+      this._tasks.set(taskRow.id, { ...taskRow, source: 'supabase' })
+      this._emitStatus(taskRow.id, 'monitoring')
+      this._startSupabaseTask(taskRow).catch((err) => {
+        this._emitStatus(taskRow.id, 'error')
+        this.emit('drop', {
+          retailer: taskRow.retailer,
+          productName: `Supabase monitor error: ${err.message}`,
+          productUrl: taskRow.product_url,
+          dropType: 'supabase_notice'
+        })
+      })
+      return
+    }
+
     const PollerClass = POLLERS[taskRow.retailer]
     if (!PollerClass) {
       this._emitStatus(taskRow.id, 'error')
       return
     }
-    const poller = new PollerClass({ productUrl: taskRow.product_url, maxPrice: taskRow.max_price })
-    this._tasks.set(taskRow.id, { ...taskRow, poller })
+
+    // Target uses the shared MonitorBrowserContext (one window, one tab per product).
+    // Other retailers fall back to browserPool (one context per product) until
+    // they are updated to support monitorContext.
+    const monitorContext =
+      taskRow.retailer === 'target' ? this._getMonitorContext('target') : null
+
+    const poller = new PollerClass({
+      productUrl: taskRow.product_url,
+      maxPrice: taskRow.max_price,
+      monitorContext,
+      // browserPool is still passed as fallback for retailers that don't yet
+      // use monitorContext, and for the TargetPoller legacy path.
+      browserPool: this._pool
+    })
+
+    this._tasks.set(taskRow.id, { ...taskRow, poller, source: 'local' })
     this._monitor.addTask({ id: taskRow.id, poller, intervalMs: taskRow.interval_ms || 4000 })
     this._emitStatus(taskRow.id, 'monitoring')
   }
 
+  async _startSupabaseTask(taskRow) {
+    const source = await this._getSupabaseSource()
+    await source.addProduct({
+      productUrl: taskRow.product_url,
+      retailer: taskRow.retailer,
+      productKey: extractProductKey(taskRow.retailer, taskRow.product_url),
+      maxPrice: taskRow.max_price ?? null
+    })
+  }
+
   stopTask(id) {
-    this._monitor.removeTask(id)
+    const entry = this._tasks.get(id)
+    if (entry?.source === 'supabase') {
+      this._supabaseSource?.removeProduct(entry.product_url).catch(() => {})
+    } else {
+      this._monitor.removeTask(id)
+    }
     this._tasks.delete(id)
     this._emitStatus(id, 'idle')
   }
 
   stopAll() {
     for (const id of [...this._tasks.keys()]) this.stopTask(id)
+  }
+
+  async setMonitorMode() {
+    // Restart every active task under whatever monitorMode getSettings() now
+    // returns. Caller persists the setting before invoking this.
+    const activeIds = [...this._tasks.keys()]
+    this.stopAll()
+    if (this._supabaseSource) {
+      await this._supabaseSource.stop().catch(() => {})
+      this._supabaseSource = null
+      this._supabaseSourcePromise = null
+    }
+    for (const id of activeIds) {
+      const task = this._getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(id)
+      if (task) this.startTask(task)
+    }
   }
 
   async testTask(taskRow) {
@@ -97,22 +225,24 @@ export class TaskManager extends EventEmitter {
   }
 
   async _onDrop(dropEvent) {
+    const task = [...this._tasks.values()].find((t) => t.product_url === dropEvent.productUrl)
+
+    // Alert-only mode: fire a single enriched notification and stop — no checkout.
+    if (task?.mode === 'alert-only') {
+      const alertEvent = {
+        ...dropEvent,
+        productName: `🔔 ${dropEvent.productName} is in stock!`
+      }
+      this.emit('drop', alertEvent)
+      await this._notify.fire(alertEvent)
+      return
+    }
+
+    // All other modes: emit the raw drop event and fire the notification.
     this.emit('drop', dropEvent)
     await this._notify.fire(dropEvent)
 
-    const task = [...this._tasks.values()].find((t) => t.product_url === dropEvent.productUrl)
     if (!task) return
-
-    // Handle based on task mode
-    if (task.mode === 'alert-only') {
-      // Just notify, don't checkout
-      await this._notify.fire({
-        ...dropEvent,
-        productName: `🔔 ALERT: ${dropEvent.productName} is in stock!`,
-        dropType: 'in_stock'
-      })
-      return
-    }
 
     const flow = FLOWS[dropEvent.retailer]
     if (!flow) return
@@ -121,7 +251,7 @@ export class TaskManager extends EventEmitter {
     if (task.mode === 'test-checkout') {
       await this._runFlowsForTask({ ...task, mode: 'test-checkout' }, dropEvent)
     } else {
-      // auto-checkout mode
+      // auto-checkout / monitor-and-buy mode
       await this._runFlowsForTask(task, dropEvent)
     }
   }
