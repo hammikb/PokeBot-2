@@ -25,11 +25,16 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
+    "@ghostery/adblocker-playwright": "^2.18.0",
+    "@nut-tree-fork/nut-js": "^4.2.6",
+    "@supabase/supabase-js": "^2.108.2",
     "axios": "^1.16.1",
     "better-sqlite3": "^12.10.0",
     "cheerio": "^1.2.0",
+    "cloakbrowser": "^0.3.31",
     "electron-updater": "^6.8.3",
-    "patchright": "^1.60.2",
+    "mmdb-lib": "^3.0.2",
+    "playwright-core": "^1.60.0",
     "react-router-dom": "^7.16.0",
     "twilio": "^6.0.2"
   },
