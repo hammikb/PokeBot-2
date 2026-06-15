@@ -3,7 +3,9 @@ import { extractProductKey } from '../../../src/main/products/productKey.js'
 
 describe('extractProductKey', () => {
   it('pulls the TCIN from a Target URL', () => {
-    expect(extractProductKey('target', 'https://www.target.com/p/guppy/A-94336414')).toBe('94336414')
+    expect(extractProductKey('target', 'https://www.target.com/p/guppy/A-94336414')).toBe(
+      '94336414'
+    )
   })
   it('pulls the TCIN when there is no slug', () => {
     expect(extractProductKey('target', 'https://www.target.com/p/A-94336414')).toBe('94336414')

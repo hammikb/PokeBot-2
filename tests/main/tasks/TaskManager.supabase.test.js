@@ -3,7 +3,9 @@ import { EventEmitter } from 'events'
 
 vi.mock('../../../src/main/automation/flows/walmart.js', () => ({ runWalmartFlow: vi.fn() }))
 vi.mock('../../../src/main/automation/flows/target.js', () => ({ runTargetFlow: vi.fn() }))
-vi.mock('../../../src/main/automation/flows/pokemon-center.js', () => ({ runPokemonCenterFlow: vi.fn() }))
+vi.mock('../../../src/main/automation/flows/pokemon-center.js', () => ({
+  runPokemonCenterFlow: vi.fn()
+}))
 vi.mock('../../../src/main/automation/flows/costco.js', () => ({ runCostcoFlow: vi.fn() }))
 
 import { TaskManager } from '../../../src/main/tasks/TaskManager.js'

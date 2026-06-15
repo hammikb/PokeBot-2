@@ -10,7 +10,12 @@ export function extractProductKey(retailer, productUrl) {
     try {
       return new URL(productUrl).pathname.split('/').filter(Boolean).pop() || null
     } catch {
-      return String(productUrl || '').split('/').pop()?.split('?')[0] || null
+      return (
+        String(productUrl || '')
+          .split('/')
+          .pop()
+          ?.split('?')[0] || null
+      )
     }
   }
   return null

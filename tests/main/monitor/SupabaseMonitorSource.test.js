@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { SupabaseMonitorSource } from '../../../src/main/monitor/SupabaseMonitorSource.js'
 
 // Fake supabase client. Captures upserts, channel creation, and lets the test
@@ -72,7 +72,13 @@ describe('SupabaseMonitorSource', () => {
       productKey: '94336414',
       maxPrice: null
     })
-    fireDrop({ product_id: 'prod-1', retailer: 'target', name: 'Pokemon ETB', price: 49.99, drop_type: 'in_stock' })
+    fireDrop({
+      product_id: 'prod-1',
+      retailer: 'target',
+      name: 'Pokemon ETB',
+      price: 49.99,
+      drop_type: 'in_stock'
+    })
 
     expect(drops).toEqual([
       {
@@ -97,7 +103,13 @@ describe('SupabaseMonitorSource', () => {
       productKey: '94336414',
       maxPrice: 40
     })
-    fireDrop({ product_id: 'prod-1', retailer: 'target', name: 'Pokemon ETB', price: 49.99, drop_type: 'in_stock' })
+    fireDrop({
+      product_id: 'prod-1',
+      retailer: 'target',
+      name: 'Pokemon ETB',
+      price: 49.99,
+      drop_type: 'in_stock'
+    })
 
     expect(drops).toEqual([])
   })
