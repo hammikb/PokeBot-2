@@ -5,3 +5,7 @@ out
 .eslintcache
 *.log*
 .env
+
+# Python
+__pycache__/
+*.pyc
