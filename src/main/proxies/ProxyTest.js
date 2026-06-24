@@ -1,4 +1,8 @@
-import { request } from 'patchright'
+// CloakBrowser is a browser launcher and does not expose an HTTP `request` client,
+// so proxy reachability checks use the request API from `playwright-core` — the same
+// engine CloakBrowser is built on (already a dependency, no patchright needed).
+import { request } from 'playwright-core'
+
 
 const RETAILER_TEST_URLS = {
   target: 'https://www.target.com/',

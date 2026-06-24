@@ -1,4 +1,5 @@
-import { chromium } from 'patchright'
+import { launch } from 'cloakbrowser'
+
 
 const BLOCK_PATTERNS = [
   /captcha/i,
@@ -9,7 +10,8 @@ const BLOCK_PATTERNS = [
 ]
 
 export async function lookupProductFromPage(productUrl) {
-  const browser = await chromium.launch({ headless: true })
+  const browser = await launch({ headless: true, humanize: true, geoip: true })
+
   try {
     const page = await browser.newPage({
       userAgent:

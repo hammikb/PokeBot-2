@@ -14,6 +14,21 @@ vi.mock('../../../../src/main/automation/TraceRecorder.js', () => ({
   }))
 }))
 
+// Mock NativeInputBridge so tests don't need nut-js or a real browser window.
+// The mock delegates back to page.locator() so existing test assertions still work.
+vi.mock('../../../../src/main/automation/NativeInputBridge.js', () => ({
+  NativeInputBridge: {
+    create: vi.fn(async (page) => ({
+      isNative: false,
+      click: vi.fn(async (selector) => page.locator(selector).first().click()),
+      fill: vi.fn(async (selector, value) => page.locator(selector).first().fill(value)),
+      type: vi.fn(async (selector, text) => page.locator(selector).first().fill(text)),
+      press: vi.fn(async (key) => page.keyboard?.press(key))
+    }))
+  }
+}))
+
+
 function makePage({ counts = {}, throws = {}, orderId = 'order-123' } = {}) {
   const page = {
     fills: [],

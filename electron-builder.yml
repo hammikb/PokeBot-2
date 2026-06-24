@@ -16,20 +16,15 @@ asarUnpack:
   - resources/**
   - node_modules/better-sqlite3/**
   - node_modules/better-sqlite3/build/Release/*.node
-  - node_modules/playwright/**
-# NOTE: Playwright browser bundling is skipped here because node_modules/playwright/.local-chromium
-# does not exist until browsers are downloaded. Before building for distribution, run:
-#   npx playwright install chromium
-# Then re-add the extraResources section below:
-#
-# extraResources:
-#   - from: node_modules/playwright/.local-chromium
-#     to: chromium
-#     filter: "**/*"
-#
-# WARNING: Bundling Chromium adds ~200MB to the installer. Consider relying on
-# system Chromium or prompting end users to run `npx playwright install chromium`
-# on first launch as an alternative.
+  # CloakBrowser ships native code and downloads its custom stealth Chromium at runtime,
+  # so it must stay outside the asar archive to be able to spawn the binary and write its cache.
+  - node_modules/cloakbrowser/**
+  - node_modules/playwright-core/**
+# NOTE: The CloakBrowser stealth Chromium is NOT bundled in the installer. It is downloaded
+# on first launch into the user's cache directory (the custom binary cannot be redistributed).
+# This keeps the installer small (~no +200MB Chromium) but requires network access and a
+# writable cache dir on first run. See CLOAKBROWSER_MIGRATION.md for details.
+
 win:
   executableName: pokebot2
   target:

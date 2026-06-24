@@ -1,11 +1,14 @@
 import { scryptSync, createCipheriv, createDecipheriv, randomBytes } from 'crypto'
 
-// Generate a unique salt per encryption operation for better security
-// Note: For account passwords, we still use a user-specific salt stored in the database
-export function deriveKey(password, salt = null) {
-  // If no salt provided, generate a random one (32 bytes for scrypt)
-  const actualSalt = salt || randomBytes(32)
-  return { key: scryptSync(password, actualSalt, 32), salt: actualSalt }
+const STATIC_SALT = 'pokebot2-salt-v1'
+
+/**
+ * Derive a 32-byte AES key from a password.
+ * Uses a static salt so the same password always produces the same key,
+ * which is required for decrypting previously-stored data.
+ */
+export function deriveKey(password, salt = STATIC_SALT) {
+  return scryptSync(password, salt, 32)
 }
 
 export function encrypt(plaintext, key) {
@@ -26,8 +29,9 @@ export function decrypt(ciphertext, key) {
   return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8')
 }
 
-// Legacy function for backward compatibility with existing encrypted data
+/**
+ * Alias kept for backward compatibility — identical to deriveKey() with the default salt.
+ */
 export function deriveKeyLegacy(password) {
-  const SALT_STATIC = 'pokebot2-salt-v1'
-  return scryptSync(password, SALT_STATIC, 32)
+  return deriveKey(password)
 }

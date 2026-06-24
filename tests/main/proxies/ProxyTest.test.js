@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { request } from 'playwright'
+import { request } from 'playwright-core'
 import { proxyToPlaywright, testProxy } from '../../../src/main/proxies/ProxyTest.js'
 
-vi.mock('playwright', () => ({
+vi.mock('playwright-core', () => ({
   request: {
     newContext: vi.fn()
   }
 }))
+
 
 describe('ProxyTest', () => {
   beforeEach(() => {

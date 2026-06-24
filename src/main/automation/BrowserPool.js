@@ -1,4 +1,4 @@
-import { chromium } from 'patchright'
+import { launchPersistentContext } from 'cloakbrowser'
 import { mkdirSync } from 'fs'
 import { createModuleLogger } from '../utils/logger.js'
 
@@ -60,11 +60,17 @@ export class BrowserPool {
       throw err
     }
 
+    // CloakBrowser applies stealth at the Chromium binary level (58 source-level
+    // C++ patches covering webdriver, canvas, WebGL, audio, fonts, WebRTC, CDP, etc.),
+    // so the manual JS init-script spoofing previously required by patchright is no
+    // longer needed and would actually risk creating detectable inconsistencies.
     const contextOptions = {
+      userDataDir: profilePath,
       headless: false,
+      humanize: true,
+      geoip: true,
       args: [
         '--no-sandbox',
-        '--disable-blink-features=AutomationControlled',
         '--disable-dev-shm-usage',
         '--disable-setuid-sandbox',
         '--no-first-run',
@@ -85,130 +91,19 @@ export class BrowserPool {
         '--disable-prompt-on-repost',
         '--disable-sync',
         '--enable-features=NetworkService,NetworkServiceInProcess'
-      ],
-      ignoreDefaultArgs: ['--enable-automation']
+      ]
     }
 
-    if (proxy) {
-      const parts = proxy.split(':')
-      if (parts.length >= 2) {
-        const [host, port, username, password] = parts
-        contextOptions.proxy = {
-          server: `http://${host}:${port}`,
-          ...(username && password ? { username, password } : {})
-        }
-      }
-    }
+    const proxyUrl = buildProxyUrl(proxy)
+    if (proxyUrl) contextOptions.proxy = proxyUrl
 
     try {
-      log.info('Launching browser context with enhanced stealth', { accountId })
-      const context = await chromium.launchPersistentContext(profilePath, contextOptions)
-      
-      // Inject comprehensive anti-detection scripts on every page
-      await context.addInitScript(() => {
-        // 1. Remove webdriver property (most important!)
-        Object.defineProperty(navigator, 'webdriver', {
-          get: () => undefined
-        })
-        
-        // 2. Fix chrome object with more realistic properties
-        window.chrome = {
-          runtime: {},
-          loadTimes: function() {},
-          csi: function() {},
-          app: {}
-        }
-        
-        // 3. Fix permissions API
-        const originalQuery = window.navigator.permissions.query
-        window.navigator.permissions.query = (parameters) => (
-          parameters.name === 'notifications' ?
-            Promise.resolve({ state: Notification.permission }) :
-            originalQuery(parameters)
-        )
-        
-        // 4. Spoof plugins with realistic data
-        Object.defineProperty(navigator, 'plugins', {
-          get: () => {
-            return [
-              {
-                0: { type: "application/x-google-chrome-pdf", suffixes: "pdf", description: "Portable Document Format" },
-                description: "Portable Document Format",
-                filename: "internal-pdf-viewer",
-                length: 1,
-                name: "Chrome PDF Plugin"
-              },
-              {
-                0: { type: "application/pdf", suffixes: "pdf", description: "Portable Document Format" },
-                description: "Portable Document Format", 
-                filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai",
-                length: 1,
-                name: "Chrome PDF Viewer"
-              },
-              {
-                0: { type: "application/x-nacl", suffixes: "", description: "Native Client Executable" },
-                1: { type: "application/x-pnacl", suffixes: "", description: "Portable Native Client Executable" },
-                description: "Native Client",
-                filename: "internal-nacl-plugin",
-                length: 2,
-                name: "Native Client"
-              }
-            ]
-          }
-        })
-        
-        // 5. Fix languages
-        Object.defineProperty(navigator, 'languages', {
-          get: () => ['en-US', 'en']
-        })
-        
-        // 6. Override toString to hide modifications
-        const originalToString = Function.prototype.toString
-        Function.prototype.toString = function() {
-          if (this === navigator.permissions.query) {
-            return 'function query() { [native code] }'
-          }
-          return originalToString.call(this)
-        }
-        
-        // 7. Add missing navigator properties
-        if (!navigator.connection) {
-          Object.defineProperty(navigator, 'connection', {
-            get: () => ({
-              effectiveType: '4g',
-              rtt: 50,
-              downlink: 10,
-              saveData: false
-            })
-          })
-        }
-        
-        // 8. Fix hardwareConcurrency
-        Object.defineProperty(navigator, 'hardwareConcurrency', {
-          get: () => 8
-        })
-        
-        // 9. Fix deviceMemory
-        Object.defineProperty(navigator, 'deviceMemory', {
-          get: () => 8
-        })
-        
-        // 10. Fix platform
-        Object.defineProperty(navigator, 'platform', {
-          get: () => 'Win32'
-        })
-        
-        // 11. Add missing window properties
-        window.navigator.chrome = window.chrome
-        
-        // 12. Fix Notification permission
-        const originalNotification = window.Notification
-        Object.defineProperty(window, 'Notification', {
-          get: () => originalNotification,
-          set: () => {}
-        })
+      log.info('Launching CloakBrowser context with binary-level stealth', {
+        accountId,
+        proxy: Boolean(proxyUrl)
       })
-      
+      const context = await launchPersistentContext(contextOptions)
+
       this._active.set(accountId, context)
       this._updateActivity(accountId)
       context.on?.('close', () => {
@@ -223,6 +118,63 @@ export class BrowserPool {
       log.error('Failed to launch browser context', { accountId, error: err.message })
       throw err
     }
+  }
+
+  /**
+   * Launch a lightweight ephemeral context for monitoring (no persistent profile).
+   * Uses a temp directory so it doesn't pollute account profiles.
+   * Returns the context directly (not stored in the pool — caller must close it).
+   */
+  async launchContext({ accountId = 'monitor', proxy = null } = {}) {
+    const { tmpdir } = await import('os')
+    const { join } = await import('path')
+    // Use a STABLE path (no timestamp) so cookies persist across context
+    // recreations. This is critical for Akamai — accumulated cookies mean
+    // fewer challenges on subsequent visits.
+    const profilePath = join(tmpdir(), `pokebot-monitor-${accountId}`)
+
+    try {
+      mkdirSync(profilePath, { recursive: true })
+    } catch {
+      // ignore
+    }
+
+    const contextOptions = {
+      userDataDir: profilePath,
+      headless: false,
+      humanize: true,
+      geoip: true,
+      args: [
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-setuid-sandbox',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--password-store=basic',
+        '--disable-background-networking',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-breakpad',
+        '--disable-component-extensions-with-background-pages',
+        '--disable-features=TranslateUI',
+        '--disable-ipc-flooding-protection',
+        '--disable-renderer-backgrounding',
+        '--force-color-profile=srgb',
+        '--metrics-recording-only',
+        '--mute-audio',
+        '--disable-hang-monitor',
+        '--disable-prompt-on-repost',
+        '--disable-sync',
+        '--enable-features=NetworkService,NetworkServiceInProcess'
+      ]
+    }
+
+    const proxyUrl = buildProxyUrl(proxy)
+    if (proxyUrl) contextOptions.proxy = proxyUrl
+
+    log.info('Launching ephemeral monitor context', { accountId, proxy: Boolean(proxyUrl) })
+    const context = await launchPersistentContext(contextOptions)
+    return context
   }
 
   async close(accountId) {
@@ -260,4 +212,26 @@ function isContextOpen(context) {
   } catch {
     return false
   }
+}
+
+/**
+ * Convert a `host:port[:username:password]` proxy string into the URL form
+ * that CloakBrowser expects (e.g. `http://user:pass@host:port`).
+ * Returns null when no usable proxy is provided.
+ */
+export function buildProxyUrl(proxy) {
+  if (!proxy) return null
+  const parts = String(proxy).trim().split(':')
+  if (parts.length < 2) return null
+
+  const [host, port, username, ...passwordParts] = parts
+  if (!host || !port) return null
+
+  if (username) {
+    const password = passwordParts.join(':')
+    const auth = `${encodeURIComponent(username)}:${encodeURIComponent(password)}@`
+    return `http://${auth}${host}:${port}`
+  }
+
+  return `http://${host}:${port}`
 }

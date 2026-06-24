@@ -1,50 +1,80 @@
 import { EventEmitter } from 'events'
 
+// How long to wait between launching each browser context at startup.
+// Staggering prevents all 20-30 Chrome windows from opening simultaneously,
+// which would cause a CPU/RAM spike. Guppy uses ~500ms between launches.
+const STARTUP_STAGGER_MS = 500
+
 export class MonitorEngine extends EventEmitter {
   constructor() {
     super()
-    this._timers = new Map()
-    this._firstChecks = new Set() // Track which tasks have had their first check
+    this._timers = new Map() // id → intervalId
+    this._pollers = new Map() // id → poller (for cleanup)
+    this._firstChecks = new Set()
+    this._taskCount = 0 // used to stagger startup launches
   }
 
   addTask({ id, poller, intervalMs }) {
     if (this._timers.has(id)) return
-    
-    // Mark this as needing first check
+
     this._firstChecks.add(id)
-    
+    this._pollers.set(id, poller)
+
+    // Stagger the initial poll so all browser contexts don't open at once.
+    // Each task waits an extra STARTUP_STAGGER_MS * taskIndex before its
+    // first poll. Subsequent polls run on the normal interval.
+    const startupDelay = this._taskCount * STARTUP_STAGGER_MS
+    this._taskCount++
+
     const run = async () => {
       try {
         const event = await poller.poll()
         const isFirstCheck = this._firstChecks.has(id)
-        
+
         if (event) {
-          // Always emit on first check (even if already in stock)
-          // After first check, only emit on actual restocks
           if (isFirstCheck) {
             this.emit('drop', { ...event, isFirstCheck: true })
-            this._firstChecks.delete(id) // Mark first check as done
+            this._firstChecks.delete(id)
           } else {
             this.emit('drop', event)
           }
         } else if (isFirstCheck) {
-          // First check but not in stock - mark as done anyway
           this._firstChecks.delete(id)
         }
       } catch {
         // Poll failures should not stop future monitor ticks.
       }
     }
-    run()
-    this._timers.set(id, setInterval(run, intervalMs))
+
+    // Delay the first run, then start the regular interval after it completes.
+    setTimeout(() => {
+      run()
+      this._timers.set(id, setInterval(run, intervalMs))
+    }, startupDelay)
+
+    // Store a placeholder so removeTask works even before the timeout fires.
+    if (!this._timers.has(id)) {
+      this._timers.set(id, null)
+    }
   }
+
 
   removeTask(id) {
     const timer = this._timers.get(id)
-    if (timer) {
+    if (timer != null) {
       clearInterval(timer)
-      this._timers.delete(id)
     }
+    this._timers.delete(id)
+
+    this._firstChecks.delete(id)
+
+    // Call destroy() on the poller if it has one (e.g. TargetPoller closes
+    // its persistent browser context).
+    const poller = this._pollers.get(id)
+    if (poller?.destroy) {
+      poller.destroy().catch(() => {})
+    }
+    this._pollers.delete(id)
   }
 
   stopAll() {

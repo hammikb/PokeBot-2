@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
 import { runTargetAutoLogin } from '../../../../src/main/automation/flows/target-auto-login.js'
 
 vi.mock('../../../../src/main/automation/captcha.js', () => ({
@@ -14,7 +15,7 @@ import { checkTargetSession } from '../../../../src/main/automation/flows/check-
 
 beforeEach(() => vi.resetAllMocks())
 
-function makePage({ visibleSelectors = new Set(), fillable = true } = {}) {
+function makePage({ visibleSelectors = new Set() } = {}) {
   const page = {
     clicks: [],
     checks: [],
@@ -28,6 +29,11 @@ function makePage({ visibleSelectors = new Set(), fillable = true } = {}) {
       this.navigations.push(url)
       this.lastUrl = url
     },
+    // Stubs so the post-login settle helper resolves instantly in tests.
+    async waitForURL() {},
+    async waitForLoadState() {},
+    async waitForTimeout() {},
+
     async route(pattern, handler) {
       this.routes.push({ pattern, handler })
     },
@@ -74,13 +80,26 @@ function makeLocator(page, selector, visibleSelectors) {
     },
     async check() {
       page.checks.push(selector)
+      // Selecting the "Login with password" radio reveals the password field,
+      // mirroring Target's real sign-in behavior.
+      if (selector.includes('password-checkbox') || selector.includes('auth-factor')) {
+        visibleSelectors.add('input[id="password"]')
+      }
     },
+
     async isChecked() {
       return false
     },
     async fill(value) {
       page.fills.push({ selector, value })
     },
+    // fastFill() calls locator.evaluate(fn, value) to set the value directly; record the
+    // resulting value the same way fill() does so the flow's assertions still see it.
+    async evaluate(_fn, value) {
+      if (typeof value === 'string') page.fills.push({ selector, value })
+      return true
+    },
+
     async waitFor({ state } = {}) {
       if (state === 'visible' && !visible) throw new Error(`Not visible: ${selector}`)
       page.waits.push(selector)
@@ -127,14 +146,13 @@ describe('runTargetAutoLogin', () => {
     expect(page.fills).toHaveLength(0)
   })
 
-  it('fills email and password when sign-in form is visible', async () => {
+  it('selects the Login with password radio, then fills email and password', async () => {
     const page = makePage({
       visibleSelectors: new Set([
         'username',
         'Continue',
         'keepMeSignedIn',
-        'role=button name=Enter your password',
-        'input[id="password"]',
+        'password-checkbox',
         'Sign in'
       ])
     })
@@ -144,9 +162,9 @@ describe('runTargetAutoLogin', () => {
 
     expect(result).toMatchObject({ success: true, loggedIn: true })
     expect(page.checks.some((selector) => selector.includes('keepMeSignedIn'))).toBe(true)
-    expect(page.clicks.some((selector) => selector.includes('role=button name=Enter your password'))).toBe(
-      true
-    )
+    // The real Target "Login with password" control is the radio input password-checkbox;
+    // it must be selected (checked) before the password field is revealed.
+    expect(page.checks.some((selector) => selector.includes('password-checkbox'))).toBe(true)
     expect(page.fills.some((f) => f.value === 'kai@example.com')).toBe(true)
     expect(page.fills.some((f) => f.value === 'SecurePass1!')).toBe(true)
     expect(page.navigations).toContain('https://www.target.com/account?prehydrateClick=true')

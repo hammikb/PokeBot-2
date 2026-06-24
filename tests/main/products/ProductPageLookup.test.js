@@ -1,12 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { chromium } from 'playwright'
+import { launch } from 'cloakbrowser'
 import { lookupProductFromPage } from '../../../src/main/products/ProductPageLookup.js'
 
-vi.mock('playwright', () => ({
-  chromium: {
-    launch: vi.fn()
-  }
+vi.mock('cloakbrowser', () => ({
+  launch: vi.fn()
 }))
+
 
 function mockBrowserSnapshot(snapshot) {
   const page = {
@@ -18,7 +17,8 @@ function mockBrowserSnapshot(snapshot) {
     newPage: vi.fn(async () => page),
     close: vi.fn(async () => {})
   }
-  chromium.launch.mockResolvedValue(browser)
+  launch.mockResolvedValue(browser)
+
   return { page, browser }
 }
 

@@ -1,7 +1,15 @@
-import { describe, expect, it, vi } from 'vitest'
+ import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../../src/main/automation/flows/walmart.js', () => ({
   runWalmartFlow: vi.fn(async () => ({
+    success: true,
+    testMode: true,
+    requiresManualCheckout: true
+  }))
+}))
+
+vi.mock('../../../src/main/automation/flows/target.js', () => ({
+  runTargetFlow: vi.fn(async () => ({
     success: true,
     testMode: true,
     requiresManualCheckout: true
@@ -18,6 +26,7 @@ vi.mock('../../../src/main/automation/flows/costco.js', () => ({
 
 import { TaskManager } from '../../../src/main/tasks/TaskManager.js'
 import { runWalmartFlow } from '../../../src/main/automation/flows/walmart.js'
+import { runTargetFlow } from '../../../src/main/automation/flows/target.js'
 
 function makeTaskManager() {
   const notify = { fire: vi.fn() }
@@ -53,8 +62,8 @@ function makeTaskManager() {
 }
 
 describe('TaskManager test checkout', () => {
-  it('returns a clear error because Target checkout automation has been reset', async () => {
-    const { manager } = makeTaskManager()
+  it('runs the target checkout flow in test mode for selected accounts', async () => {
+    const { manager, browserPool, browserContext } = makeTaskManager()
 
     const result = await manager.testTask({
       id: 'task-1',
@@ -62,13 +71,23 @@ describe('TaskManager test checkout', () => {
       product_name: 'Pokemon ETB',
       product_url: 'https://www.target.com/p/example/A-123',
       account_ids: JSON.stringify(['account-1']),
-      mode: 'test-checkout'
+      buy_limit: 1,
+      mode: 'monitor-and-buy'
     })
 
-    expect(result).toMatchObject({
-      success: false,
-      results: [{ success: false, error: 'Test checkout is not supported for target' }]
+    expect(result.success).toBe(true)
+    expect(browserPool.launch).toHaveBeenCalledWith('account-1', {
+      profilePath: 'profile-1',
+      proxy: ''
     })
+    expect(runTargetFlow).toHaveBeenCalledWith(
+      browserContext,
+      expect.objectContaining({
+        productUrl: 'https://www.target.com/p/example/A-123',
+        mode: 'test-checkout'
+      })
+    )
+    expect(browserPool.close).not.toHaveBeenCalled()
   })
 
   it('returns a clear error when a task has no selected accounts', async () => {

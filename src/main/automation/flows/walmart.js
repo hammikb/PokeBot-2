@@ -1,11 +1,16 @@
 import { waitForCaptchaIfNeeded } from '../captcha.js'
 import { startTrace } from '../TraceRecorder.js'
+import { NativeInputBridge } from '../NativeInputBridge.js'
 
 export async function runWalmartFlow(
   context,
   { productUrl, cvv, account, notificationEngine, dropEvent, mode, onStep = () => {} }
 ) {
   const page = await context.newPage()
+  // Create native input bridge — uses nut-js OS-level mouse/keyboard instead of
+  // CDP Input.dispatch*Event. Falls back to CDP silently if nut-js unavailable.
+  const input = await NativeInputBridge.create(page)
+
   const trace = await startTrace(context, {
     retailer: 'walmart',
     accountName: account?.name,
@@ -38,21 +43,21 @@ export async function runWalmartFlow(
     // Add to cart with human-like behavior
     onStep('Clicking Add to cart')
     const atcBtn = page.locator('button[data-automation-id="atc"], button:has-text("Add to cart")')
-    
-    // Hover before clicking (more human-like)
-    await atcBtn.first().hover()
-    await page.waitForTimeout(300 + Math.random() * 500) // Random delay 300-800ms
-    
+
+    // Hover before clicking (more human-like, optional for environments that don't support it)
+    await atcBtn.first().hover?.()
+    await page.waitForTimeout?.(300 + Math.random() * 500) // Random delay 300-800ms
+
     await atcBtn.first().click({ timeout: 15000 })
     await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
 
     // Wait for cart to update with random delay (more human-like)
     onStep('Waiting for cart to update')
-    await page.waitForTimeout(2000 + Math.random() * 1000) // Random 2-3s
+    await page.waitForTimeout?.(2000 + Math.random() * 1000) // Random 2-3s
 
     // Scroll a bit (human behavior)
-    await page.evaluate(() => window.scrollBy(0, 100))
-    await page.waitForTimeout(500 + Math.random() * 500)
+    await page.evaluate?.(() => window.scrollBy(0, 100))
+    await page.waitForTimeout?.(500 + Math.random() * 500)
 
     // Go to checkout
     onStep('Opening checkout')
@@ -61,9 +66,9 @@ export async function runWalmartFlow(
       timeout: 30000
     })
     await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
-    
+
     // Wait for checkout page to fully load
-    await page.waitForTimeout(1500 + Math.random() * 1000) // Random 1.5-2.5s
+    await page.waitForTimeout?.(1500 + Math.random() * 1000) // Random 1.5-2.5s
 
     // Enter CVV
     onStep('Checking CVV field')
@@ -72,7 +77,10 @@ export async function runWalmartFlow(
     )
     if ((await cvvField.count()) > 0) {
       onStep('Filling CVV')
-      await cvvField.first().fill(cvv)
+      // Use native OS keyboard input — avoids CDP Input.dispatchKeyEvent detection
+      const cvvSelector =
+        'input[name="cvv"], input[placeholder*="CVV"], input[aria-label*="CVV"], input[aria-label*="cvv"]'
+      await input.fill(cvvSelector, cvv)
     }
 
     // Place order
@@ -97,7 +105,11 @@ export async function runWalmartFlow(
     }
 
     onStep('Clicking Place order')
-    await placeOrderBtn.first().click({ timeout: 15000 })
+    // Use native OS mouse click — avoids CDP Input.dispatchMouseEvent detection
+    const placeOrderSelector =
+      'button:has-text("Place order"), button[data-automation-id="place-order"], button:has-text("Place Order")'
+    await input.click(placeOrderSelector)
+
 
     // Wait for confirmation
     onStep('Waiting for order confirmation')

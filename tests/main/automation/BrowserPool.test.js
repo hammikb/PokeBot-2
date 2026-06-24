@@ -5,11 +5,10 @@ const mocks = vi.hoisted(() => ({
   launchPersistentContext: vi.fn()
 }))
 
-vi.mock('playwright', () => ({
-  chromium: {
-    launchPersistentContext: mocks.launchPersistentContext
-  }
+vi.mock('cloakbrowser', () => ({
+  launchPersistentContext: mocks.launchPersistentContext
 }))
+
 
 function makeContext({ open = true } = {}) {
   const handlers = {}
