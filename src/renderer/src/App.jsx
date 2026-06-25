@@ -19,6 +19,7 @@ export default function App() {
     loadSettings,
     pushFeedEvent,
     setTaskStatus,
+    pushQueueProgress,
     setAccountRegistrationStatus
   } = useAppStore()
 
@@ -31,6 +32,7 @@ export default function App() {
     if (ipc) {
       ipc.on(IPC.FEED_EVENT, (_event, data) => pushFeedEvent(data))
       ipc.on(IPC.TASK_STATUS, (_event, { taskId, status }) => setTaskStatus(taskId, status))
+      ipc.on(IPC.QUEUE_PROGRESS, (_event, data) => pushQueueProgress(data))
       ipc.on(IPC.ACCOUNT_STATUS, (_event, data) => {
         loadAccounts()
         if (data?.email)
@@ -40,6 +42,7 @@ export default function App() {
     return () => {
       ipc?.removeAllListeners(IPC.FEED_EVENT)
       ipc?.removeAllListeners(IPC.TASK_STATUS)
+      ipc?.removeAllListeners(IPC.QUEUE_PROGRESS)
       ipc?.removeAllListeners(IPC.ACCOUNT_STATUS)
     }
   }, [
@@ -49,6 +52,7 @@ export default function App() {
     loadSettings,
     pushFeedEvent,
     setTaskStatus,
+    pushQueueProgress,
     setAccountRegistrationStatus
   ])
 

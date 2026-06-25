@@ -2,7 +2,7 @@ import { ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { IPC, RETAILER_BUY_LIMITS } from '../shared/constants.js'
+import { IPC, RETAILER_BUY_LIMITS, DROP_TYPES } from '../shared/constants.js'
 import {
   addCatalogItemFromUrl,
   deleteCatalogItem,
@@ -47,6 +47,7 @@ export function registerIpcHandlers({
   mainWindow,
   browserPool,
   notificationEngine,
+  queueJoiner,
   encryptionKey
 }) {
   // Settings
@@ -441,6 +442,35 @@ export function registerIpcHandlers({
     const items = await pokemonFinder.scanAll()
     return items
   })
+
+  // Walmart queue auto-join. One real session per item — takes a legitimate spot,
+  // tracks position, pings on "your turn". Human finishes checkout.
+  ipcMain.handle(IPC.QUEUE_JOIN, (_, { id, productUrl, label }) => {
+    if (!id || !productUrl) throw new Error('id and productUrl are required to join a queue')
+    // Resolve the task's first assigned account so the queue rides its logged-in
+    // Walmart session. No account → joiner runs logged-out and says so.
+    const task = getDb().prepare('SELECT account_ids FROM tasks WHERE id = ?').get(id)
+    let account = null
+    try {
+      const accountIds = JSON.parse(task?.account_ids || '[]')
+      if (accountIds.length) account = accountManager.getDecrypted(accountIds[0]) || null
+    } catch {
+      /* no/invalid account_ids — run logged-out */
+    }
+    queueJoiner.start(id, { productUrl, label, account })
+    return true
+  })
+  ipcMain.handle(IPC.QUEUE_STOP, (_, id) => queueJoiner.stop(id))
+
+  queueJoiner.on('progress', (p) => mainWindow?.webContents?.send(IPC.QUEUE_PROGRESS, p))
+  queueJoiner.on('turn', ({ label, status }) =>
+    notificationEngine?.fire({
+      retailer: 'walmart',
+      productName: `🎟️ YOUR TURN: ${status?.itemName || label}`,
+      dropType: DROP_TYPES.QUEUE_OPEN,
+      price: status?.price
+    })
+  )
 
   // Push events to renderer
   taskManager.on('drop', (event) => mainWindow?.webContents?.send(IPC.FEED_EVENT, event))

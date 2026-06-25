@@ -5,6 +5,7 @@ import { initDb, getDb } from './db.js'
 import { deriveKeyLegacy } from './crypto.js'
 import { AccountManager } from './accounts/AccountManager.js'
 import { BrowserPool } from './automation/BrowserPool.js'
+import { QueueJoiner } from './automation/QueueJoiner.js'
 import { NotificationEngine } from './notify/NotificationEngine.js'
 import { TaskManager } from './tasks/TaskManager.js'
 import { createPokemonFinder } from './monitor/PokemonFinder.js'
@@ -21,6 +22,7 @@ import { IPC } from '../shared/constants.js'
 let mainWindow
 let taskManager
 let pokemonFinder
+let queueJoiner
 let encryptionKey = null
 const TEMP_DEV_VAULT_PASSWORD = 'pokebot-dev-vault'
 
@@ -45,6 +47,7 @@ async function createMainWindow(encryptionKey) {
   const browserPool = new BrowserPool({ maxConcurrent: settings.maxConcurrent || 3 })
   const notificationEngine = new NotificationEngine(getSettings)
   const profileWarmup = new ProfileWarmup(browserPool)
+  queueJoiner = new QueueJoiner({ browserPool })
   // const configManager = new ConfigManager()
   const configManager = null // Temporarily disabled
   taskManager = new TaskManager({
@@ -128,7 +131,8 @@ async function createMainWindow(encryptionKey) {
     encryptionKey,
     mainWindow,
     browserPool,
-    notificationEngine
+    notificationEngine,
+    queueJoiner
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -167,5 +171,6 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   taskManager?.stopAll()
+  queueJoiner?.stopAll()
   if (process.platform !== 'darwin') app.quit()
 })

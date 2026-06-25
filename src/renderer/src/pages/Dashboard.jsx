@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useAppStore } from '../store/appStore'
+import QueuePanel from '../components/QueuePanel'
 
 const TYPE_COLOR = {
   in_stock: 'text-green-400',
@@ -18,7 +19,8 @@ const STATUS_COLOR = {
 }
 
 export default function Dashboard() {
-  const { feedEvents, tasks, taskStatuses, accounts, startTask, stopTask } = useAppStore()
+  const { feedEvents, tasks, taskStatuses, accounts, startTask, stopTask, queueJobs, joinQueue } =
+    useAppStore()
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -88,6 +90,20 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <span className="text-gray-500 shrink-0">{accountCount} accs</span>
+                  {t.retailer === 'walmart' &&
+                    (queueJobs[t.id] ? (
+                      <span className="text-yellow-400 shrink-0 text-xs uppercase tracking-wider">
+                        in queue
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => joinQueue(t.id, t.product_url, t.product_name || t.product_url)}
+                        className="text-yellow-500 hover:text-yellow-300 shrink-0 text-xs uppercase tracking-wider"
+                        title="Auto-join Walmart waiting room"
+                      >
+                        🎟️ queue
+                      </button>
+                    ))}
                   {status === 'idle' || status === 'error' ? (
                     <button
                       onClick={() => startTask(t.id)}
@@ -109,6 +125,9 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Walmart Queues */}
+      <QueuePanel />
 
       {/* Account Status */}
       <div className="bg-[#111] border border-gray-800 rounded p-4">

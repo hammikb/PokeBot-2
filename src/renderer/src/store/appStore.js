@@ -24,6 +24,7 @@ export const useAppStore = create((set, get) => ({
   settings: {},
   feedEvents: [],
   taskStatuses: {},
+  queueJobs: {},
   taskReadiness: {},
   accountRegistrationStatuses: {},
   proxyTestResults: {},
@@ -262,6 +263,19 @@ export const useAppStore = create((set, get) => ({
   pushFeedEvent: (event) => set((s) => ({ feedEvents: [event, ...s.feedEvents].slice(0, 200) })),
   setTaskStatus: (taskId, status) =>
     set((s) => ({ taskStatuses: { ...s.taskStatuses, [taskId]: status } })),
+
+  // Walmart queue auto-join
+  joinQueue: (id, productUrl, label) => invoke(IPC.QUEUE_JOIN, { id, productUrl, label }),
+  stopQueue: (id) => invoke(IPC.QUEUE_STOP, id),
+  pushQueueProgress: (p) =>
+    set((s) => {
+      if (p.phase === 'stopped') {
+        const next = { ...s.queueJobs }
+        delete next[p.id]
+        return { queueJobs: next }
+      }
+      return { queueJobs: { ...s.queueJobs, [p.id]: { ...s.queueJobs[p.id], ...p } } }
+    }),
 
   // Payment Methods
   loadPaymentMethods: async () => {
