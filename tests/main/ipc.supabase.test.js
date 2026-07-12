@@ -1,22 +1,26 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
-const { handlers, pushCatalogItemToSupabase, signIn, SupabaseClient } = vi.hoisted(() => {
+const { handlers, pushCatalogItemToSupabase } = vi.hoisted(() => {
   const handlers = new Map()
   const pushCatalogItemToSupabase = vi.fn(async () => ({ productId: 'prod-1' }))
-  const signIn = vi.fn(async () => ({}))
-  const SupabaseClient = vi.fn(function () {
-    return { signIn, client: { id: 'client' } }
-  })
-  return { handlers, pushCatalogItemToSupabase, signIn, SupabaseClient }
+  return { handlers, pushCatalogItemToSupabase }
 })
 
 vi.mock('electron', () => ({ ipcMain: { handle: (channel, fn) => handlers.set(channel, fn) } }))
 vi.mock('../../src/main/supabase/catalogPublish.js', () => ({ pushCatalogItemToSupabase }))
-vi.mock('../../src/main/supabase/SupabaseClient.js', () => ({ SupabaseClient }))
 
 import { registerIpcHandlers } from '../../src/main/ipc.js'
 import { IPC } from '../../src/shared/constants.js'
-import { encrypt, decrypt } from '../../src/main/crypto.js'
+
+function makeAuthSessionManager() {
+  return {
+    getStatus: vi.fn(() => ({ authenticated: false, user: null })),
+    getClient: vi.fn(() => ({ fakeClient: true })),
+    signIn: vi.fn(async () => {}),
+    signUp: vi.fn(async () => {}),
+    signOut: vi.fn(async () => {})
+  }
+}
 
 function setup() {
   handlers.clear()
@@ -37,7 +41,7 @@ function setup() {
     }))
   }
   const taskManager = { on: vi.fn(), setMonitorMode: vi.fn(async () => {}) }
-  const key = Buffer.alloc(32, 7)
+  const authSessionManager = makeAuthSessionManager()
   registerIpcHandlers({
     getDb: () => db,
     accountManager: {},
@@ -48,24 +52,19 @@ function setup() {
     pokemonFinder: { on: vi.fn() },
     profileWarmup: {},
     configManager: null,
-    getSettings: () => ({
-      supabaseUrl: 'https://x.supabase.co',
-      supabaseKey: 'k',
-      supabaseEmail: 'bot@example.com',
-      supabasePasswordEnc: encrypt('1234', key)
-    }),
+    getSettings: () => ({}),
     mainWindow: { webContents: { send: vi.fn() } },
     browserPool: {},
     notificationEngine: { fire: vi.fn() },
-    encryptionKey: key
+    queueJoiner: { on: vi.fn() },
+    authSessionManager
   })
-  return { handlers, settingsStore, taskManager, key }
+  return { handlers, settingsStore, taskManager, authSessionManager }
 }
 
-describe('supabase IPC handlers', () => {
+describe('supabase catalog IPC handlers', () => {
   beforeEach(() => {
     pushCatalogItemToSupabase.mockClear()
-    signIn.mockClear()
   })
 
   it('MONITOR_SET_MODE saves the setting then restarts tasks', async () => {
@@ -75,21 +74,58 @@ describe('supabase IPC handlers', () => {
     expect(taskManager.setMonitorMode).toHaveBeenCalled()
   })
 
-  it('SUPABASE_SET_PASSWORD stores the password encrypted (never plaintext)', async () => {
-    const { handlers, settingsStore, key } = setup()
-    await handlers.get(IPC.SUPABASE_SET_PASSWORD)({}, 'hunter2')
-    const stored = JSON.parse(settingsStore.supabasePasswordEnc)
-    expect(stored).not.toContain('hunter2')
-    expect(decrypt(stored, key)).toBe('hunter2')
+  it('CATALOG_PUSH_SUPABASE pushes the catalog item using the signed-in auth session client', async () => {
+    const { handlers, authSessionManager } = setup()
+    const result = await handlers.get(IPC.CATALOG_PUSH_SUPABASE)({}, 'cat-1')
+    expect(authSessionManager.getClient).toHaveBeenCalled()
+    expect(pushCatalogItemToSupabase).toHaveBeenCalledWith({
+      client: { fakeClient: true },
+      item: expect.objectContaining({ retailer_item_id: '94336414' })
+    })
+    expect(result).toEqual({ productId: 'prod-1' })
   })
 
-  it('CATALOG_PUSH_SUPABASE signs in and upserts the catalog item', async () => {
-    const { handlers } = setup()
-    const result = await handlers.get(IPC.CATALOG_PUSH_SUPABASE)({}, 'cat-1')
-    expect(signIn).toHaveBeenCalled()
-    expect(pushCatalogItemToSupabase).toHaveBeenCalledWith(
-      expect.objectContaining({ item: expect.objectContaining({ retailer_item_id: '94336414' }) })
+  it('CATALOG_PUSH_SUPABASE throws when not signed in', async () => {
+    const { handlers, authSessionManager } = setup()
+    authSessionManager.getClient.mockReturnValue(null)
+    await expect(handlers.get(IPC.CATALOG_PUSH_SUPABASE)({}, 'cat-1')).rejects.toThrow(
+      'Not signed in to Supabase yet'
     )
-    expect(result).toEqual({ productId: 'prod-1' })
+  })
+})
+
+describe('auth IPC handlers', () => {
+  it("AUTH_GET_STATUS returns the manager's current status", async () => {
+    const { handlers, authSessionManager } = setup()
+    authSessionManager.getStatus.mockReturnValue({
+      authenticated: true,
+      user: { id: 'u1', email: 'a@b.com' }
+    })
+    const result = await handlers.get(IPC.AUTH_GET_STATUS)({})
+    expect(result).toEqual({ authenticated: true, user: { id: 'u1', email: 'a@b.com' } })
+  })
+
+  it('AUTH_SIGN_IN signs in with the given credentials and returns the resulting status', async () => {
+    const { handlers, authSessionManager } = setup()
+    authSessionManager.getStatus.mockReturnValue({
+      authenticated: true,
+      user: { id: 'u1', email: 'a@b.com' }
+    })
+    const result = await handlers.get(IPC.AUTH_SIGN_IN)({}, { email: 'a@b.com', password: 'pw' })
+    expect(authSessionManager.signIn).toHaveBeenCalledWith('a@b.com', 'pw')
+    expect(result).toEqual({ authenticated: true, user: { id: 'u1', email: 'a@b.com' } })
+  })
+
+  it('AUTH_SIGN_UP signs up with the given credentials', async () => {
+    const { handlers, authSessionManager } = setup()
+    await handlers.get(IPC.AUTH_SIGN_UP)({}, { email: 'new@b.com', password: 'pw' })
+    expect(authSessionManager.signUp).toHaveBeenCalledWith('new@b.com', 'pw')
+  })
+
+  it('AUTH_SIGN_OUT signs out and returns the resulting (unauthenticated) status', async () => {
+    const { handlers, authSessionManager } = setup()
+    const result = await handlers.get(IPC.AUTH_SIGN_OUT)({})
+    expect(authSessionManager.signOut).toHaveBeenCalled()
+    expect(result).toEqual({ authenticated: false, user: null })
   })
 })

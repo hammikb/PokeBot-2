@@ -15,10 +15,7 @@ import { runTargetAutoLogin } from './automation/flows/target-auto-login.js'
 import { runTargetRegistration } from './automation/flows/register-target.js'
 import { runWalmartRegistration } from './automation/flows/register-walmart.js'
 import { buildTaskReadiness } from './tasks/TaskReadiness.js'
-import { encrypt, decrypt } from './crypto.js'
-import { SupabaseClient } from './supabase/SupabaseClient.js'
 import { pushCatalogItemToSupabase } from './supabase/catalogPublish.js'
-import { SUPABASE_URL, SUPABASE_KEY } from './supabase/config.js'
 
 const SUPPORTED_TASK_RETAILERS = new Set(['target', 'walmart'])
 const TASK_UPDATE_COLUMNS = {
@@ -48,7 +45,7 @@ export function registerIpcHandlers({
   browserPool,
   notificationEngine,
   queueJoiner,
-  encryptionKey
+  authSessionManager
 }) {
   // Settings
   ipcMain.handle(IPC.SETTINGS_GET, () => getSettings())
@@ -70,24 +67,33 @@ export function registerIpcHandlers({
     return next
   })
 
-  // Store the bot's Supabase password encrypted at rest (never plaintext).
-  ipcMain.handle(IPC.SUPABASE_SET_PASSWORD, (_, password) => {
-    const enc = encrypt(String(password ?? ''), encryptionKey)
-    getDb()
-      .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
-      .run('supabasePasswordEnc', JSON.stringify(enc))
-    return true
+  // Per-user Supabase Auth — replaces the old shared "bot account" (email/password
+  // settings) with a real signed-in user. authSessionManager owns the one session for
+  // the app's lifetime and persists it (encrypted) across restarts.
+  ipcMain.handle(IPC.AUTH_GET_STATUS, () => authSessionManager.getStatus())
+
+  ipcMain.handle(IPC.AUTH_SIGN_IN, async (_, { email, password }) => {
+    await authSessionManager.signIn(email, password)
+    return authSessionManager.getStatus()
+  })
+
+  ipcMain.handle(IPC.AUTH_SIGN_UP, async (_, { email, password }) => {
+    await authSessionManager.signUp(email, password)
+    return authSessionManager.getStatus()
+  })
+
+  ipcMain.handle(IPC.AUTH_SIGN_OUT, async () => {
+    await authSessionManager.signOut()
+    return authSessionManager.getStatus()
   })
 
   // Publish a local catalog item to the Supabase products table.
   ipcMain.handle(IPC.CATALOG_PUSH_SUPABASE, async (_, id) => {
     const item = getDb().prepare('SELECT * FROM product_catalog WHERE id = ?').get(id)
     if (!item) throw new Error('Catalog item not found')
-    const s = getSettings()
-    const password = s.supabasePasswordEnc ? decrypt(s.supabasePasswordEnc, encryptionKey) : ''
-    const sc = new SupabaseClient({ url: SUPABASE_URL, key: SUPABASE_KEY })
-    await sc.signIn(s.supabaseEmail, password)
-    return pushCatalogItemToSupabase({ client: sc.client, item })
+    const client = authSessionManager.getClient()
+    if (!client) throw new Error('Not signed in to Supabase yet')
+    return pushCatalogItemToSupabase({ client, item })
   })
 
   // Accounts
