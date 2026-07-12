@@ -30,6 +30,9 @@ export const useAppStore = create((set, get) => ({
   proxyTestResults: {},
   proxyTestRunState: 'idle',
   proxyTestMessage: '',
+  authStatus: 'checking', // 'checking' | 'authenticated' | 'unauthenticated'
+  authUser: null,
+  authError: '',
 
   loadTasks: async () => {
     const tasks = await invoke(IPC.TASKS_GET)
@@ -256,8 +259,46 @@ export const useAppStore = create((set, get) => ({
     await invoke(IPC.MONITOR_SET_MODE, mode)
     await get().loadSettings()
   },
-  setSupabasePassword: async (password) => {
-    await invoke(IPC.SUPABASE_SET_PASSWORD, password)
+  checkAuthStatus: async () => {
+    try {
+      const status = await invoke(IPC.AUTH_GET_STATUS)
+      set({
+        authStatus: status.authenticated ? 'authenticated' : 'unauthenticated',
+        authUser: status.user ?? null
+      })
+    } catch (err) {
+      set({ authStatus: 'unauthenticated', authError: err.message })
+    }
+  },
+  signIn: async (email, password) => {
+    set({ authError: '' })
+    try {
+      const status = await invoke(IPC.AUTH_SIGN_IN, { email, password })
+      set({ authStatus: 'authenticated', authUser: status.user ?? null })
+    } catch (err) {
+      set({ authError: err.message })
+      throw err
+    }
+  },
+  signUp: async (email, password) => {
+    set({ authError: '' })
+    try {
+      const status = await invoke(IPC.AUTH_SIGN_UP, { email, password })
+      set({ authStatus: 'authenticated', authUser: status.user ?? null })
+    } catch (err) {
+      set({ authError: err.message })
+      throw err
+    }
+  },
+  signOut: async () => {
+    await invoke(IPC.AUTH_SIGN_OUT)
+    set({ authStatus: 'unauthenticated', authUser: null })
+  },
+  setAuthState: (state) => {
+    set({
+      authStatus: state.authenticated ? 'authenticated' : 'unauthenticated',
+      authUser: state.user ?? null
+    })
   },
   pushCatalogToSupabase: async (id) => invoke(IPC.CATALOG_PUSH_SUPABASE, id),
   pushFeedEvent: (event) => set((s) => ({ feedEvents: [event, ...s.feedEvents].slice(0, 200) })),
