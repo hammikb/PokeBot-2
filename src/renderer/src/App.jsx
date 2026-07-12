@@ -9,10 +9,14 @@ import Catalog from './pages/Catalog'
 import Settings from './pages/Settings'
 import PaymentMethods from './pages/PaymentMethods'
 import ShippingAddresses from './pages/ShippingAddresses'
+import Login from './pages/Login'
 import { IPC } from '../../shared/constants'
 
 export default function App() {
   const {
+    authStatus,
+    checkAuthStatus,
+    setAuthState,
     loadTasks,
     loadAccounts,
     loadCatalog,
@@ -23,7 +27,21 @@ export default function App() {
     setAccountRegistrationStatus
   } = useAppStore()
 
+  // Auth check + live auth-state updates run regardless of current status.
   useEffect(() => {
+    const ipc = window.electron?.ipcRenderer
+    checkAuthStatus()
+    if (ipc) {
+      ipc.on(IPC.AUTH_STATE_CHANGED, (_event, state) => setAuthState(state))
+    }
+    return () => {
+      ipc?.removeAllListeners(IPC.AUTH_STATE_CHANGED)
+    }
+  }, [checkAuthStatus, setAuthState])
+
+  // App data + live feed only load once actually signed in.
+  useEffect(() => {
+    if (authStatus !== 'authenticated') return
     const ipc = window.electron?.ipcRenderer
     loadTasks()
     loadAccounts()
@@ -46,6 +64,7 @@ export default function App() {
       ipc?.removeAllListeners(IPC.ACCOUNT_STATUS)
     }
   }, [
+    authStatus,
     loadTasks,
     loadAccounts,
     loadCatalog,
@@ -55,6 +74,18 @@ export default function App() {
     pushQueueProgress,
     setAccountRegistrationStatus
   ])
+
+  if (authStatus === 'checking') {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#0f0f0f] text-gray-500 font-mono text-sm uppercase tracking-widest">
+        Loading...
+      </div>
+    )
+  }
+
+  if (authStatus !== 'authenticated') {
+    return <Login />
+  }
 
   return (
     <HashRouter>
