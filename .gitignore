@@ -9,3 +9,6 @@ out
 # Python
 __pycache__/
 *.pyc
+
+# Git worktrees (subagent-driven-development isolation)
+.worktrees/
