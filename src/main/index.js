@@ -16,6 +16,7 @@ import { ShippingManager } from './shipping/ShippingManager.js'
 import { ThumbnailCache } from './thumbnails/ThumbnailCache.js'
 // import { ConfigManager } from './config/configManager.js'
 import { registerIpcHandlers } from './ipc.js'
+import { AuthSessionManager } from './supabase/AuthSessionManager.js'
 import { logger } from './utils/logger.js'
 import { IPC } from '../shared/constants.js'
 
@@ -50,13 +51,27 @@ async function createMainWindow(encryptionKey) {
   queueJoiner = new QueueJoiner({ browserPool })
   // const configManager = new ConfigManager()
   const configManager = null // Temporarily disabled
+
+  // Per-user Supabase Auth session, reused by catalog browsing and task monitoring.
+  // Silently restores a prior sign-in (encrypted refresh token in `settings`) before the
+  // window loads, so the renderer's first AUTH_GET_STATUS call already reflects the real
+  // state — no login-screen flash for an already-signed-in user. `mainWindow` is assigned
+  // further below; the 'change' listener only fires after that point, via closure.
+  const authSessionManager = new AuthSessionManager({ getDb, encryptionKey })
+  await authSessionManager.restoreSession().catch((err) => {
+    logger.warn('Supabase session restore failed at startup', { error: err.message })
+  })
+  authSessionManager.on('change', (state) => {
+    mainWindow?.webContents?.send(IPC.AUTH_STATE_CHANGED, state)
+  })
+
   taskManager = new TaskManager({
     accountManager,
     notificationEngine,
     browserPool,
     getDb,
     getSettings,
-    encryptionKey
+    authSessionManager
   })
   
   // Initialize Pokemon Finder (disabled for now)
@@ -128,7 +143,7 @@ async function createMainWindow(encryptionKey) {
     profileWarmup,
     configManager,
     getSettings,
-    encryptionKey,
+    authSessionManager,
     mainWindow,
     browserPool,
     notificationEngine,
