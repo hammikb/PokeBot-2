@@ -124,4 +124,11 @@ describe('AuthSessionManager', () => {
     expect(db._store.authRefreshTokenEnc).toBeUndefined()
     expect(manager.getStatus()).toEqual({ authenticated: false, user: null })
   })
+
+  it('signIn with remember=false authenticates without persisting a refresh token', async () => {
+    await manager.signIn('a@b.com', 'pw', false)
+
+    expect(db._store.authRefreshTokenEnc).toBeUndefined()
+    expect(manager.getStatus()).toEqual({ authenticated: true, user: { id: 'u1', email: 'a@b.com' } })
+  })
 })

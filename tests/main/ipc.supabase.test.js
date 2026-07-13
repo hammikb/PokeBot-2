@@ -140,14 +140,20 @@ describe('auth IPC handlers', () => {
       user: { id: 'u1', email: 'a@b.com' }
     })
     const result = await handlers.get(IPC.AUTH_SIGN_IN)({}, { email: 'a@b.com', password: 'pw' })
-    expect(authSessionManager.signIn).toHaveBeenCalledWith('a@b.com', 'pw')
+    expect(authSessionManager.signIn).toHaveBeenCalledWith('a@b.com', 'pw', true)
     expect(result).toEqual({ authenticated: true, user: { id: 'u1', email: 'a@b.com' } })
+  })
+
+  it('AUTH_SIGN_IN passes rememberMe: false through when the caller opts out', async () => {
+    const { handlers, authSessionManager } = setup()
+    await handlers.get(IPC.AUTH_SIGN_IN)({}, { email: 'a@b.com', password: 'pw', rememberMe: false })
+    expect(authSessionManager.signIn).toHaveBeenCalledWith('a@b.com', 'pw', false)
   })
 
   it('AUTH_SIGN_UP signs up with the given credentials', async () => {
     const { handlers, authSessionManager } = setup()
     await handlers.get(IPC.AUTH_SIGN_UP)({}, { email: 'new@b.com', password: 'pw' })
-    expect(authSessionManager.signUp).toHaveBeenCalledWith('new@b.com', 'pw')
+    expect(authSessionManager.signUp).toHaveBeenCalledWith('new@b.com', 'pw', true)
   })
 
   it('AUTH_SIGN_OUT signs out and returns the resulting (unauthenticated) status', async () => {

@@ -289,20 +289,20 @@ export const useAppStore = create((set, get) => ({
       set({ authStatus: 'unauthenticated', authError: err.message })
     }
   },
-  signIn: async (email, password) => {
+  signIn: async (email, password, rememberMe = true) => {
     set({ authError: '' })
     try {
-      const status = await invoke(IPC.AUTH_SIGN_IN, { email, password })
+      const status = await invoke(IPC.AUTH_SIGN_IN, { email, password, rememberMe })
       set({ authStatus: 'authenticated', authUser: status.user ?? null })
     } catch (err) {
       set({ authError: err.message })
       throw err
     }
   },
-  signUp: async (email, password) => {
+  signUp: async (email, password, rememberMe = true) => {
     set({ authError: '' })
     try {
-      const status = await invoke(IPC.AUTH_SIGN_UP, { email, password })
+      const status = await invoke(IPC.AUTH_SIGN_UP, { email, password, rememberMe })
       set({ authStatus: 'authenticated', authUser: status.user ?? null })
     } catch (err) {
       set({ authError: err.message })

@@ -72,13 +72,13 @@ export function registerIpcHandlers({
   // the app's lifetime and persists it (encrypted) across restarts.
   ipcMain.handle(IPC.AUTH_GET_STATUS, () => authSessionManager.getStatus())
 
-  ipcMain.handle(IPC.AUTH_SIGN_IN, async (_, { email, password }) => {
-    await authSessionManager.signIn(email, password)
+  ipcMain.handle(IPC.AUTH_SIGN_IN, async (_, { email, password, rememberMe = true }) => {
+    await authSessionManager.signIn(email, password, rememberMe)
     return authSessionManager.getStatus()
   })
 
-  ipcMain.handle(IPC.AUTH_SIGN_UP, async (_, { email, password }) => {
-    await authSessionManager.signUp(email, password)
+  ipcMain.handle(IPC.AUTH_SIGN_UP, async (_, { email, password, rememberMe = true }) => {
+    await authSessionManager.signUp(email, password, rememberMe)
     return authSessionManager.getStatus()
   })
 

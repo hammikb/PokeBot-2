@@ -17,6 +17,10 @@ export class AuthSessionManager extends EventEmitter {
     this._client = client
     this._authenticated = false
     this._user = null
+    // Whether the current session should be persisted across restarts ("stay signed
+    // in"). Defaults true so restoreSession() and the refresh-token rotation below
+    // behave as before for the common case.
+    this._remember = true
 
     // supabase-js auto-refreshes the access token in the background and rotates the
     // refresh token on every refresh. Without this subscription the encrypted token we
@@ -24,7 +28,7 @@ export class AuthSessionManager extends EventEmitter {
     // once the app has been open long enough for one. Optional chaining throughout so
     // test fixtures that pass a bare fake client (no .client.auth) don't throw.
     this._client.client?.auth?.onAuthStateChange?.((event, session) => {
-      if (event === 'TOKEN_REFRESHED' && session?.refresh_token) {
+      if (event === 'TOKEN_REFRESHED' && session?.refresh_token && this._remember) {
         this._saveRefreshToken(session.refresh_token)
       }
     })
@@ -65,16 +69,18 @@ export class AuthSessionManager extends EventEmitter {
     }
   }
 
-  async signIn(email, password) {
+  async signIn(email, password, remember = true) {
     const session = await this._client.signIn(email, password)
-    this._saveRefreshToken(session.refresh_token)
+    this._remember = remember
+    if (remember) this._saveRefreshToken(session.refresh_token)
     this._setState(true, session.user ?? null)
     return session
   }
 
-  async signUp(email, password) {
+  async signUp(email, password, remember = true) {
     const session = await this._client.signUp(email, password)
-    this._saveRefreshToken(session.refresh_token)
+    this._remember = remember
+    if (remember) this._saveRefreshToken(session.refresh_token)
     this._setState(true, session.user ?? null)
     return session
   }
@@ -86,6 +92,7 @@ export class AuthSessionManager extends EventEmitter {
       // Best-effort remote sign-out — clear local session state regardless, so the user
       // isn't stuck "signed in" locally just because the network call failed.
     }
+    this._remember = true
     this._clearRefreshToken()
     this._setState(false, null)
   }
@@ -98,6 +105,7 @@ export class AuthSessionManager extends EventEmitter {
     }
     try {
       const session = await this._client.restoreSession(token)
+      this._remember = true
       this._saveRefreshToken(session.refresh_token)
       this._setState(true, session.user ?? null)
       return true

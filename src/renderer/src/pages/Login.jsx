@@ -6,14 +6,15 @@ export default function Login() {
   const [mode, setMode] = useState('sign-in')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [rememberMe, setRememberMe] = useState(true)
   const [submitting, setSubmitting] = useState(false)
 
   async function handleSubmit(e) {
     e.preventDefault()
     setSubmitting(true)
     try {
-      if (mode === 'sign-in') await signIn(email, password)
-      else await signUp(email, password)
+      if (mode === 'sign-in') await signIn(email, password, rememberMe)
+      else await signUp(email, password, rememberMe)
     } catch {
       // authError is already set in the store by signIn/signUp
     } finally {
@@ -87,6 +88,16 @@ export default function Login() {
             className="w-full bg-[#111] border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:border-red-500 outline-none transition-colors"
           />
         </div>
+
+        <label className="flex items-center gap-2 text-gray-400 text-sm select-none">
+          <input
+            type="checkbox"
+            checked={rememberMe}
+            onChange={(e) => setRememberMe(e.target.checked)}
+            className="accent-red-600"
+          />
+          Stay signed in
+        </label>
 
         {authError && <div className="text-red-500 text-sm">{authError}</div>}
 
