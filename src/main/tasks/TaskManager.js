@@ -16,7 +16,6 @@ import { SamsClubPoller } from '../monitor/retailers/samsclub.js'
 import { RetryManager } from '../utils/retryManager.js'
 import { extractProductKey } from '../products/productKey.js'
 import { SupabaseMonitorSource } from '../monitor/SupabaseMonitorSource.js'
-import { getSupabaseSession } from '../supabase/session.js'
 import { DROP_TYPES } from '../../shared/constants.js'
 
 const POLLERS = {
@@ -43,7 +42,7 @@ export class TaskManager extends EventEmitter {
     browserPool,
     getDb,
     getSettings = () => ({}),
-    encryptionKey = null,
+    authSessionManager = null,
     createSupabaseSource = null,
     queueJoiner = null
   }) {
@@ -54,7 +53,7 @@ export class TaskManager extends EventEmitter {
     this._queueJoiner = queueJoiner
     this._getDb = getDb
     this._getSettings = getSettings
-    this._encryptionKey = encryptionKey
+    this._authSessionManager = authSessionManager
     this._monitor = new MonitorEngine()
     this._monitor.on('drop', (event) => this._onDrop(event))
     this._tasks = new Map()
@@ -80,12 +79,10 @@ export class TaskManager extends EventEmitter {
   }
 
   async _buildSupabaseSource() {
-    const session = await getSupabaseSession({
-      getSettings: this._getSettings,
-      encryptionKey: this._encryptionKey
-    })
-    if (!session) throw new Error('Supabase bot credentials are not configured yet')
-    return new SupabaseMonitorSource({ client: session.client })
+    if (!this._authSessionManager?.getStatus().authenticated) {
+      throw new Error('Not signed in to Supabase yet')
+    }
+    return new SupabaseMonitorSource({ client: this._authSessionManager.getClient() })
   }
 
   async _getSupabaseSource() {

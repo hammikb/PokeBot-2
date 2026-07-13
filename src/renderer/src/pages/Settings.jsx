@@ -14,15 +14,8 @@ const FIELDS = [
   { key: 'maxConcurrent', label: 'Max Concurrent Browsers', type: 'number', placeholder: '3' }
 ]
 
-// URL + publishable key are baked into the app (src/main/supabase/config.js).
-// Users only provide login credentials.
-const SUPABASE_FIELDS = [
-  { key: 'supabaseEmail', label: 'Bot Email', type: 'text', placeholder: 'bot@example.com' }
-]
-
 export default function Settings() {
-  const { settings, saveSetting, setMonitorMode, setSupabasePassword, clearSupabaseCredentials } =
-    useAppStore()
+  const { settings, saveSetting, setMonitorMode, signOut } = useAppStore()
   const mode = settings.monitorMode || 'local'
 
   return (
@@ -64,55 +57,6 @@ export default function Settings() {
         </div>
       </div>
 
-      {mode === 'supabase' &&
-        SUPABASE_FIELDS.map((field) => (
-          <div key={field.key}>
-            <label className="text-gray-500 uppercase tracking-wider text-sm block mb-1.5">
-              {field.label}
-            </label>
-            <input
-              type={field.type}
-              placeholder={field.placeholder}
-              defaultValue={settings[field.key] ?? ''}
-              onBlur={(e) => {
-                if (e.target.value !== (settings[field.key] ?? '').toString()) {
-                  saveSetting(field.key, e.target.value)
-                }
-              }}
-              key={`${field.key}-${settings[field.key]}`}
-              className="w-full bg-[#111] border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:border-red-500 outline-none transition-colors"
-            />
-          </div>
-        ))}
-
-      {mode === 'supabase' && (
-        <div>
-          <label className="text-gray-500 uppercase tracking-wider text-sm block mb-1.5">
-            Bot Password
-          </label>
-          <input
-            type="password"
-            placeholder="••••••••"
-            onBlur={(e) => {
-              if (e.target.value) setSupabasePassword(e.target.value)
-            }}
-            className="w-full bg-[#111] border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:border-red-500 outline-none transition-colors"
-          />
-          <div className="text-gray-600 text-sm mt-1">
-            Stored encrypted. Leave blank to keep current.
-          </div>
-          {(settings.supabaseEmail || settings.supabasePasswordEnc) && (
-            <button
-              type="button"
-              onClick={clearSupabaseCredentials}
-              className="mt-2 text-red-500 hover:text-red-300 uppercase tracking-wider text-sm"
-            >
-              Clear stored bot credentials
-            </button>
-          )}
-        </div>
-      )}
-
       {FIELDS.map((field) => (
         <div key={field.key}>
           <label className="text-gray-500 uppercase tracking-wider text-sm block mb-1.5">
@@ -132,7 +76,18 @@ export default function Settings() {
           />
         </div>
       ))}
+
       <div className="text-gray-600 text-sm pt-2">Settings saved automatically on field blur.</div>
+
+      <div className="pt-4 border-t border-gray-800">
+        <button
+          type="button"
+          onClick={signOut}
+          className="text-red-500 hover:text-red-300 uppercase tracking-wider text-sm"
+        >
+          Sign Out
+        </button>
+      </div>
     </div>
   )
 }

@@ -15,8 +15,7 @@ import { runTargetAutoLogin } from './automation/flows/target-auto-login.js'
 import { runTargetRegistration } from './automation/flows/register-target.js'
 import { runWalmartRegistration } from './automation/flows/register-walmart.js'
 import { buildTaskReadiness } from './tasks/TaskReadiness.js'
-import { encrypt } from './crypto.js'
-import { getPublicClient, resetSupabaseSession } from './supabase/session.js'
+import { getPublicClient } from './supabase/session.js'
 import { findWalmartMatch } from './products/WalmartMatch.js'
 
 const SUPPORTED_TASK_RETAILERS = new Set(['target', 'walmart'])
@@ -46,7 +45,7 @@ export function registerIpcHandlers({
   browserPool,
   notificationEngine,
   queueJoiner,
-  encryptionKey
+  authSessionManager
 }) {
   // Settings
   ipcMain.handle(IPC.SETTINGS_GET, () => getSettings())
@@ -55,7 +54,6 @@ export function registerIpcHandlers({
     getDb()
       .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
       .run(key, JSON.stringify(value))
-    if (key === 'supabaseEmail') resetSupabaseSession()
     return true
   })
 
@@ -69,14 +67,24 @@ export function registerIpcHandlers({
     return next
   })
 
-  // Store the bot's Supabase password encrypted at rest (never plaintext).
-  ipcMain.handle(IPC.SUPABASE_SET_PASSWORD, (_, password) => {
-    const enc = encrypt(String(password ?? ''), encryptionKey)
-    getDb()
-      .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
-      .run('supabasePasswordEnc', JSON.stringify(enc))
-    resetSupabaseSession()
-    return true
+  // Per-user Supabase Auth — replaces the old shared "bot account" (email/password
+  // settings) with a real signed-in user. authSessionManager owns the one session for
+  // the app's lifetime and persists it (encrypted) across restarts.
+  ipcMain.handle(IPC.AUTH_GET_STATUS, () => authSessionManager.getStatus())
+
+  ipcMain.handle(IPC.AUTH_SIGN_IN, async (_, { email, password }) => {
+    await authSessionManager.signIn(email, password)
+    return authSessionManager.getStatus()
+  })
+
+  ipcMain.handle(IPC.AUTH_SIGN_UP, async (_, { email, password }) => {
+    await authSessionManager.signUp(email, password)
+    return authSessionManager.getStatus()
+  })
+
+  ipcMain.handle(IPC.AUTH_SIGN_OUT, async () => {
+    await authSessionManager.signOut()
+    return authSessionManager.getStatus()
   })
 
   // Read-only browse of the known-Target reference catalog (261+ items) —
@@ -136,16 +144,6 @@ export function registerIpcHandlers({
   ipcMain.handle(IPC.CATALOG_LIST_WALMART_MATCHES, () =>
     getDb().prepare('SELECT * FROM catalog_walmart_matches').all()
   )
-
-  // Actually clear stored bot credentials — the password field alone can't
-  // (it only ever saves a non-empty value, never removes one).
-  ipcMain.handle(IPC.SUPABASE_CLEAR_CREDENTIALS, () => {
-    getDb()
-      .prepare('DELETE FROM settings WHERE key IN (?, ?)')
-      .run('supabaseEmail', 'supabasePasswordEnc')
-    resetSupabaseSession()
-    return true
-  })
 
   // Accounts
   ipcMain.handle(IPC.ACCOUNTS_GET, () => accountManager.getAll())

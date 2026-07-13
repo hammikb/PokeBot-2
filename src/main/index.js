@@ -16,7 +16,7 @@ import { ShippingManager } from './shipping/ShippingManager.js'
 import { ThumbnailCache } from './thumbnails/ThumbnailCache.js'
 // import { ConfigManager } from './config/configManager.js'
 import { registerIpcHandlers } from './ipc.js'
-import { getSupabaseSession } from './supabase/session.js'
+import { AuthSessionManager } from './supabase/AuthSessionManager.js'
 import { logger } from './utils/logger.js'
 import { IPC } from '../shared/constants.js'
 
@@ -52,11 +52,24 @@ async function createMainWindow(encryptionKey) {
   // const configManager = new ConfigManager()
   const configManager = null // Temporarily disabled
 
-  // Connect to Supabase (PokeAlert) at startup regardless of monitor mode —
-  // the shared session is reused by catalog browsing and task monitoring.
-  // No-op (returns null) until bot email/password are set in Settings.
-  getSupabaseSession({ getSettings, encryptionKey }).catch((err) => {
-    logger.warn('Supabase session not established at startup', { error: err.message })
+  // Per-user Supabase Auth session, reused by catalog browsing and task monitoring.
+  // Silently restores a prior sign-in (encrypted refresh token in `settings`) before the
+  // window loads, so the renderer's first AUTH_GET_STATUS call already reflects the real
+  // state — no login-screen flash for an already-signed-in user. `mainWindow` is assigned
+  // further below; the 'change' listener only fires after that point, via closure.
+  const authSessionManager = new AuthSessionManager({ getDb, encryptionKey })
+  // restoreSession() itself never rejects, so the only startup-blocking risk is the
+  // underlying network call hanging with no timeout. Bound the wait so a bad connection
+  // delays the window by at most 8s instead of indefinitely — the renderer's own
+  // AUTH_GET_STATUS pull is still the source of truth once this resolves either way.
+  await Promise.race([
+    authSessionManager.restoreSession().catch((err) => {
+      logger.warn('Supabase session restore failed at startup', { error: err.message })
+    }),
+    new Promise((resolve) => setTimeout(resolve, 8000))
+  ])
+  authSessionManager.on('change', (state) => {
+    mainWindow?.webContents?.send(IPC.AUTH_STATE_CHANGED, state)
   })
 
   taskManager = new TaskManager({
@@ -65,7 +78,7 @@ async function createMainWindow(encryptionKey) {
     browserPool,
     getDb,
     getSettings,
-    encryptionKey,
+    authSessionManager,
     queueJoiner
   })
   
@@ -138,7 +151,7 @@ async function createMainWindow(encryptionKey) {
     profileWarmup,
     configManager,
     getSettings,
-    encryptionKey,
+    authSessionManager,
     mainWindow,
     browserPool,
     notificationEngine,

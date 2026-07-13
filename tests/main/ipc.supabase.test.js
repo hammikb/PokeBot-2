@@ -32,7 +32,16 @@ vi.mock('../../src/main/supabase/SupabaseClient.js', () => ({ SupabaseClient }))
 
 import { registerIpcHandlers } from '../../src/main/ipc.js'
 import { IPC } from '../../src/shared/constants.js'
-import { encrypt, decrypt } from '../../src/main/crypto.js'
+
+function makeAuthSessionManager() {
+  return {
+    getStatus: vi.fn(() => ({ authenticated: false, user: null })),
+    getClient: vi.fn(() => ({ fakeClient: true })),
+    signIn: vi.fn(async () => {}),
+    signUp: vi.fn(async () => {}),
+    signOut: vi.fn(async () => {})
+  }
+}
 
 function setup() {
   handlers.clear()
@@ -53,7 +62,7 @@ function setup() {
     }))
   }
   const taskManager = { on: vi.fn(), setMonitorMode: vi.fn(async () => {}) }
-  const key = Buffer.alloc(32, 7)
+  const authSessionManager = makeAuthSessionManager()
   registerIpcHandlers({
     getDb: () => db,
     accountManager: {},
@@ -64,22 +73,17 @@ function setup() {
     pokemonFinder: { on: vi.fn() },
     profileWarmup: {},
     configManager: null,
-    getSettings: () => ({
-      supabaseUrl: 'https://x.supabase.co',
-      supabaseKey: 'k',
-      supabaseEmail: 'bot@example.com',
-      supabasePasswordEnc: encrypt('1234', key)
-    }),
+    getSettings: () => ({}),
     mainWindow: { webContents: { send: vi.fn() } },
     browserPool: {},
     notificationEngine: { fire: vi.fn() },
     queueJoiner: { on: vi.fn() },
-    encryptionKey: key
+    authSessionManager
   })
-  return { handlers, settingsStore, taskManager, key }
+  return { handlers, settingsStore, taskManager, authSessionManager }
 }
 
-describe('supabase IPC handlers', () => {
+describe('supabase catalog IPC handlers', () => {
   beforeEach(() => {
     catalogSelect.mockClear()
     signIn.mockClear()
@@ -90,14 +94,6 @@ describe('supabase IPC handlers', () => {
     await handlers.get(IPC.MONITOR_SET_MODE)({}, 'supabase')
     expect(JSON.parse(settingsStore.monitorMode)).toBe('supabase')
     expect(taskManager.setMonitorMode).toHaveBeenCalled()
-  })
-
-  it('SUPABASE_SET_PASSWORD stores the password encrypted (never plaintext)', async () => {
-    const { handlers, settingsStore, key } = setup()
-    await handlers.get(IPC.SUPABASE_SET_PASSWORD)({}, 'hunter2')
-    const stored = JSON.parse(settingsStore.supabasePasswordEnc)
-    expect(stored).not.toContain('hunter2')
-    expect(decrypt(stored, key)).toBe('hunter2')
   })
 
   it('SUPABASE_CATALOG_LIST reads the target_catalog reference list anonymously — no sign-in required', async () => {
@@ -124,37 +120,40 @@ describe('supabase IPC handlers', () => {
     ])
   })
 
-  it('SUPABASE_CLEAR_CREDENTIALS deletes stored email/password (real removal, unlike blanking the field)', async () => {
-    const { handlers } = setup()
-    const deleted = []
-    const db = {
-      prepare: vi.fn((sql) => ({
-        run: (...args) => {
-          if (sql.includes('DELETE FROM settings')) deleted.push(...args)
-        }
-      }))
-    }
-    // Re-register with a db we can inspect for the delete call.
-    const taskManager = { on: vi.fn(), setMonitorMode: vi.fn(async () => {}) }
-    registerIpcHandlers({
-      getDb: () => db,
-      accountManager: {},
-      paymentManager: {},
-      shippingManager: {},
-      thumbnailCache: {},
-      taskManager,
-      pokemonFinder: { on: vi.fn() },
-      profileWarmup: {},
-      configManager: null,
-      getSettings: () => ({}),
-      mainWindow: { webContents: { send: vi.fn() } },
-      browserPool: {},
-      notificationEngine: { fire: vi.fn() },
-      queueJoiner: { on: vi.fn() },
-      encryptionKey: Buffer.alloc(32, 7)
+})
+
+describe('auth IPC handlers', () => {
+  it("AUTH_GET_STATUS returns the manager's current status", async () => {
+    const { handlers, authSessionManager } = setup()
+    authSessionManager.getStatus.mockReturnValue({
+      authenticated: true,
+      user: { id: 'u1', email: 'a@b.com' }
     })
-    const result = await handlers.get(IPC.SUPABASE_CLEAR_CREDENTIALS)({})
-    expect(deleted).toEqual(['supabaseEmail', 'supabasePasswordEnc'])
-    expect(result).toBe(true)
+    const result = await handlers.get(IPC.AUTH_GET_STATUS)({})
+    expect(result).toEqual({ authenticated: true, user: { id: 'u1', email: 'a@b.com' } })
+  })
+
+  it('AUTH_SIGN_IN signs in with the given credentials and returns the resulting status', async () => {
+    const { handlers, authSessionManager } = setup()
+    authSessionManager.getStatus.mockReturnValue({
+      authenticated: true,
+      user: { id: 'u1', email: 'a@b.com' }
+    })
+    const result = await handlers.get(IPC.AUTH_SIGN_IN)({}, { email: 'a@b.com', password: 'pw' })
+    expect(authSessionManager.signIn).toHaveBeenCalledWith('a@b.com', 'pw')
+    expect(result).toEqual({ authenticated: true, user: { id: 'u1', email: 'a@b.com' } })
+  })
+
+  it('AUTH_SIGN_UP signs up with the given credentials', async () => {
+    const { handlers, authSessionManager } = setup()
+    await handlers.get(IPC.AUTH_SIGN_UP)({}, { email: 'new@b.com', password: 'pw' })
+    expect(authSessionManager.signUp).toHaveBeenCalledWith('new@b.com', 'pw')
+  })
+
+  it('AUTH_SIGN_OUT signs out and returns the resulting (unauthenticated) status', async () => {
+    const { handlers, authSessionManager } = setup()
+    const result = await handlers.get(IPC.AUTH_SIGN_OUT)({})
+    expect(authSessionManager.signOut).toHaveBeenCalled()
+    expect(result).toEqual({ authenticated: false, user: null })
   })
 })
