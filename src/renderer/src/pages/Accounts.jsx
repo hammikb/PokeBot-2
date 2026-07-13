@@ -10,19 +10,7 @@ const makeEmptyForm = () => ({
   name: '',
   retailer: RETAILERS.TARGET,
   username: '',
-  password: '',
-  cvv: '',
-  proxy: '',
-  shipping: {
-    firstName: '',
-    lastName: '',
-    address1: '',
-    address2: '',
-    city: '',
-    state: '',
-    zip: '',
-    phone: ''
-  }
+  password: ''
 })
 
 export default function Accounts() {
@@ -30,8 +18,6 @@ export default function Accounts() {
     accounts,
     createAccount,
     deleteAccount,
-    settings,
-    registerAccount,
     setAccountStatus,
     openAccountSession,
     checkAccountSession,
@@ -39,104 +25,20 @@ export default function Accounts() {
   } = useAppStore()
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(makeEmptyForm)
-  const [bulkRows, setBulkRows] = useState('')
-  const [bulkStatus, setBulkStatus] = useState('')
-  const [registerOnSite, setRegisterOnSite] = useState(false)
-  const [registerStatus, setRegisterStatus] = useState('')
-  const [bulkCreateRows, setBulkCreateRows] = useState('')
-  const [bulkCreateStatus, setBulkCreateStatus] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [sessionStatus, setSessionStatus] = useState('')
   const [sessionCheckingId, setSessionCheckingId] = useState('')
   const [autoLoginId, setAutoLoginId] = useState('')
-  const importedProxies = Array.isArray(settings.proxies) ? settings.proxies : []
   const proxyCounts = getProxyCounts(accounts)
 
   const setF = (key, value) => setForm((current) => ({ ...current, [key]: value }))
-  const setShipping = (key, value) =>
-    setForm((current) => ({
-      ...current,
-      shipping: {
-        ...current.shipping,
-        [key]: value
-      }
-    }))
 
   const submit = async (event) => {
     event.preventDefault()
     const accountData = { ...form, name: form.name || makeAccountName(form) }
-    if (registerOnSite) {
-      if (form.retailer === RETAILERS.TARGET) {
-        const pwErr = validateTargetPassword(form.password)
-        if (pwErr) {
-          setRegisterStatus(pwErr)
-          return
-        }
-      }
-      setRegisterStatus('Registering...')
-      const result = await registerAccount({
-        ...accountData,
-        email: form.username,
-        firstName: form.shipping.firstName,
-        lastName: form.shipping.lastName,
-        phone: form.shipping.phone
-      })
-      if (result.success) {
-        setRegisterStatus('Registered — check email to verify')
-        setForm(makeEmptyForm())
-        setRegisterOnSite(false)
-      } else {
-        setRegisterStatus(
-          result.alreadyExists
-            ? 'Already registered on site'
-            : result.error || 'Registration failed'
-        )
-      }
-    } else {
-      await createAccount(accountData)
-      setShowForm(false)
-      setForm(makeEmptyForm())
-    }
-  }
-
-  const bulkCreateOnSite = async () => {
-    const rows = parseBulkRows(bulkCreateRows)
-    if (rows.length === 0) {
-      setBulkCreateStatus('No valid rows found')
-      return
-    }
-    let succeeded = 0
-    let failed = 0
-    for (let i = 0; i < rows.length; i++) {
-      setBulkCreateStatus(`Registering ${i + 1}/${rows.length}...`)
-      const row = rows[i]
-      const result = await registerAccount({
-        ...row,
-        email: row.username,
-        firstName: row.shipping.firstName,
-        lastName: row.shipping.lastName,
-        phone: row.shipping.phone
-      })
-      if (result.success) succeeded++
-      else failed++
-    }
-    setBulkCreateRows('')
-    setBulkCreateStatus(`Done: ${succeeded} registered, ${failed} failed`)
-  }
-
-  const importBulkAccounts = async () => {
-    const rows = parseBulkRows(bulkRows)
-    if (rows.length === 0) {
-      setBulkStatus('No valid rows found')
-      return
-    }
-
-    setBulkStatus(`Importing ${rows.length} accounts...`)
-    for (const row of rows) {
-      await createAccount(row)
-    }
-    setBulkRows('')
-    setBulkStatus(`Imported ${rows.length} accounts`)
+    await createAccount(accountData)
+    setShowForm(false)
+    setForm(makeEmptyForm())
   }
 
   const openSession = async (account) => {
@@ -253,190 +155,17 @@ export default function Accounts() {
                   {showPassword ? 'hide' : 'show'}
                 </button>
               </div>
-              {registerOnSite && form.retailer === RETAILERS.TARGET && (
-                <TargetPasswordHint password={form.password} />
-              )}
             </Field>
           </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="CVV">
-              <input
-                value={form.cvv}
-                onChange={(event) => setF('cvv', event.target.value)}
-                maxLength={4}
-                className={INPUT_CLASS}
-              />
-            </Field>
-            <Field label="Proxy">
-              <select
-                value={form.proxy}
-                onChange={(event) => setF('proxy', event.target.value)}
-                className={INPUT_CLASS}
-              >
-                <option value="">No proxy</option>
-                {importedProxies.map((proxy) => (
-                  <option key={proxy} value={proxy}>
-                    {proxyLabel(proxy, proxyCounts)}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="First Name">
-              <input
-                required={registerOnSite}
-                value={form.shipping.firstName}
-                onChange={(event) => setShipping('firstName', event.target.value)}
-                className={INPUT_CLASS}
-              />
-            </Field>
-            <Field label="Last Name">
-              <input
-                required={registerOnSite}
-                value={form.shipping.lastName}
-                onChange={(event) => setShipping('lastName', event.target.value)}
-                className={INPUT_CLASS}
-              />
-            </Field>
-          </div>
-
-          <Field label="Address">
-            <input
-              value={form.shipping.address1}
-              onChange={(event) => setShipping('address1', event.target.value)}
-              placeholder="Street address"
-              className={INPUT_CLASS}
-            />
-          </Field>
-
-          <Field label="Address 2">
-            <input
-              value={form.shipping.address2}
-              onChange={(event) => setShipping('address2', event.target.value)}
-              placeholder="Apt, suite, unit"
-              className={INPUT_CLASS}
-            />
-          </Field>
-
-          <div className="grid grid-cols-4 gap-3">
-            <Field label="City">
-              <input
-                value={form.shipping.city}
-                onChange={(event) => setShipping('city', event.target.value)}
-                className={INPUT_CLASS}
-              />
-            </Field>
-            <Field label="State">
-              <input
-                value={form.shipping.state}
-                onChange={(event) => setShipping('state', event.target.value.toUpperCase())}
-                maxLength={2}
-                className={INPUT_CLASS}
-              />
-            </Field>
-            <Field label="Zip">
-              <input
-                value={form.shipping.zip}
-                onChange={(event) => setShipping('zip', event.target.value)}
-                className={INPUT_CLASS}
-              />
-            </Field>
-            <Field label="Phone">
-              <input
-                value={form.shipping.phone}
-                onChange={(event) => setShipping('phone', event.target.value)}
-                className={INPUT_CLASS}
-              />
-            </Field>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="registerOnSite"
-              checked={registerOnSite}
-              onChange={(e) => setRegisterOnSite(e.target.checked)}
-              className="accent-red-600"
-            />
-            <label htmlFor="registerOnSite" className="text-gray-400 uppercase tracking-wider">
-              Register on site (bot creates account)
-            </label>
-          </div>
-
-          {registerStatus && (
-            <div
-              className={`text-sm ${registerStatus.includes('fail') || registerStatus.includes('error') || registerStatus.includes('Already') ? 'text-red-400' : 'text-green-400'}`}
-            >
-              {registerStatus}
-            </div>
-          )}
 
           <button
             type="submit"
             className="w-full bg-red-600 hover:bg-red-500 text-white rounded px-4 py-2 uppercase tracking-wider font-bold text-sm"
           >
-            {registerOnSite ? 'Register on Site' : 'Save Account'}
+            Save Account
           </button>
         </form>
       )}
-
-      <section className="bg-[#111] border border-gray-800 rounded p-4 space-y-4 text-sm">
-        <div>
-          <h3 className="text-gray-400 uppercase tracking-widest mb-1.5">Bulk Import</h3>
-          <p className="text-gray-600">
-            CSV format:
-            retailer,email,password,first,last,address1,address2,city,state,zip,phone,proxy
-          </p>
-        </div>
-        <textarea
-          value={bulkRows}
-          onChange={(event) => setBulkRows(event.target.value)}
-          rows={4}
-          placeholder="target,user@email.com,password,Ash,Ketchum,1 Pallet Town,,Pallet,CA,90210,5551234567,1.2.3.4:8080:user:pass"
-          className="w-full bg-[#0f0f0f] border border-gray-700 rounded px-3 py-2 text-gray-200"
-        />
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={importBulkAccounts}
-            disabled={!bulkRows.trim()}
-            className="text-sm border border-red-700 text-red-400 hover:border-red-500 disabled:border-gray-800 disabled:text-gray-700 px-4 py-2 rounded uppercase tracking-wider font-bold"
-          >
-            Import Accounts
-          </button>
-          <span className="text-gray-600">{bulkStatus || 'Passwords are encrypted on save.'}</span>
-        </div>
-      </section>
-
-      <section className="bg-[#111] border border-gray-800 rounded p-4 space-y-4 text-sm">
-        <div>
-          <h3 className="text-gray-400 uppercase tracking-widest mb-1.5">Bulk Create on Site</h3>
-          <p className="text-gray-600">
-            Bot registers each account on Target/Walmart. Same CSV format as bulk import.
-          </p>
-        </div>
-        <textarea
-          value={bulkCreateRows}
-          onChange={(e) => setBulkCreateRows(e.target.value)}
-          rows={4}
-          placeholder="target,user@email.com,password,Ash,Ketchum,1 Pallet Town,,Pallet,CA,90210,5551234567"
-          className="w-full bg-[#0f0f0f] border border-gray-700 rounded px-3 py-2 text-gray-200"
-        />
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={bulkCreateOnSite}
-            disabled={!bulkCreateRows.trim()}
-            className="text-sm border border-red-700 text-red-400 hover:border-red-500 disabled:border-gray-800 disabled:text-gray-700 px-4 py-2 rounded uppercase tracking-wider font-bold"
-          >
-            Create Accounts on Site
-          </button>
-          <span className="text-gray-600">{bulkCreateStatus}</span>
-        </div>
-      </section>
 
       <div className="space-y-2">
         {sessionStatus && (
@@ -538,70 +267,12 @@ function Field({ label, children }) {
   )
 }
 
-function parseBulkRows(value) {
-  return value
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line, index) => parseBulkRow(line, index))
-    .filter(Boolean)
-}
-
-function parseBulkRow(line, index) {
-  const [
-    retailer = RETAILERS.TARGET,
-    username = '',
-    password = '',
-    firstName = '',
-    lastName = '',
-    address1 = '',
-    address2 = '',
-    city = '',
-    state = '',
-    zip = '',
-    phone = '',
-    proxy = ''
-  ] = splitCsvLine(line)
-
-  if (!username || !password) return null
-  const normalizedRetailer = SUPPORTED_ACCOUNT_RETAILERS.includes(retailer)
-    ? retailer
-    : RETAILERS.TARGET
-
-  return {
-    name: `${normalizedRetailer}-${username || index + 1}`,
-    retailer: normalizedRetailer,
-    username,
-    password,
-    proxy,
-    shipping: {
-      firstName,
-      lastName,
-      address1,
-      address2,
-      city,
-      state: state.toUpperCase(),
-      zip,
-      phone
-    }
-  }
-}
-
-function splitCsvLine(line) {
-  return line.split(',').map((part) => part.trim())
-}
-
 function getProxyCounts(accounts) {
   return accounts.reduce((counts, account) => {
     if (!account.proxy) return counts
     counts[account.proxy] = (counts[account.proxy] || 0) + 1
     return counts
   }, {})
-}
-
-function proxyLabel(proxy, counts) {
-  const count = counts[proxy] || 0
-  return `${proxyHost(proxy)} - ${count} account${count === 1 ? '' : 's'} tied`
 }
 
 function proxyHost(proxy) {
@@ -619,58 +290,4 @@ function parseShipping(value) {
 
 function makeAccountName(form) {
   return `${form.retailer}-${form.username}`
-}
-
-// Returns null if valid, error string if invalid
-function validateTargetPassword(pw) {
-  if (!pw || pw.length < 8 || pw.length > 20) return '8–20 characters required'
-  if (/[<> ]/.test(pw)) return 'Cannot contain <, >, or spaces'
-  if (/(.)\1{2,}/.test(pw)) return 'No 3 or more consecutive repeated characters (e.g. aaa, 111)'
-  const types = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^a-zA-Z0-9<> ]/].filter((r) => r.test(pw)).length
-  if (types < 2)
-    return 'Must include at least 2 of: lowercase, uppercase, numbers, special characters'
-  return null
-}
-
-function TargetPasswordHint({ password }) {
-  const length = password.length
-  const lengthOk = length >= 8 && length <= 20
-  const noForbidden = !/[<> ]/.test(password)
-  const noRepeat = !/(.)\1{2,}/.test(password)
-  const types = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^a-zA-Z0-9<> ]/].filter((r) =>
-    r.test(password)
-  ).length
-  const typesOk = types >= 2
-
-  const renderRule = ({ ok, label }) => (
-    <div className={`flex items-center gap-1.5 ${ok ? 'text-green-400' : 'text-red-400'}`}>
-      <span className="shrink-0 font-bold">{ok ? '✓' : '✗'}</span>
-      <span>{label}</span>
-    </div>
-  )
-
-  return (
-    <div className="mt-2 bg-[#0a0a0a] border border-gray-800 rounded px-3 py-2 space-y-1 text-xs">
-      <div className="text-gray-500 uppercase tracking-wider mb-1.5">Password requirements</div>
-      <Rule ok={lengthOk} label="8–20 characters" />
-      {renderRule({
-        ok: typesOk,
-        label: 'At least 2 of: lowercase, uppercase, numbers, special chars'
-      })}
-      {renderRule({
-        ok: noRepeat,
-        label: 'No 3+ consecutive repeated characters (aaa, 111, etc.)'
-      })}
-      {renderRule({ ok: noForbidden, label: 'No spaces, < or >' })}
-    </div>
-  )
-}
-
-function Rule({ ok, label }) {
-  return (
-    <div className={`flex items-center gap-1.5 ${ok ? 'text-green-400' : 'text-red-400'}`}>
-      <span className="shrink-0 font-bold">{ok ? 'âœ“' : 'âœ—'}</span>
-      <span>{label}</span>
-    </div>
-  )
 }

@@ -16,6 +16,7 @@ import { ShippingManager } from './shipping/ShippingManager.js'
 import { ThumbnailCache } from './thumbnails/ThumbnailCache.js'
 // import { ConfigManager } from './config/configManager.js'
 import { registerIpcHandlers } from './ipc.js'
+import { getSupabaseSession } from './supabase/session.js'
 import { logger } from './utils/logger.js'
 import { IPC } from '../shared/constants.js'
 
@@ -50,13 +51,22 @@ async function createMainWindow(encryptionKey) {
   queueJoiner = new QueueJoiner({ browserPool })
   // const configManager = new ConfigManager()
   const configManager = null // Temporarily disabled
+
+  // Connect to Supabase (PokeAlert) at startup regardless of monitor mode —
+  // the shared session is reused by catalog browsing and task monitoring.
+  // No-op (returns null) until bot email/password are set in Settings.
+  getSupabaseSession({ getSettings, encryptionKey }).catch((err) => {
+    logger.warn('Supabase session not established at startup', { error: err.message })
+  })
+
   taskManager = new TaskManager({
     accountManager,
     notificationEngine,
     browserPool,
     getDb,
     getSettings,
-    encryptionKey
+    encryptionKey,
+    queueJoiner
   })
   
   // Initialize Pokemon Finder (disabled for now)

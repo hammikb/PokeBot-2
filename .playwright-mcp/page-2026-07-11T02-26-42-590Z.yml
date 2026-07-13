@@ -1,0 +1,214 @@
+- generic [active] [ref=f9e1]:
+  - generic [ref=f9e3]:
+    - generic [ref=f9e4]:
+      - banner [ref=f9e5]:
+        - link "Skip to Main Content" [ref=f9e6] [cursor=pointer]:
+          - /url: "#maincontent"
+        - button "Open sparky, your AI shopping assistant" [ref=f9e8]
+        - text:    
+        - link "Walmart Homepage" [ref=f9e10] [cursor=pointer]:
+          - /url: /
+          - img "Walmart" [ref=f9e11]
+        - generic [ref=f9e14]:
+          - button "Pickup or delivery? Los Angeles, 90019 • Burbank Supercenter" [ref=f9e18] [cursor=pointer]:
+            - generic [ref=f9e19]:
+              - generic [ref=f9e20]:
+                - generic [ref=f9e21]: Pickup or delivery?
+                - generic [ref=f9e23]:
+                  - generic [ref=f9e24]: Los Angeles, 90019
+                  - generic [ref=f9e30]:
+                    - generic [ref=f9e31]: •
+                    - generic [ref=f9e32]: Burbank Supercenter
+              - generic [ref=f9e33]: 
+          - generic:    
+          - generic [ref=f9e36]:
+            - generic [ref=f9e37]: Los Angeles, 90019
+            - generic [ref=f9e39]: •
+        - search "Walmart Site-Wide" [ref=f9e41]:
+          - generic [ref=f9e42]:
+            - searchbox "Search" [ref=f9e43]: "074427167264"
+            - button [ref=f9e44] [cursor=pointer]:
+              - generic [ref=f9e45]: 
+            - button "Search" [ref=f9e46] [cursor=pointer]:
+              - generic [ref=f9e47]: 
+        - navigation "Account and Cart" [ref=f9e48]:
+          - list [ref=f9e49]:
+            - listitem [ref=f9e50]:
+              - button "Reorder My Items" [ref=f9e51] [cursor=pointer]:
+                - generic [ref=f9e52]: 
+                - generic [ref=f9e53]:
+                  - generic [ref=f9e54]: Reorder
+                  - generic [ref=f9e55]: My Items
+              - text:   
+            - listitem [ref=f9e56]:
+              - generic [ref=f9e57]:
+                - generic [ref=f9e58]:
+                  - button "Sign In Account" [ref=f9e59] [cursor=pointer]:
+                    - generic [ref=f9e60]: 
+                    - generic [ref=f9e61]:
+                      - generic [ref=f9e62]: Sign In
+                      - generic [ref=f9e63]: Account
+                  - text:   
+                - generic [ref=f9e66]:
+                  - generic [ref=f9e68]:
+                    - generic [ref=f9e69]: Spanish / Español now available!
+                    - generic [ref=f9e71]:
+                      - generic [ref=f9e72]: 
+                      - generic [ref=f9e73]:
+                        - generic [ref=f9e74]: Spanish / Español
+                        - generic [ref=f9e75]: now available!
+                  - generic:
+                    - button "Close Spanish / Español now available!":
+                      - generic [ref=f9e76]: 
+            - listitem [ref=f9e77]:
+              - button "Cart contains 0 items Total Amount $0.00" [ref=f9e80]:
+                - generic [ref=f9e81]: 
+                - generic [ref=f9e82]: "0"
+                - generic [ref=f9e83]: $0.00
+      - generic [ref=f9e84]:
+        - generic [ref=f9e85]:
+          - navigation "Primary" [ref=f9e86]:
+            - list [ref=f9e87]:
+              - listitem [ref=f9e88]:
+                - button "Departments " [ref=f9e92]:
+                  - text: Departments
+                  - generic [ref=f9e93]: 
+              - listitem [ref=f9e94]:
+                - button "Services " [ref=f9e98]:
+                  - text: Services
+                  - generic [ref=f9e99]: 
+          - navigation "Secondary" [ref=f9e101]:
+            - list [ref=f9e102]:
+              - listitem [ref=f9e103]:
+                - link "Rollbacks & More" [ref=f9e105] [cursor=pointer]:
+                  - /url: https://www.walmart.com/shop/savings?facet=special_offers%3ARollback
+              - listitem [ref=f9e106]:
+                - link "Summer of Soccer" [ref=f9e108] [cursor=pointer]:
+                  - /url: https://www.walmart.com/cp/soccer/2069984
+              - listitem [ref=f9e109]:
+                - link "Get it Fast" [ref=f9e111] [cursor=pointer]:
+                  - /url: https://www.walmart.com/cp/get-it-fast/6545138
+              - listitem [ref=f9e112]:
+                - link "Pharmacy" [ref=f9e114] [cursor=pointer]:
+                  - /url: https://www.walmart.com/cp/pharmacy/5431
+              - listitem [ref=f9e115]:
+                - link "New Arrivals" [ref=f9e117] [cursor=pointer]:
+                  - /url: https://www.walmart.com/cp/new-arrivals/2593086
+              - listitem [ref=f9e118]:
+                - link "Back to School" [ref=f9e120] [cursor=pointer]:
+                  - /url: https://www.walmart.com/cp/back-to-school/1071204
+              - listitem [ref=f9e121]:
+                - link "Walmart+" [ref=f9e123] [cursor=pointer]:
+                  - /url: https://www.walmart.com/plus
+        - button "More " [ref=f9e126] [cursor=pointer]:
+          - generic [ref=f9e127]: More
+          - generic [ref=f9e129]: 
+    - generic [ref=f9e131]:
+      - main [ref=f9e134]:
+        - generic [ref=f9e135]:
+          - generic [ref=f9e138]:
+            - region "Advertisement" [ref=f9e142]:
+              - generic [ref=f9e143]:
+                - iframe [ref=f9e144]:
+                  - generic [ref=f11e1]:
+                    - link "___" [ref=f11e2] [cursor=pointer]:
+                      - /url: "#"
+                    - link "sours trip and jolly rancher logos. Pack fruity fun. Make every trip delicious.." [ref=f11e6] [cursor=pointer]:
+                      - /url: https://www.walmart.com/dad/trk/v1/ck?encrypted=eyJraWQiOiJyc2FfdjEiLCJlbmMiOiJBMTI4R0NNIiwiYWxnIjoiUlNBLU9BRVAtMjU2In0.rG91BIzCwuaen_RyAKXqE4jufwVY0s3083WhBJ568K1DSxLXKxevJnIwy0L2_0aA1MntbKewcdPHChJ0dDFHdg_6o3oqVclW0ShagMGK53JSdlJ8rknVn4Z85HA9uwPGWzb3qUjw41N_dlBOobFGpOnqBmdIJc5JExLZSPG7Yzz0U3wt7LZRYx7cAL8osrgIajTPlCS1f4UM8cFlFamuGR0a1-oUsWrLvolgMl8frVa2TbYkjpHwdGPWiCMBgQnUpzdKOQNOPHgQZkdeEvEZqXzAeq2Cafry0dJUJufn1Iamua1gSjnijMcJDK_OGtkCosQvaimPvUQGcUGGP2qNNA.HSOYi79GJNbZ8UHt.IabiJX_sABjAU3guB7hJXczsBtkGkmRSMP--jAqdLpLQq-h-byTcWfXHckXZa5OcfHRWES52Vrd1voSvuCEm4pMJS1ZDEJ9PznPiBj-gkLmFD-iaMlFH_TPKdk9tSr2Cav4OHelw-Vriskj3yiPN3eHjNU3Pdu-K7zb_zXWlDz2j23ojFetONF8M2BblWTaKX7R7VAyTpAE4GDnI91qINGHoIqkCu-ZbHvASDa8NlljKKo11sC45WIca97p6ADdFKx2kBdQowomB8NAUeWDr-8Pt9nIIL4zD58qNGYhMzWPWLspSI7qu2z6mUurgCw1r5FyIHBJLS1ogtOGBbi8SqHm5zKG3oFSP1u1MpXWEj0V86B_YRgOMP1do-CQ3XAkbRtmfh4nqVC8HAfpQiGNe26s6VCpxz17u3kPbg9U0KI5OHpk8QZjkCoCTc9r7zwYge8Nf27RD_CYNat-aoPtlaRSnAARa1RrAjMDN8dTznkrhNETXp_eeaiLDPALOXJM45WzafB3jRnt-hx67OiHh53NL6KIqcvc_XptYbJ7YxeyRfrFcaRPQLSlI1imTkWEawmHxDOLpqHR6Gv1c0H59JvHE-SzYqDjW_mSy4F-h_3ge_Cv5y2A4D8WlGRDq7koXhaHjcSrRsslToDtWEStiV9fvOLu1CCBKqscxqgoWSxsIMA.c3ReBDZkL4I3QAvHwF__Rw
+                      - generic [ref=f11e8]:
+                        - generic [ref=f11e10]: Pack fruity fun
+                        - generic [ref=f11e11]: Make every trip delicious.
+                - generic [ref=f9e147]:
+                  - generic [ref=f9e148]: Sponsored
+                  - button "Ad disclaimer and feedback" [ref=f9e150] [cursor=pointer]:
+                    - generic [ref=f9e151]: 
+            - region "Sort and Filter section" [ref=f9e156]:
+              - switch "Filter by In-store" [ref=f9e159]:
+                - generic [ref=f9e160]: 
+                - generic [ref=f9e162]: In-store
+              - switch "Filter by Get it fast" [ref=f9e165]:
+                - generic [ref=f9e166]: 
+                - generic [ref=f9e168]: Get it fast
+              - button "Filter by Price not applied, activate to change" [ref=f9e171]:
+                - generic [ref=f9e172]: 
+                - generic [ref=f9e174]: Price
+                - generic [ref=f9e175]: 
+              - button "Filter by Brand not applied, activate to change" [ref=f9e178]:
+                - generic [ref=f9e179]: Brand
+                - generic [ref=f9e180]: 
+              - generic [ref=f9e181]:
+                - generic [ref=f9e182]: Sort by
+                - text: "|"
+                - button "Sort by Best Match" [ref=f9e184]:
+                  - text: Best Match
+                  - generic [ref=f9e185]: 
+            - separator [ref=f9e186]
+          - generic [ref=f9e189]:
+            - generic [ref=f9e190]:
+              - generic [ref=f9e193]:
+                - generic [ref=f9e194]:
+                  - button "Price" [ref=f9e197]:
+                    - img [ref=f9e199]: 
+                  - separator [ref=f9e200]
+                - generic [ref=f9e201]:
+                  - button "Brand" [ref=f9e204]:
+                    - img [ref=f9e206]: 
+                  - separator [ref=f9e207]
+                - generic [ref=f9e208]:
+                  - button "Color" [ref=f9e211]:
+                    - img [ref=f9e213]: 
+                  - separator [ref=f9e214]
+                - generic [ref=f9e215]:
+                  - button "Availability" [ref=f9e218]:
+                    - img [ref=f9e220]: 
+                  - separator [ref=f9e221]
+                - generic [ref=f9e222]:
+                  - button "Departments" [ref=f9e225]:
+                    - img [ref=f9e227]: 
+                  - separator [ref=f9e228]
+              - generic [ref=f9e231]:
+                - heading "Results for \"074427167264\" (1)" [level=2] [ref=f9e239]: Results for "074427167264"(1)
+                - generic [ref=f9e241]:
+                  - generic [ref=f9e242]: Uses item details. Price when purchased online
+                  - button "legal information" [ref=f9e243] [cursor=pointer]:
+                    - generic [ref=f9e244]: 
+                - group [ref=f9e248]:
+                  - link [ref=f9e249] [cursor=pointer]:
+                    - /url: /ip/Ultra-Pro-Pok-mon-TCG-Mega-Evolution-Chaos-Rising-9-Pocket-Portfolio/20381409668?conditionGroupCode=4&classType=REGULAR&from=/search
+                    - heading "Ultra Pro -Pokmon TCG Mega Evolution Chaos Rising 9-Pocket Portfolio $29.99" [level=3] [ref=f9e251]
+                  - generic [ref=f9e252]:
+                    - generic [ref=f9e255]:
+                      - button "Sign in to add to Favorites list, Ultra Pro -Pokmon TCG Mega Evolution Chaos Rising 9-Pocket Portfolio" [ref=f9e256]:
+                        - generic [ref=f9e257]: 
+                      - img "Ultra Pro -Pokmon TCG Mega Evolution Chaos Rising 9-Pocket Portfolio" [ref=f9e258]
+                    - button "Add to cart - Ultra Pro -Pokmon TCG Mega Evolution Chaos Rising 9-Pocket Portfolio" [ref=f9e262] [cursor=pointer]:
+                      - generic "add to cart" [ref=f9e263]: 
+                      - generic [ref=f9e264]: Add
+                    - generic [ref=f9e265]:
+                      - generic [ref=f9e267]:
+                        - generic [ref=f9e268]: $2999
+                        - generic [ref=f9e269]: current price $29.99
+                      - heading "Ultra Pro -Pokmon TCG Mega Evolution Chaos Rising 9-Pocket Portfolio" [level=3] [ref=f9e271]
+                      - generic [ref=f9e273]:
+                        - generic [ref=f9e274]: Free shipping, arrives in 3+ days
+                        - generic [ref=f9e277]:
+                          - img "Collectible item" [ref=f9e278]: 
+                          - generic [ref=f9e279]: New
+            - region "Advertisement" [ref=f9e284]:
+              - generic [ref=f9e285]:
+                - iframe [ref=f9e286]:
+                  - generic [ref=f12e1]:
+                    - link "___" [ref=f12e2] [cursor=pointer]:
+                      - /url: "#"
+                    - link "A walmart plus bag filled with supplies next to a walmart plus gas station. Save with Walmart+. Get free delivery, gas savings + so much more. See more. Sponsored" [ref=f12e5] [cursor=pointer]:
+                      - /url: https://www.walmart.com/dad/trk/v1/ck?encrypted=eyJraWQiOiJyc2FfdjEiLCJlbmMiOiJBMTI4R0NNIiwiYWxnIjoiUlNBLU9BRVAtMjU2In0.VZ0dW93hIiI431ecq6a8Ec0C1jgk8BlAi_dOsQyhkL07m3T7YoMRqFhs67ghxlDWNC0oW7_B4y-fiyuEFyMYFfjtgAAxlqBk8RqQCuCR6vZCFgXhHAA_5S3tU22_70kgrWhvBGI1NrnyMCbJBgQl-5KPtDh07hvzz_7q_jpCMAQRAjG8XADWihrZy0mo9jBpSdc7MDfmO4794vbg6G5-Vc1lhUcfdDZUwt0xBCHkgMA3Ct1Ny6JhZtp32I4zuPFDJJ33oP3DzA8J2AmYUEjO9EURPO8BZu8k3MhYHrQDUBOoBeBPPuLZtCK5HZJErXeI4ybnin7Iv5KWufK8uo4EHg.dcKpeQulCPhhpCSb.EzSuWS-hdvSr_ZvxmE1Iclvw2e5Qdby1vz4PqaW24A8ZJDtSJWgE5xqoyKOXqv0LmOR8ydtEMb-9K4_tlq3-q_qlzulVKEzpwyPVf5WWwiZfCb2WsSDB7vG0ogbkdDjKis0qf_q-QoZJTdqquNrgIbp1egn_SiUIdaaqR-K1ETsEgz0Pa0_-wJ5bnVCYfD2MM1P-NQjFWyucFTB4QZ5V6BZNuwi5IaP8VuhlBaO9XhX9tjVTom9_7RfiM-KsO0MUfMKyycjgGPtfqCeIQAtVRha2ElJ6USuPe5_oIf1qdAZ9spZoUsCf5OYFPrHpg9wvnE0Ld4oAyfJkq9WeWCaUiWTNxAfkImmDmys67Ou7EOEJy-fP6tXgiMT3NOVgF6PXEZ1iPqJ0OyX916yn8CgKQVlB8vrIsjYnAReRyloQzBqVgLo_cGgD-wivrZqqoxex4jOEM6TVjVYJc7SfJLJwAdgEUTlmsX6T0GCLovPvuxo1IsD_gyUWDs-1Q4pXTcvE2cMvLHVnbt4WAdHi98CanXlKNBsQngYD_kVJOV_MCK03-dGZUnvI-3rqputIo_FbEutSzt7D1etDx64EfCqwNKH76LCUwg.Cu_CNKqCbALYU65LcAKcdw
+                      - generic [ref=f12e13]:
+                        - generic [ref=f12e14]: Save with Walmart+
+                        - generic [ref=f12e15]: Get free delivery, gas savings + so much more.
+                        - generic [ref=f12e16]: See more
+                - generic [ref=f9e289]:
+                  - generic [ref=f9e290]: Sponsored
+                  - button "Ad disclaimer and feedback" [ref=f9e292] [cursor=pointer]:
+                    - generic [ref=f9e293]: 
+      - contentinfo [ref=f9e296]
+  - alert [ref=f9e299]

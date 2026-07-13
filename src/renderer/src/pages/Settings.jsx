@@ -21,7 +21,8 @@ const SUPABASE_FIELDS = [
 ]
 
 export default function Settings() {
-  const { settings, saveSetting, setMonitorMode, setSupabasePassword } = useAppStore()
+  const { settings, saveSetting, setMonitorMode, setSupabasePassword, clearSupabaseCredentials } =
+    useAppStore()
   const mode = settings.monitorMode || 'local'
 
   return (
@@ -100,6 +101,15 @@ export default function Settings() {
           <div className="text-gray-600 text-sm mt-1">
             Stored encrypted. Leave blank to keep current.
           </div>
+          {(settings.supabaseEmail || settings.supabasePasswordEnc) && (
+            <button
+              type="button"
+              onClick={clearSupabaseCredentials}
+              className="mt-2 text-red-500 hover:text-red-300 uppercase tracking-wider text-sm"
+            >
+              Clear stored bot credentials
+            </button>
+          )}
         </div>
       )}
 

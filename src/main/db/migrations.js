@@ -165,6 +165,66 @@ const migrations = [
         CREATE INDEX IF NOT EXISTS idx_alert_history_created ON alert_history(created_at);
       `)
     }
+  },
+  {
+    version: 5,
+    name: 'add_catalog_walmart_matches',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS catalog_walmart_matches (
+          target_product_key TEXT PRIMARY KEY,
+          walmart_item_id TEXT NOT NULL,
+          walmart_url TEXT NOT NULL,
+          walmart_name TEXT,
+          confidence TEXT NOT NULL,
+          created_at INTEGER DEFAULT (strftime('%s','now'))
+        );
+      `)
+    }
+  },
+  {
+    version: 6,
+    name: 'add_product_monitors_and_retailer_sources',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS product_monitors (
+          id TEXT PRIMARY KEY,
+          product_key TEXT,
+          name TEXT NOT NULL,
+          image_url TEXT,
+          category TEXT,
+          catalog_msrp REAL,
+          action_mode TEXT NOT NULL DEFAULT 'auto-checkout',
+          created_at INTEGER DEFAULT (strftime('%s','now')),
+          updated_at INTEGER DEFAULT (strftime('%s','now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS monitor_sources (
+          id TEXT PRIMARY KEY,
+          monitor_id TEXT NOT NULL,
+          retailer TEXT NOT NULL,
+          product_url TEXT,
+          retailer_item_id TEXT,
+          msrp REAL,
+          current_price REAL,
+          price_ceiling REAL,
+          buy_limit INTEGER NOT NULL DEFAULT 1,
+          account_ids TEXT NOT NULL DEFAULT '[]',
+          action_mode TEXT NOT NULL DEFAULT 'auto-checkout',
+          enabled INTEGER NOT NULL DEFAULT 0,
+          verification_status TEXT NOT NULL DEFAULT 'unverified',
+          task_id TEXT,
+          created_at INTEGER DEFAULT (strftime('%s','now')),
+          updated_at INTEGER DEFAULT (strftime('%s','now')),
+          UNIQUE(monitor_id, retailer),
+          FOREIGN KEY (monitor_id) REFERENCES product_monitors(id) ON DELETE CASCADE,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_monitor_sources_monitor ON monitor_sources(monitor_id);
+        CREATE INDEX IF NOT EXISTS idx_monitor_sources_task ON monitor_sources(task_id);
+      `)
+    }
   }
 ]
 

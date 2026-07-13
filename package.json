@@ -31,7 +31,7 @@
     "axios": "^1.16.1",
     "better-sqlite3": "^12.10.0",
     "cheerio": "^1.2.0",
-    "cloakbrowser": "^0.3.31",
+    "cloakbrowser": "^0.4.9",
     "electron-updater": "^6.8.3",
     "mmdb-lib": "^3.0.2",
     "playwright-core": "^1.60.0",

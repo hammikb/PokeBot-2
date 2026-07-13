@@ -70,6 +70,43 @@ const TABLE_COLUMNS = {
     'last_checked_at',
     'created_at',
     'updated_at'
+  ],
+  catalog_walmart_matches: [
+    'target_product_key',
+    'walmart_item_id',
+    'walmart_url',
+    'walmart_name',
+    'confidence',
+    'created_at'
+  ],
+  product_monitors: [
+    'id',
+    'product_key',
+    'name',
+    'image_url',
+    'category',
+    'catalog_msrp',
+    'action_mode',
+    'created_at',
+    'updated_at'
+  ],
+  monitor_sources: [
+    'id',
+    'monitor_id',
+    'retailer',
+    'product_url',
+    'retailer_item_id',
+    'msrp',
+    'current_price',
+    'price_ceiling',
+    'buy_limit',
+    'account_ids',
+    'action_mode',
+    'enabled',
+    'verification_status',
+    'task_id',
+    'created_at',
+    'updated_at'
   ]
 }
 
@@ -80,7 +117,7 @@ export function initDb(dbPath) {
   log.info('Initializing database', { dbPath })
   db = createSqliteDb(dbPath) || new JsonDb(dbPath)
   db.pragma('journal_mode = WAL')
-  
+
   // Run migrations first
   try {
     runMigrations(db)
@@ -88,7 +125,7 @@ export function initDb(dbPath) {
     log.error('Migration failed', { error: err.message })
     throw err
   }
-  
+
   // Legacy schema creation for backward compatibility
   db.exec(`
     CREATE TABLE IF NOT EXISTS accounts (
@@ -295,7 +332,12 @@ class JsonStatement {
     applyDefaults(table, row)
 
     if (this.sql.startsWith('INSERT OR REPLACE')) {
-      const primaryKey = table === 'settings' ? 'key' : 'id'
+      const primaryKey =
+        table === 'settings'
+          ? 'key'
+          : table === 'catalog_walmart_matches'
+            ? 'target_product_key'
+            : 'id'
       this.db.tables[table] = this.db.tables[table].filter(
         (existing) => existing[primaryKey] !== row[primaryKey]
       )
@@ -382,4 +424,5 @@ function applyDefaults(table, row) {
     row.updated_at ??= now
     row.status ??= 'active'
   }
+  if (table === 'catalog_walmart_matches') row.created_at ??= now
 }

@@ -34,6 +34,7 @@ export class WalmartPoller {
     this._isFirstPoll = true
     this._cooldownUntil = 0
     this._consecutiveBlocks = 0
+    this._queueActive = false
   }
 
   async poll() {
@@ -63,6 +64,21 @@ export class WalmartPoller {
     this._cooldownUntil = 0
 
     if (!product) return null
+
+    // Queue went live — fire once (dedupe) so the joiner auto-joins. The joiner
+    // reads the real item name/price from the /qp token itself.
+    if (product.queue) {
+      if (this._queueActive) return null
+      this._queueActive = true
+      this._isFirstPoll = false
+      return createDropEvent({
+        retailer: 'walmart',
+        productName: 'Queue is live',
+        productUrl: this.productUrl,
+        dropType: DROP_TYPES.QUEUE_OPEN
+      })
+    }
+    this._queueActive = false
 
     const { name, price, inStock } = product
     log.info('Polled Walmart product', {
@@ -173,6 +189,17 @@ export class WalmartPoller {
       .catch(() => {
         if (!resolved) resolveData(null)
       })
+
+    // Queue gate? Walmart bounces gated items to /qp — detect via the final URL
+    // and short-circuit so the joiner can take over instead of waiting on the API.
+    if (!resolved) {
+      const url = page.url()
+      if (url.includes('qpdata') || url.includes('/qp')) {
+        resolved = true
+        clearTimeout(timer)
+        resolveData({ queue: true })
+      }
+    }
 
     return dataPromise
   }

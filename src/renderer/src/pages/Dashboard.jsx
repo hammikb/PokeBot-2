@@ -38,7 +38,7 @@ export default function Dashboard() {
       {/* Top: Live Feed + Active Tasks */}
       <div className="flex gap-3 flex-1 min-h-0">
         {/* Live Feed */}
-        <div className="w-80 bg-[#111] border border-gray-800 rounded p-4 flex flex-col min-h-0">
+        <div className="flex-1 bg-[#111] border border-gray-800 rounded p-4 flex flex-col min-h-0">
           <div className="text-sm text-gray-500 uppercase tracking-widest mb-2">Live Feed</div>
           <div className="flex-1 overflow-y-auto space-y-2">
             {feedEvents.length === 0 && (
@@ -52,7 +52,7 @@ export default function Dashboard() {
                 <span className={`shrink-0 ${TYPE_COLOR[e.dropType] || 'text-gray-300'}`}>
                   {e.retailer}
                 </span>
-                <span className="text-gray-200 truncate">{e.productName}</span>
+                <span className="text-gray-200 break-words min-w-0">{e.productName}</span>
                 {e.price != null && <span className="text-gray-400 shrink-0">${e.price}</span>}
               </div>
             ))}
@@ -164,7 +164,7 @@ export default function Dashboard() {
                   {new Date(e.timestamp).toLocaleTimeString()}
                 </span>
                 <span className="text-yellow-400 shrink-0">{e.retailer}</span>
-                <span className="text-gray-200 truncate">{e.productName}</span>
+                <span className="text-gray-200 break-words min-w-0">{e.productName}</span>
                 {e.price != null && <span className="text-gray-400 shrink-0">${e.price}</span>}
               </div>
             ))}

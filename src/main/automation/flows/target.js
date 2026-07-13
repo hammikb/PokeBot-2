@@ -1,6 +1,6 @@
 import { waitForCaptchaIfNeeded } from '../captcha.js'
 import { startTrace } from '../TraceRecorder.js'
-import { TargetApiClient, fullApiCheckout } from '../api/targetApi.js'
+import { TargetApiClient } from '../api/targetApi.js'
 
 import { createModuleLogger } from '../../utils/logger.js'
 
@@ -66,53 +66,12 @@ export async function runTargetFlow(
 
     onStep('Signed in to Target')
 
-    // Preferred path: drive the ENTIRE checkout via in-page API calls (add → address →
-    // payment → place order), no UI clicks. If any step fails we fall through to the
-    // browser-UI flow below, so this is a pure speed optimization with a safety net.
-    if (useApi) {
-      const apiResult = await fullApiCheckout(page, {
-        tcin,
-        quantity: buyLimit,
-        cvv,
-        testMode: isTestMode,
-        onStep
-      })
-
-      if (apiResult.success) {
-        const { screenshotPath, tracePath } = (await trace.stop()) || {}
-
-        if (apiResult.testMode) {
-          onStep('TEST MODE: cart/address/payment set via API — review & place order manually')
-          return {
-            success: true,
-            testMode: true,
-            requiresManualCheckout: true,
-            screenshotPath,
-            tracePath,
-            message: 'Full-API test checkout ready - review and place order manually'
-          }
-        }
-        onStep(`Order placed via API${apiResult.orderId ? ` (${apiResult.orderId})` : ''}`)
-        return {
-          success: true,
-          testMode: false,
-          requiresManualCheckout: false,
-          orderId: apiResult.orderId,
-          screenshotPath,
-          tracePath,
-          message: 'Target order placed successfully via API'
-        }
-      }
-
-      onStep(`Full-API checkout failed at ${apiResult.step} - using browser fallback`)
-      log.warn('Full-API checkout failed, falling back to browser UI', {
-        step: apiResult.step,
-        status: apiResult.status,
-        error: apiResult.error
-      })
-    }
-
-    // Browser-based add-to-cart + UI checkout (fallback, or non-API products).
+    // Add to cart via API (fast), then drive the browser UI for checkout.
+    // The full-API checkout (set address/payment/place order) is intentionally not used:
+    // Target's PUT /web_checkouts/v1/checkouts/* routes 401 for the in-page fetch (the
+    // session lacks the required auth scope), so those steps always fell back to browser
+    // anyway. A logged-in account already has its default address + payment applied at
+    // checkout, so the browser UI just clicks through to the review page.
     if (useApi) {
       try {
         onStep(`Adding ${buyLimit} item(s) to cart via API...`)
@@ -165,13 +124,7 @@ export async function runTargetFlow(
             cartId: result.cartId
           })
 
-          // Navigate to cart first, then proceed to checkout
-          onStep('Opening Target checkout')
-          await page.goto('https://www.target.com/co-cart', {
-            waitUntil: 'domcontentloaded',
-            timeout: 30000
-          })
-          await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
+          // Item is in the cart; the checkout navigation below drives the rest.
         } else {
           onStep('API failed, using browser fallback')
           log.warn('Browser-based API failed, falling back to clicking', { error: result.error })
@@ -187,40 +140,37 @@ export async function runTargetFlow(
       await browserAddToCart(page, productUrl, buyLimit, onStep, notificationEngine, dropEvent)
     }
 
-    // Click "Checkout" button
-    onStep('Proceeding to checkout')
-    const checkoutBtn = page.locator(
-      'button[data-test="checkout-button"], button:has-text("Checkout"), a:has-text("Checkout")'
+    // Go straight to the checkout review page by URL instead of clicking the cart's
+    // "Check out" button — the button click raced the React render and sometimes hit the
+    // Apple Pay button by accident. Modern Target checkout is a single-page order review
+    // (saved address + payment already shown), so we just wait for "Place your order".
+    onStep('Opening Target checkout')
+    await page.goto('https://www.target.com/checkout', {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000
+    })
+    await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
+
+    onStep('Waiting for order review page')
+    const placeOrderBtn = page.locator(
+      'button[data-test="placeOrderButton"], button:has-text("Place your order"), button:has-text("Place order")'
     )
-    if ((await checkoutBtn.count()) > 0) {
-      await checkoutBtn.first().click({ timeout: 10000 })
-      await page.waitForLoadState('domcontentloaded')
-      await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
+    try {
+      await placeOrderBtn.first().waitFor({ state: 'visible', timeout: 15000 })
+    } catch {
+      onStep('Order review page not reached - manual intervention required')
+      requiresManual = true
+      const traceResult = (await trace.stop()) || {}
+      return {
+        success: false,
+        requiresManualCheckout: true,
+        screenshotPath: traceResult?.screenshotPath,
+        tracePath: traceResult?.tracePath,
+        message: 'Could not reach order review page - complete manually'
+      }
     }
 
-    // Wait for checkout page to load
-    await page.waitForTimeout(2000)
-
-    // Shipping address should already be saved in Target account
-    onStep('Using saved shipping address')
-    await page.waitForTimeout(1000)
-
-    // Continue to payment
-    onStep('Continuing to payment')
-    const continueToPaymentBtn = page.locator(
-      'button:has-text("Continue to payment"), button:has-text("Save and continue")'
-    )
-    if ((await continueToPaymentBtn.count()) > 0) {
-      await continueToPaymentBtn.first().click({ timeout: 10000 })
-      await page.waitForLoadState('domcontentloaded')
-      await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
-    }
-
-    // Handle payment
-    onStep('Verifying payment method')
-    await page.waitForTimeout(2000)
-
-    // Check if CVV is needed
+    // Enter CVV if the review page asks for it.
     const cvvInput = page.locator('input[id*="cvv"], input[name*="cvv"], input[placeholder*="CVV"]')
     if ((await cvvInput.count()) > 0 && cvv) {
       onStep('Entering CVV')
@@ -228,38 +178,8 @@ export async function runTargetFlow(
       await page.waitForTimeout(500)
     }
 
-    // If no payment method, require manual intervention
-    const addPaymentBtn = page.locator(
-      'button:has-text("Add payment"), button:has-text("Add card")'
-    )
-    if ((await addPaymentBtn.count()) > 0) {
-      onStep('Payment method required - please add manually')
-      requiresManual = true
-      const { screenshotPath } = (await trace.stop()) || {}
-      return {
-        success: false,
-        requiresManualCheckout: true,
-        screenshotPath,
-        message: 'Payment method not saved - add in Target account first'
-      }
-    }
-
-    // Continue to review order
-    onStep('Continuing to review order')
-    const continueToReviewBtn = page.locator(
-      'button:has-text("Continue to review order"), button:has-text("Save and continue")'
-    )
-    if ((await continueToReviewBtn.count()) > 0) {
-      await continueToReviewBtn.first().click({ timeout: 10000 })
-      await page.waitForLoadState('domcontentloaded')
-      await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
-    }
-
-    // Wait for review page
-    await page.waitForTimeout(2000)
-
     if (isTestMode) {
-      onStep('TEST MODE: Stopping before final submission')
+      onStep('TEST MODE: on order review page - stopping before Place your order')
       requiresManual = true
       const traceResult = await trace.stop()
       return {
@@ -274,22 +194,6 @@ export async function runTargetFlow(
 
     // Place order
     onStep('Placing order')
-    const placeOrderBtn = page.locator(
-      'button[data-test="placeOrderButton"], button:has-text("Place your order"), button:has-text("Place order")'
-    )
-
-    if ((await placeOrderBtn.count()) === 0) {
-      onStep('Place order button not found - manual intervention required')
-      requiresManual = true
-      const { screenshotPath } = (await trace.stop()) || {}
-      return {
-        success: false,
-        requiresManualCheckout: true,
-        screenshotPath,
-        message: 'Could not find place order button - complete manually'
-      }
-    }
-
     await placeOrderBtn.first().click({ timeout: 10000 })
     await page.waitForLoadState('domcontentloaded')
 

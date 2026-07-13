@@ -1,11 +1,10 @@
 import { useEffect } from 'react'
-import { HashRouter, Routes, Route, NavLink } from 'react-router-dom'
+import { HashRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom'
 import { useAppStore } from './store/appStore'
 import Dashboard from './pages/Dashboard'
 import Tasks from './pages/Tasks'
 import Accounts from './pages/Accounts'
 import Proxies from './pages/Proxies'
-import Catalog from './pages/Catalog'
 import Settings from './pages/Settings'
 import PaymentMethods from './pages/PaymentMethods'
 import ShippingAddresses from './pages/ShippingAddresses'
@@ -14,6 +13,7 @@ import { IPC } from '../../shared/constants'
 export default function App() {
   const {
     loadTasks,
+    loadMonitors,
     loadAccounts,
     loadCatalog,
     loadSettings,
@@ -26,6 +26,7 @@ export default function App() {
   useEffect(() => {
     const ipc = window.electron?.ipcRenderer
     loadTasks()
+    loadMonitors()
     loadAccounts()
     loadCatalog()
     loadSettings()
@@ -47,6 +48,7 @@ export default function App() {
     }
   }, [
     loadTasks,
+    loadMonitors,
     loadAccounts,
     loadCatalog,
     loadSettings,
@@ -66,7 +68,6 @@ export default function App() {
           {[
             ['/', 'Dashboard'],
             ['/tasks', 'Tasks'],
-            ['/catalog', 'Catalog'],
             ['/accounts', 'Accounts'],
             ['/payments', 'Payments'],
             ['/shipping', 'Shipping'],
@@ -97,7 +98,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/tasks" element={<Tasks />} />
-            <Route path="/catalog" element={<Catalog />} />
+            <Route path="/catalog" element={<Navigate to="/tasks" replace />} />
             <Route path="/accounts" element={<Accounts />} />
             <Route path="/payments" element={<PaymentMethods />} />
             <Route path="/shipping" element={<ShippingAddresses />} />

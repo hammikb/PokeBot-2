@@ -379,8 +379,12 @@ export async function fullApiCheckout(
     return { success: false, step: 'get_cart', error: state.error || 'no cart id' }
   }
 
-  // 3. Shipping address / fulfillment (skip if Target already has one selected).
-  if (!state.hasAddress || addressId) {
+  // 3. Shipping address / fulfillment.
+  // A logged-in account with a saved default address has it auto-applied to the checkout,
+  // so we only call setFulfillment when a specific addressId override is requested. The
+  // unconditional call 401s (the in-page fetch lacks the scope for PUT /checkouts) and was
+  // forcing a browser fallback on every run.
+  if (addressId) {
     onStep('API: setting shipping address')
     const ful = await setFulfillment(page, resolvedCartId, { addressId })
     if (!ful.success) {

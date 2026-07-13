@@ -16,11 +16,15 @@ function invoke(channel, ...args) {
 
 export const useAppStore = create((set, get) => ({
   tasks: [],
+  monitors: [],
   accounts: [],
   paymentMethods: [],
   shippingAddresses: [],
   catalogItems: [],
   catalogMessage: '',
+  supabaseCatalog: [],
+  walmartMatches: {},
+  walmartCandidates: {},
   settings: {},
   feedEvents: [],
   taskStatuses: {},
@@ -39,6 +43,20 @@ export const useAppStore = create((set, get) => ({
   loadTaskReadiness: async () => {
     const taskReadiness = await invoke(IPC.TASKS_READINESS)
     set({ taskReadiness })
+  },
+  loadMonitors: async () => {
+    const monitors = await invoke(IPC.MONITORS_LIST)
+    set({ monitors })
+    return monitors
+  },
+  saveMonitor: async (monitor) => {
+    const saved = await invoke(IPC.MONITORS_SAVE, monitor)
+    await Promise.all([get().loadMonitors(), get().loadTasks()])
+    return saved
+  },
+  deleteMonitor: async (id) => {
+    await invoke(IPC.MONITORS_DELETE, id)
+    await Promise.all([get().loadMonitors(), get().loadTasks()])
   },
   loadAccounts: async () => {
     const accounts = await invoke(IPC.ACCOUNTS_GET)
@@ -60,8 +78,9 @@ export const useAppStore = create((set, get) => ({
     })
   },
   createTask: async (data) => {
-    await invoke(IPC.TASKS_CREATE, data)
-    get().loadTasks()
+    const id = await invoke(IPC.TASKS_CREATE, data)
+    await get().loadTasks()
+    return id
   },
   updateTask: async (id, data) => {
     await invoke(IPC.TASKS_UPDATE, id, data)
@@ -259,7 +278,33 @@ export const useAppStore = create((set, get) => ({
   setSupabasePassword: async (password) => {
     await invoke(IPC.SUPABASE_SET_PASSWORD, password)
   },
-  pushCatalogToSupabase: async (id) => invoke(IPC.CATALOG_PUSH_SUPABASE, id),
+  clearSupabaseCredentials: async () => {
+    await invoke(IPC.SUPABASE_CLEAR_CREDENTIALS)
+    await get().loadSettings()
+  },
+  loadSupabaseCatalog: async () => {
+    const supabaseCatalog = await invoke(IPC.SUPABASE_CATALOG_LIST)
+    set({ supabaseCatalog })
+  },
+  loadWalmartMatches: async () => {
+    const rows = await invoke(IPC.CATALOG_LIST_WALMART_MATCHES)
+    set({ walmartMatches: Object.fromEntries(rows.map((row) => [row.target_product_key, row])) })
+  },
+  findWalmartMatch: async (productKey, upc, name) => {
+    const candidates = await invoke(IPC.CATALOG_FIND_WALMART_MATCH, { upc, name })
+    set((s) => ({ walmartCandidates: { ...s.walmartCandidates, [productKey]: candidates } }))
+  },
+  dismissWalmartCandidates: (productKey) =>
+    set((s) => {
+      const next = { ...s.walmartCandidates }
+      delete next[productKey]
+      return { walmartCandidates: next }
+    }),
+  confirmWalmartMatch: async (productKey, candidate) => {
+    await invoke(IPC.CATALOG_SAVE_WALMART_MATCH, { productKey, candidate })
+    get().dismissWalmartCandidates(productKey)
+    await get().loadWalmartMatches()
+  },
   pushFeedEvent: (event) => set((s) => ({ feedEvents: [event, ...s.feedEvents].slice(0, 200) })),
   setTaskStatus: (taskId, status) =>
     set((s) => ({ taskStatuses: { ...s.taskStatuses, [taskId]: status } })),

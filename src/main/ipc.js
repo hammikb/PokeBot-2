@@ -15,10 +15,9 @@ import { runTargetAutoLogin } from './automation/flows/target-auto-login.js'
 import { runTargetRegistration } from './automation/flows/register-target.js'
 import { runWalmartRegistration } from './automation/flows/register-walmart.js'
 import { buildTaskReadiness } from './tasks/TaskReadiness.js'
-import { encrypt, decrypt } from './crypto.js'
-import { SupabaseClient } from './supabase/SupabaseClient.js'
-import { pushCatalogItemToSupabase } from './supabase/catalogPublish.js'
-import { SUPABASE_URL, SUPABASE_KEY } from './supabase/config.js'
+import { encrypt } from './crypto.js'
+import { getPublicClient, resetSupabaseSession } from './supabase/session.js'
+import { findWalmartMatch } from './products/WalmartMatch.js'
 
 const SUPPORTED_TASK_RETAILERS = new Set(['target', 'walmart'])
 const TASK_UPDATE_COLUMNS = {
@@ -42,7 +41,6 @@ export function registerIpcHandlers({
   taskManager,
   pokemonFinder,
   profileWarmup,
-  configManager,
   getSettings,
   mainWindow,
   browserPool,
@@ -57,6 +55,7 @@ export function registerIpcHandlers({
     getDb()
       .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
       .run(key, JSON.stringify(value))
+    if (key === 'supabaseEmail') resetSupabaseSession()
     return true
   })
 
@@ -76,18 +75,76 @@ export function registerIpcHandlers({
     getDb()
       .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
       .run('supabasePasswordEnc', JSON.stringify(enc))
+    resetSupabaseSession()
     return true
   })
 
-  // Publish a local catalog item to the Supabase products table.
-  ipcMain.handle(IPC.CATALOG_PUSH_SUPABASE, async (_, id) => {
-    const item = getDb().prepare('SELECT * FROM product_catalog WHERE id = ?').get(id)
-    if (!item) throw new Error('Catalog item not found')
-    const s = getSettings()
-    const password = s.supabasePasswordEnc ? decrypt(s.supabasePasswordEnc, encryptionKey) : ''
-    const sc = new SupabaseClient({ url: SUPABASE_URL, key: SUPABASE_KEY })
-    await sc.signIn(s.supabaseEmail, password)
-    return pushCatalogItemToSupabase({ client: sc.client, item })
+  // Read-only browse of the known-Target reference catalog (261+ items) —
+  // anon-key read, no login required. The app has no write access here either;
+  // this table is maintained by the PokeAlert worker.
+  ipcMain.handle(IPC.SUPABASE_CATALOG_LIST, async () => {
+    const table = getPublicClient().client.from('target_catalog')
+    let result = await table
+      .select(
+        'id, product_key, name, image, category, upc, regular_price, current_price, price_checked_at'
+      )
+      .order('sort_order', { ascending: true, nullsFirst: false })
+    if (isMissingCatalogPriceColumn(result.error)) {
+      result = await table
+        .select('id, product_key, name, image, category, upc')
+        .order('sort_order', { ascending: true, nullsFirst: false })
+    }
+    const { data, error } = result
+    if (error) throw new Error(`Supabase catalog list failed: ${error.message}`)
+    return data.map((item) => ({
+      id: item.id,
+      retailer: 'target',
+      product_key: item.product_key,
+      product_url: `https://www.target.com/p/-/A-${item.product_key}`,
+      name: item.name,
+      image: item.image,
+      category: item.category,
+      upc: item.upc,
+      regular_price: item.regular_price,
+      current_price: item.current_price,
+      price_checked_at: item.price_checked_at
+    }))
+  })
+
+  // Suggest Walmart matches for a Target Catalog item (UPC search first, name
+  // search as a lower-confidence fallback). Read-only — never saves anything;
+  // the user picks a candidate and CATALOG_SAVE_WALMART_MATCH persists it.
+  ipcMain.handle(IPC.CATALOG_FIND_WALMART_MATCH, async (_, { upc, name }) => {
+    return findWalmartMatch({ upc, name })
+  })
+
+  // Persist the confirmed match locally. This never touches the shared
+  // Supabase target_catalog — it's PokeBot-only enrichment data.
+  ipcMain.handle(IPC.CATALOG_SAVE_WALMART_MATCH, (_, { productKey, candidate }) => {
+    getDb()
+      .prepare(
+        `
+      INSERT OR REPLACE INTO catalog_walmart_matches
+        (target_product_key, walmart_item_id, walmart_url, walmart_name, confidence)
+      VALUES (?, ?, ?, ?, ?)
+    `
+      )
+      .run(productKey, candidate.itemId, candidate.url, candidate.name, candidate.confidence)
+    return true
+  })
+
+  ipcMain.handle(IPC.CATALOG_LIST_WALMART_MATCHES, () =>
+    getDb().prepare('SELECT * FROM catalog_walmart_matches').all()
+  )
+
+  // Actually clear stored bot credentials — the password field alone can't
+  // (it only ever saves a non-empty value, never removes one).
+  ipcMain.handle(IPC.SUPABASE_CLEAR_CREDENTIALS, () => {
+    getDb()
+      .prepare('DELETE FROM settings WHERE key IN (?, ?)')
+      .run('supabaseEmail', 'supabasePasswordEnc')
+    resetSupabaseSession()
+    return true
   })
 
   // Accounts
@@ -328,6 +385,139 @@ export function registerIpcHandlers({
     }
     return true
   })
+  ipcMain.handle(IPC.MONITORS_LIST, () => listProductMonitors(getDb()))
+  ipcMain.handle(IPC.MONITORS_SAVE, (_, data) => {
+    if (!data?.name || !Array.isArray(data.sources)) {
+      throw new Error('Monitor name and retailer sources are required')
+    }
+    const db = getDb()
+    const monitorId = data.id || randomUUID()
+    const now = Math.floor(Date.now() / 1000)
+    db.prepare(
+      `INSERT INTO product_monitors
+        (id, product_key, name, image_url, category, catalog_msrp, action_mode, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+        product_key = excluded.product_key,
+        name = excluded.name,
+        image_url = excluded.image_url,
+        category = excluded.category,
+        catalog_msrp = excluded.catalog_msrp,
+        action_mode = excluded.action_mode,
+        updated_at = excluded.updated_at`
+    ).run(
+      monitorId,
+      data.productKey || null,
+      data.name,
+      data.imageUrl || null,
+      data.category || null,
+      toNullablePrice(data.catalogMsrp),
+      data.actionMode || 'auto-checkout',
+      now,
+      now
+    )
+
+    for (const source of data.sources) {
+      if (!SUPPORTED_TASK_RETAILERS.has(source.retailer)) continue
+      const existing = db
+        .prepare('SELECT * FROM monitor_sources WHERE monitor_id = ? AND retailer = ?')
+        .get(monitorId, source.retailer)
+      const sourceId = existing?.id || randomUUID()
+      let taskId = existing?.task_id || null
+      const enabled = source.enabled === true && Boolean(source.productUrl)
+      const msrp = toNullablePrice(source.msrp)
+      const priceCeiling = toNullablePrice(source.priceCeiling)
+      if (enabled && !(priceCeiling > 0)) {
+        throw new Error(`A price limit is required for ${source.retailer}`)
+      }
+      const accountIds = Array.isArray(source.accountIds) ? source.accountIds : []
+
+      if (enabled) {
+        taskId ||= randomUUID()
+        db.prepare(
+          `INSERT INTO tasks
+            (id, retailer, product_url, product_name, product_image_url, buy_limit, max_price, mode, account_ids, interval_ms)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+            retailer = excluded.retailer,
+            product_url = excluded.product_url,
+            product_name = excluded.product_name,
+            product_image_url = excluded.product_image_url,
+            buy_limit = excluded.buy_limit,
+            max_price = excluded.max_price,
+            mode = excluded.mode,
+            account_ids = excluded.account_ids,
+            interval_ms = excluded.interval_ms`
+        ).run(
+          taskId,
+          source.retailer,
+          source.productUrl,
+          source.productName || data.name,
+          source.imageUrl || data.imageUrl || null,
+          normalizeBuyLimit(source.buyLimit, source.retailer),
+          priceCeiling,
+          source.actionMode || data.actionMode || 'auto-checkout',
+          JSON.stringify(accountIds),
+          source.intervalMs || 4000
+        )
+      } else if (taskId) {
+        taskManager.stopTask(taskId)
+        db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
+        taskId = null
+      }
+
+      db.prepare(
+        `INSERT INTO monitor_sources
+          (id, monitor_id, retailer, product_url, retailer_item_id, msrp, current_price,
+           price_ceiling, buy_limit, account_ids, action_mode, enabled, verification_status,
+           task_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(monitor_id, retailer) DO UPDATE SET
+          product_url = excluded.product_url,
+          retailer_item_id = excluded.retailer_item_id,
+          msrp = excluded.msrp,
+          current_price = excluded.current_price,
+          price_ceiling = excluded.price_ceiling,
+          buy_limit = excluded.buy_limit,
+          account_ids = excluded.account_ids,
+          action_mode = excluded.action_mode,
+          enabled = excluded.enabled,
+          verification_status = excluded.verification_status,
+          task_id = excluded.task_id,
+          updated_at = excluded.updated_at`
+      ).run(
+        sourceId,
+        monitorId,
+        source.retailer,
+        source.productUrl || null,
+        source.retailerItemId || null,
+        msrp,
+        toNullablePrice(source.currentPrice),
+        priceCeiling,
+        normalizeBuyLimit(source.buyLimit, source.retailer),
+        JSON.stringify(accountIds),
+        source.actionMode || data.actionMode || 'auto-checkout',
+        enabled ? 1 : 0,
+        source.verificationStatus || 'unverified',
+        taskId,
+        now,
+        now
+      )
+    }
+    return listProductMonitors(db).find((monitor) => monitor.id === monitorId)
+  })
+  ipcMain.handle(IPC.MONITORS_DELETE, (_, id) => {
+    const db = getDb()
+    const sources = db.prepare('SELECT task_id FROM monitor_sources WHERE monitor_id = ?').all(id)
+    for (const source of sources) {
+      if (!source.task_id) continue
+      taskManager.stopTask(source.task_id)
+      db.prepare('DELETE FROM tasks WHERE id = ?').run(source.task_id)
+    }
+    db.prepare('DELETE FROM monitor_sources WHERE monitor_id = ?').run(id)
+    db.prepare('DELETE FROM product_monitors WHERE id = ?').run(id)
+    return true
+  })
   ipcMain.handle(IPC.CATALOG_GET, () => getCatalogItems(getDb))
   ipcMain.handle(IPC.CATALOG_ADD_URL, async (_, productUrl) =>
     addCatalogItemFromUrl(getDb, productUrl, {
@@ -512,4 +702,44 @@ function normalizeBuyLimit(value, retailer) {
   const numericValue = Number.parseInt(value, 10)
   if (!Number.isFinite(numericValue) || numericValue < 1) return fallback
   return Math.min(numericValue, fallback)
+}
+
+function toNullablePrice(value) {
+  if (value === '' || value == null) return null
+  const number = Number(value)
+  return Number.isFinite(number) && number >= 0 ? number : null
+}
+
+function listProductMonitors(db) {
+  const monitors = db.prepare('SELECT * FROM product_monitors ORDER BY created_at DESC').all()
+  const sourceStatement = db.prepare(
+    'SELECT * FROM monitor_sources WHERE monitor_id = ? ORDER BY retailer'
+  )
+  return monitors.map((monitor) => ({
+    ...monitor,
+    sources: sourceStatement.all(monitor.id).map((source) => ({
+      ...source,
+      enabled: source.enabled === 1,
+      account_ids: safeJsonArray(source.account_ids)
+    }))
+  }))
+}
+
+function safeJsonArray(value) {
+  try {
+    const parsed = JSON.parse(value || '[]')
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function isMissingCatalogPriceColumn(error) {
+  if (!error) return false
+  return (
+    error.code === '42703' ||
+    /column\s+target_catalog\.(regular_price|current_price|price_checked_at)\s+does not exist/i.test(
+      error.message || ''
+    )
+  )
 }

@@ -15,10 +15,9 @@ import { GameStopPoller } from '../monitor/retailers/gamestop.js'
 import { SamsClubPoller } from '../monitor/retailers/samsclub.js'
 import { RetryManager } from '../utils/retryManager.js'
 import { extractProductKey } from '../products/productKey.js'
-import { SupabaseClient } from '../supabase/SupabaseClient.js'
 import { SupabaseMonitorSource } from '../monitor/SupabaseMonitorSource.js'
-import { SUPABASE_URL, SUPABASE_KEY } from '../supabase/config.js'
-import { decrypt } from '../crypto.js'
+import { getSupabaseSession } from '../supabase/session.js'
+import { DROP_TYPES } from '../../shared/constants.js'
 
 const POLLERS = {
   walmart: WalmartPoller,
@@ -45,12 +44,14 @@ export class TaskManager extends EventEmitter {
     getDb,
     getSettings = () => ({}),
     encryptionKey = null,
-    createSupabaseSource = null
+    createSupabaseSource = null,
+    queueJoiner = null
   }) {
     super()
     this._accountManager = accountManager
     this._notify = notificationEngine
     this._pool = browserPool
+    this._queueJoiner = queueJoiner
     this._getDb = getDb
     this._getSettings = getSettings
     this._encryptionKey = encryptionKey
@@ -79,13 +80,12 @@ export class TaskManager extends EventEmitter {
   }
 
   async _buildSupabaseSource() {
-    const s = this._getSettings()
-    const password = s.supabasePasswordEnc
-      ? decrypt(s.supabasePasswordEnc, this._encryptionKey)
-      : ''
-    const sc = new SupabaseClient({ url: SUPABASE_URL, key: SUPABASE_KEY })
-    await sc.signIn(s.supabaseEmail, password)
-    return new SupabaseMonitorSource({ client: sc.client })
+    const session = await getSupabaseSession({
+      getSettings: this._getSettings,
+      encryptionKey: this._encryptionKey
+    })
+    if (!session) throw new Error('Supabase bot credentials are not configured yet')
+    return new SupabaseMonitorSource({ client: session.client })
   }
 
   async _getSupabaseSource() {
@@ -225,6 +225,25 @@ export class TaskManager extends EventEmitter {
 
   async _onDrop(dropEvent) {
     const task = [...this._tasks.values()].find((t) => t.product_url === dropEvent.productUrl)
+
+    // Queue went live: auto-join with the task's account (joiner dedupes on its
+    // own). No checkout — the joiner gets you to the front, you finish the buy.
+    if (dropEvent.dropType === DROP_TYPES.QUEUE_OPEN) {
+      this.emit('drop', dropEvent)
+      await this._notify.fire(dropEvent)
+      if (task && this._queueJoiner) {
+        const accountIds = parseAccountIds(task.account_ids)
+        const account = accountIds.length
+          ? this._accountManager.getDecrypted(accountIds[0])
+          : null
+        this._queueJoiner.start(task.id, {
+          productUrl: task.product_url,
+          label: task.product_name || task.product_url,
+          account
+        })
+      }
+      return
+    }
 
     // Alert-only mode: fire a single enriched notification and stop — no checkout.
     if (task?.mode === 'alert-only') {

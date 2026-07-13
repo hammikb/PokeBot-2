@@ -1,17 +1,33 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
-const { handlers, pushCatalogItemToSupabase, signIn, SupabaseClient } = vi.hoisted(() => {
+const { handlers, signIn, SupabaseClient, catalogSelect } = vi.hoisted(() => {
   const handlers = new Map()
-  const pushCatalogItemToSupabase = vi.fn(async () => ({ productId: 'prod-1' }))
   const signIn = vi.fn(async () => ({}))
+  const catalogSelect = vi.fn(() => ({
+    order: async () => ({
+      data: [
+        {
+          id: 'cat-1',
+          product_key: '94336414',
+          name: 'Pokemon ETB',
+          image: null,
+          category: 'tcg',
+          upc: '196214112568',
+          regular_price: 49.99,
+          current_price: 44.99,
+          price_checked_at: '2026-07-11T12:00:00.000Z'
+        }
+      ],
+      error: null
+    })
+  }))
   const SupabaseClient = vi.fn(function () {
-    return { signIn, client: { id: 'client' } }
+    return { signIn, client: { from: () => ({ select: catalogSelect }) } }
   })
-  return { handlers, pushCatalogItemToSupabase, signIn, SupabaseClient }
+  return { handlers, signIn, SupabaseClient, catalogSelect }
 })
 
 vi.mock('electron', () => ({ ipcMain: { handle: (channel, fn) => handlers.set(channel, fn) } }))
-vi.mock('../../src/main/supabase/catalogPublish.js', () => ({ pushCatalogItemToSupabase }))
 vi.mock('../../src/main/supabase/SupabaseClient.js', () => ({ SupabaseClient }))
 
 import { registerIpcHandlers } from '../../src/main/ipc.js'
@@ -57,6 +73,7 @@ function setup() {
     mainWindow: { webContents: { send: vi.fn() } },
     browserPool: {},
     notificationEngine: { fire: vi.fn() },
+    queueJoiner: { on: vi.fn() },
     encryptionKey: key
   })
   return { handlers, settingsStore, taskManager, key }
@@ -64,7 +81,7 @@ function setup() {
 
 describe('supabase IPC handlers', () => {
   beforeEach(() => {
-    pushCatalogItemToSupabase.mockClear()
+    catalogSelect.mockClear()
     signIn.mockClear()
   })
 
@@ -83,13 +100,61 @@ describe('supabase IPC handlers', () => {
     expect(decrypt(stored, key)).toBe('hunter2')
   })
 
-  it('CATALOG_PUSH_SUPABASE signs in and upserts the catalog item', async () => {
+  it('SUPABASE_CATALOG_LIST reads the target_catalog reference list anonymously — no sign-in required', async () => {
     const { handlers } = setup()
-    const result = await handlers.get(IPC.CATALOG_PUSH_SUPABASE)({}, 'cat-1')
-    expect(signIn).toHaveBeenCalled()
-    expect(pushCatalogItemToSupabase).toHaveBeenCalledWith(
-      expect.objectContaining({ item: expect.objectContaining({ retailer_item_id: '94336414' }) })
+    const result = await handlers.get(IPC.SUPABASE_CATALOG_LIST)({})
+    expect(signIn).not.toHaveBeenCalled()
+    expect(catalogSelect).toHaveBeenCalledWith(
+      'id, product_key, name, image, category, upc, regular_price, current_price, price_checked_at'
     )
-    expect(result).toEqual({ productId: 'prod-1' })
+    expect(result).toEqual([
+      {
+        id: 'cat-1',
+        retailer: 'target',
+        product_key: '94336414',
+        product_url: 'https://www.target.com/p/-/A-94336414',
+        name: 'Pokemon ETB',
+        image: null,
+        category: 'tcg',
+        upc: '196214112568',
+        regular_price: 49.99,
+        current_price: 44.99,
+        price_checked_at: '2026-07-11T12:00:00.000Z'
+      }
+    ])
+  })
+
+  it('SUPABASE_CLEAR_CREDENTIALS deletes stored email/password (real removal, unlike blanking the field)', async () => {
+    const { handlers } = setup()
+    const deleted = []
+    const db = {
+      prepare: vi.fn((sql) => ({
+        run: (...args) => {
+          if (sql.includes('DELETE FROM settings')) deleted.push(...args)
+        }
+      }))
+    }
+    // Re-register with a db we can inspect for the delete call.
+    const taskManager = { on: vi.fn(), setMonitorMode: vi.fn(async () => {}) }
+    registerIpcHandlers({
+      getDb: () => db,
+      accountManager: {},
+      paymentManager: {},
+      shippingManager: {},
+      thumbnailCache: {},
+      taskManager,
+      pokemonFinder: { on: vi.fn() },
+      profileWarmup: {},
+      configManager: null,
+      getSettings: () => ({}),
+      mainWindow: { webContents: { send: vi.fn() } },
+      browserPool: {},
+      notificationEngine: { fire: vi.fn() },
+      queueJoiner: { on: vi.fn() },
+      encryptionKey: Buffer.alloc(32, 7)
+    })
+    const result = await handlers.get(IPC.SUPABASE_CLEAR_CREDENTIALS)({})
+    expect(deleted).toEqual(['supabaseEmail', 'supabasePasswordEnc'])
+    expect(result).toBe(true)
   })
 })
