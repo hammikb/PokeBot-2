@@ -91,9 +91,10 @@ export function registerIpcHandlers({
   ipcMain.handle(IPC.CATALOG_PUSH_SUPABASE, async (_, id) => {
     const item = getDb().prepare('SELECT * FROM product_catalog WHERE id = ?').get(id)
     if (!item) throw new Error('Catalog item not found')
-    const client = authSessionManager.getClient()
-    if (!client) throw new Error('Not signed in to Supabase yet')
-    return pushCatalogItemToSupabase({ client, item })
+    if (!authSessionManager.getStatus().authenticated) {
+      throw new Error('Not signed in to Supabase yet')
+    }
+    return pushCatalogItemToSupabase({ client: authSessionManager.getClient(), item })
   })
 
   // Accounts

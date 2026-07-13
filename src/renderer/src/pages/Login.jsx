@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useAppStore } from '../store/appStore'
 
 export default function Login() {
-  const { signIn, signUp, authError } = useAppStore()
+  const { signIn, signUp, authError, clearAuthError } = useAppStore()
   const [mode, setMode] = useState('sign-in')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -34,7 +34,10 @@ export default function Login() {
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => setMode('sign-in')}
+            onClick={() => {
+              setMode('sign-in')
+              clearAuthError()
+            }}
             className={`flex-1 px-3 py-1.5 rounded uppercase tracking-wider text-sm font-bold border ${
               mode === 'sign-in'
                 ? 'bg-red-600 border-red-500 text-white'
@@ -45,7 +48,10 @@ export default function Login() {
           </button>
           <button
             type="button"
-            onClick={() => setMode('sign-up')}
+            onClick={() => {
+              setMode('sign-up')
+              clearAuthError()
+            }}
             className={`flex-1 px-3 py-1.5 rounded uppercase tracking-wider text-sm font-bold border ${
               mode === 'sign-up'
                 ? 'bg-red-600 border-red-500 text-white'

@@ -76,9 +76,10 @@ export class TaskManager extends EventEmitter {
   }
 
   async _buildSupabaseSource() {
-    const client = this._authSessionManager?.getClient()
-    if (!client) throw new Error('Not signed in to Supabase yet')
-    return new SupabaseMonitorSource({ client })
+    if (!this._authSessionManager?.getStatus().authenticated) {
+      throw new Error('Not signed in to Supabase yet')
+    }
+    return new SupabaseMonitorSource({ client: this._authSessionManager.getClient() })
   }
 
   async _getSupabaseSource() {

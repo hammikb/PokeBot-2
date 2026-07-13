@@ -300,6 +300,7 @@ export const useAppStore = create((set, get) => ({
       authUser: state.user ?? null
     })
   },
+  clearAuthError: () => set({ authError: '' }),
   pushCatalogToSupabase: async (id) => invoke(IPC.CATALOG_PUSH_SUPABASE, id),
   pushFeedEvent: (event) => set((s) => ({ feedEvents: [event, ...s.feedEvents].slice(0, 200) })),
   setTaskStatus: (taskId, status) =>

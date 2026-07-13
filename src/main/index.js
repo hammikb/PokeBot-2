@@ -58,9 +58,16 @@ async function createMainWindow(encryptionKey) {
   // state — no login-screen flash for an already-signed-in user. `mainWindow` is assigned
   // further below; the 'change' listener only fires after that point, via closure.
   const authSessionManager = new AuthSessionManager({ getDb, encryptionKey })
-  await authSessionManager.restoreSession().catch((err) => {
-    logger.warn('Supabase session restore failed at startup', { error: err.message })
-  })
+  // restoreSession() itself never rejects, so the only startup-blocking risk is the
+  // underlying network call hanging with no timeout. Bound the wait so a bad connection
+  // delays the window by at most 8s instead of indefinitely — the renderer's own
+  // AUTH_GET_STATUS pull is still the source of truth once this resolves either way.
+  await Promise.race([
+    authSessionManager.restoreSession().catch((err) => {
+      logger.warn('Supabase session restore failed at startup', { error: err.message })
+    }),
+    new Promise((resolve) => setTimeout(resolve, 8000))
+  ])
   authSessionManager.on('change', (state) => {
     mainWindow?.webContents?.send(IPC.AUTH_STATE_CHANGED, state)
   })

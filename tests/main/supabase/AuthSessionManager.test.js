@@ -89,4 +89,39 @@ describe('AuthSessionManager', () => {
     expect(db._store.authRefreshTokenEnc).toBeUndefined()
     expect(manager.getStatus()).toEqual({ authenticated: false, user: null })
   })
+
+  it('re-saves the refresh token when the underlying client reports TOKEN_REFRESHED', async () => {
+    let authStateCallback
+    const clientWithAuth = {
+      ...makeFakeClient(),
+      client: {
+        auth: {
+          onAuthStateChange: vi.fn((cb) => {
+            authStateCallback = cb
+          })
+        }
+      }
+    }
+    const rotatingManager = new AuthSessionManager({
+      getDb: () => db,
+      encryptionKey: KEY,
+      client: clientWithAuth
+    })
+    await rotatingManager.signIn('a@b.com', 'pw')
+
+    authStateCallback('TOKEN_REFRESHED', { refresh_token: 'rt-rotated' })
+
+    const stored = JSON.parse(db._store.authRefreshTokenEnc)
+    expect(decrypt(stored, KEY)).toBe('rt-rotated')
+  })
+
+  it('signOut clears local session state even if the remote sign-out call fails', async () => {
+    await manager.signIn('a@b.com', 'pw')
+    client.signOut.mockRejectedValueOnce(new Error('network down'))
+
+    await manager.signOut()
+
+    expect(db._store.authRefreshTokenEnc).toBeUndefined()
+    expect(manager.getStatus()).toEqual({ authenticated: false, user: null })
+  })
 })

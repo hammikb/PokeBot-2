@@ -76,6 +76,7 @@ describe('supabase catalog IPC handlers', () => {
 
   it('CATALOG_PUSH_SUPABASE pushes the catalog item using the signed-in auth session client', async () => {
     const { handlers, authSessionManager } = setup()
+    authSessionManager.getStatus.mockReturnValue({ authenticated: true, user: { id: 'u1' } })
     const result = await handlers.get(IPC.CATALOG_PUSH_SUPABASE)({}, 'cat-1')
     expect(authSessionManager.getClient).toHaveBeenCalled()
     expect(pushCatalogItemToSupabase).toHaveBeenCalledWith({
@@ -86,8 +87,7 @@ describe('supabase catalog IPC handlers', () => {
   })
 
   it('CATALOG_PUSH_SUPABASE throws when not signed in', async () => {
-    const { handlers, authSessionManager } = setup()
-    authSessionManager.getClient.mockReturnValue(null)
+    const { handlers } = setup()
     await expect(handlers.get(IPC.CATALOG_PUSH_SUPABASE)({}, 'cat-1')).rejects.toThrow(
       'Not signed in to Supabase yet'
     )

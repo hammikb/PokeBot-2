@@ -17,6 +17,17 @@ export class AuthSessionManager extends EventEmitter {
     this._client = client
     this._authenticated = false
     this._user = null
+
+    // supabase-js auto-refreshes the access token in the background and rotates the
+    // refresh token on every refresh. Without this subscription the encrypted token we
+    // persist goes stale after the first refresh, breaking "session survives restart"
+    // once the app has been open long enough for one. Optional chaining throughout so
+    // test fixtures that pass a bare fake client (no .client.auth) don't throw.
+    this._client.client?.auth?.onAuthStateChange?.((event, session) => {
+      if (event === 'TOKEN_REFRESHED' && session?.refresh_token) {
+        this._saveRefreshToken(session.refresh_token)
+      }
+    })
   }
 
   getClient() {
@@ -69,7 +80,12 @@ export class AuthSessionManager extends EventEmitter {
   }
 
   async signOut() {
-    await this._client.signOut()
+    try {
+      await this._client.signOut()
+    } catch {
+      // Best-effort remote sign-out — clear local session state regardless, so the user
+      // isn't stuck "signed in" locally just because the network call failed.
+    }
     this._clearRefreshToken()
     this._setState(false, null)
   }
