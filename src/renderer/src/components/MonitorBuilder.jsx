@@ -5,9 +5,15 @@ import { RETAILER_BUY_LIMITS, TASK_MODES } from '../../../shared/constants'
 
 const RETAILERS = ['target', 'walmart']
 
-export default function MonitorBuilder({ product, onCancel, onSaved }) {
+export default function MonitorBuilder({
+  product,
+  existingMonitor = null,
+  onCancel,
+  onSaved,
+  isNewTask = false
+}) {
   const { accounts, walmartMatches, loadWalmartMatches, saveMonitor } = useAppStore()
-  const [mode, setMode] = useState(TASK_MODES.AUTO_CHECKOUT)
+  const [mode, setMode] = useState(existingMonitor?.action_mode || TASK_MODES.AUTO_CHECKOUT)
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -15,7 +21,54 @@ export default function MonitorBuilder({ product, onCancel, onSaved }) {
     loadWalmartMatches().catch(() => {})
   }, [loadWalmartMatches])
 
+  const defaultSource = (retailer) => ({
+    retailer,
+    enabled: false,
+    productUrl: '',
+    msrp: '',
+    priceCeiling: '',
+    buyLimit: RETAILER_BUY_LIMITS[retailer],
+    accountIds: [],
+    verificationStatus: 'unverified'
+  })
+
   const initialSources = useMemo(() => {
+    // Editing an existing monitor: prefill each retailer from its saved source
+    // (price limit, buy limit, accounts, enabled state) instead of re-deriving
+    // fresh defaults from the bare product — otherwise saving would silently
+    // discard everything already configured.
+    if (existingMonitor) {
+      const byRetailer = Object.fromEntries(
+        (existingMonitor.sources || []).map((source) => [source.retailer, source])
+      )
+      return {
+        target: byRetailer.target
+          ? {
+              retailer: 'target',
+              enabled: true,
+              productUrl: byRetailer.target.product_url || '',
+              msrp: byRetailer.target.msrp ?? '',
+              priceCeiling: byRetailer.target.price_ceiling ?? '',
+              buyLimit: byRetailer.target.buy_limit || RETAILER_BUY_LIMITS.target,
+              accountIds: byRetailer.target.account_ids || [],
+              verificationStatus: byRetailer.target.verification_status || 'unverified'
+            }
+          : defaultSource('target'),
+        walmart: byRetailer.walmart
+          ? {
+              retailer: 'walmart',
+              enabled: true,
+              productUrl: byRetailer.walmart.product_url || '',
+              msrp: byRetailer.walmart.msrp ?? '',
+              priceCeiling: byRetailer.walmart.price_ceiling ?? '',
+              buyLimit: byRetailer.walmart.buy_limit || RETAILER_BUY_LIMITS.walmart,
+              accountIds: byRetailer.walmart.account_ids || [],
+              verificationStatus: byRetailer.walmart.verification_status || 'unverified'
+            }
+          : defaultSource('walmart')
+      }
+    }
+
     const match = walmartMatches[product.productKey]
     const selectedRetailer = product.retailer || 'target'
     const catalogMsrp = product.catalogMsrp ?? product.msrp ?? product.currentPrice ?? ''
@@ -45,7 +98,7 @@ export default function MonitorBuilder({ product, onCancel, onSaved }) {
             : 'unverified'
       }
     }
-  }, [product, walmartMatches])
+  }, [product, walmartMatches, existingMonitor])
 
   const [sources, setSources] = useState(initialSources)
 
@@ -80,6 +133,7 @@ export default function MonitorBuilder({ product, onCancel, onSaved }) {
     setMessage('Saving monitor...')
     try {
       await saveMonitor({
+        id: existingMonitor?.id,
         productKey: product.productKey || null,
         name: product.productName || 'Selected product',
         imageUrl: product.productImageUrl || null,
@@ -88,7 +142,7 @@ export default function MonitorBuilder({ product, onCancel, onSaved }) {
         actionMode: mode,
         sources: enabled.map((source) => ({ ...source, actionMode: mode }))
       })
-      setMessage('Monitor created.')
+      setMessage(existingMonitor ? 'Monitor saved.' : 'Monitor created.')
       onSaved?.()
     } catch (error) {
       setMessage(error.message || 'Could not save monitor')
@@ -107,8 +161,9 @@ export default function MonitorBuilder({ product, onCancel, onSaved }) {
         <button
           type="button"
           onClick={onCancel}
-          aria-label="Cancel monitor"
-          className="w-8 h-8 rounded-lg text-gray-500 hover:text-white hover:bg-white/10 text-xl"
+          aria-label={isNewTask ? 'Cancel new task' : 'Close monitor editor'}
+          title={isNewTask ? 'Cancel new task' : 'Close editor'}
+          className="w-8 h-8 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 text-2xl leading-none transition-colors"
         >
           ×
         </button>
@@ -175,7 +230,7 @@ export default function MonitorBuilder({ product, onCancel, onSaved }) {
         disabled={saving}
         className="w-full bg-red-600 hover:bg-red-500 disabled:bg-gray-800 rounded-lg px-4 py-3 text-white font-medium"
       >
-        {saving ? 'Saving...' : 'Create monitor'}
+        {saving ? 'Saving...' : existingMonitor ? 'Save monitor' : 'Create monitor'}
       </button>
     </form>
   )

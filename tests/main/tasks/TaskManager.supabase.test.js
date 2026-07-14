@@ -58,6 +58,7 @@ describe('TaskManager monitor mode', () => {
       productUrl: 'https://www.target.com/p/A-94336414',
       retailer: 'target',
       productKey: '94336414',
+      productName: 'Pokemon ETB',
       maxPrice: 40
     })
   })

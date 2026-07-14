@@ -46,6 +46,7 @@ const makeDefaultForm = () => ({
 export default function Tasks() {
   const {
     tasks,
+    monitors,
     taskStatuses,
     taskReadiness,
     accounts,
@@ -63,6 +64,8 @@ export default function Tasks() {
   } = useAppStore()
   const [showBuilder, setShowBuilder] = useState(false)
   const [editingTaskId, setEditingTaskId] = useState(null)
+  const [editingMonitor, setEditingMonitor] = useState(null)
+  const [creatingTaskId, setCreatingTaskId] = useState(null)
   const [form, setForm] = useState(makeDefaultForm)
   const [taskActionMessage, setTaskActionMessage] = useState('')
   const [handledEditTaskId, setHandledEditTaskId] = useState(null)
@@ -153,7 +156,23 @@ export default function Tasks() {
   const resetBuilder = () => {
     setShowBuilder(false)
     setEditingTaskId(null)
+    setEditingMonitor(null)
+    setCreatingTaskId(null)
     setForm(makeDefaultForm())
+  }
+
+  const cancelBuilder = async () => {
+    // Catalog creates a draft row before opening this editor. Cancelling that
+    // flow should remove the draft instead of leaving an unconfigured task.
+    if (creatingTaskId) {
+      try {
+        await deleteTask(creatingTaskId)
+      } catch (error) {
+        setTaskActionMessage(error.message || 'Could not cancel the new task')
+        return
+      }
+    }
+    resetBuilder()
   }
 
   const submit = async (e) => {
@@ -183,7 +202,7 @@ export default function Tasks() {
     resetBuilder()
   }
 
-  const editTask = (task) => {
+  const editTask = (task, { isNew = false } = {}) => {
     let accountIds = []
     try {
       accountIds = JSON.parse(task.account_ids || '[]')
@@ -191,11 +210,22 @@ export default function Tasks() {
       accountIds = []
     }
 
+    // Tasks are one row per retailer; the monitor that owns this task carries the
+    // richer product fields (name/image/category/productKey) plus every enabled
+    // retailer's saved price limit, buy limit, and accounts. Without finding it,
+    // MonitorBuilder has no id to save against and silently creates a new monitor
+    // (and a new task) instead of updating this one.
+    const monitor =
+      monitors.find((m) => (m.sources || []).some((s) => s.task_id === task.id)) || null
+
     setForm({
       retailer: task.retailer || DEFAULT_RETAILER,
       productUrl: task.product_url || '',
-      productName: task.product_name || '',
-      productImageUrl: task.product_image_url || '',
+      productName: monitor?.name || task.product_name || '',
+      productImageUrl: monitor?.image_url || task.product_image_url || '',
+      productKey: monitor?.product_key || '',
+      category: monitor?.category || '',
+      catalogMsrp: monitor?.catalog_msrp ?? '',
       buyLimit: task.buy_limit || RETAILER_BUY_LIMITS[task.retailer] || 1,
       maxPrice: task.max_price == null ? '' : task.max_price.toString(),
       accountIds,
@@ -203,6 +233,8 @@ export default function Tasks() {
       mode: task.mode || 'monitor-and-buy'
     })
     setEditingTaskId(task.id)
+    setEditingMonitor(monitor)
+    setCreatingTaskId(isNew ? task.id : null)
     setShowBuilder(true)
   }
 
@@ -214,7 +246,7 @@ export default function Tasks() {
   if (pendingEditTaskId && pendingEditTaskId !== handledEditTaskId) {
     setHandledEditTaskId(pendingEditTaskId)
     const task = tasks.find((t) => t.id === pendingEditTaskId)
-    if (task) editTask(task)
+    if (task) editTask(task, { isNew: Boolean(location.state?.newTask) })
   }
 
   // Clearing router state is a real side effect (history mutation), so it
@@ -537,10 +569,12 @@ export default function Tasks() {
 
       {showBuilder && (
         <MonitorBuilder
-          key={`${form.productKey}:${form.productUrl}`}
+          key={editingMonitor?.id || `${form.productKey}:${form.productUrl}`}
           product={form}
-          onCancel={resetBuilder}
+          existingMonitor={editingMonitor}
+          onCancel={cancelBuilder}
           onSaved={resetBuilder}
+          isNewTask={Boolean(creatingTaskId)}
         />
       )}
 

@@ -13,19 +13,43 @@ export class SupabaseMonitorSource extends EventEmitter {
     this._byProduct = new Map() // productId → { productUrl, maxPrice }
   }
 
-  async addProduct({ productUrl, retailer, productKey, maxPrice }) {
-    const { data: product, error } = await this._client
+  async addProduct({ productUrl, retailer, productKey, productName, maxPrice }) {
+    let { data: product, error } = await this._client
       .from('products')
       .select('id')
       .match({ retailer, product_key: productKey })
       .maybeSingle()
     if (error) throw new Error(`Supabase product lookup failed: ${error.message}`)
+
     if (!product) {
-      this.emit('notice', {
-        productUrl,
-        message: 'Not tracked centrally — publish it from Catalog first.'
-      })
-      return { subscribed: false }
+      // Central monitoring needs a row in the shared `products` table before anything
+      // can watch it. RLS lets any authenticated user insert one (scoped to
+      // target/walmart), so self-register here instead of requiring a separate
+      // "publish from Catalog" step that no longer exists in the UI. Upsert (not
+      // insert) so two accounts starting the same product concurrently don't race
+      // each other into a unique-constraint error.
+      const registerResult = await this._client
+        .from('products')
+        .upsert(
+          {
+            retailer,
+            product_key: productKey,
+            product_url: productUrl,
+            name: productName || productKey,
+            active: true
+          },
+          { onConflict: 'retailer,product_key' }
+        )
+        .select('id')
+        .single()
+      if (registerResult.error) {
+        this.emit('notice', {
+          productUrl,
+          message: `Could not register this product centrally: ${registerResult.error.message}`
+        })
+        return { subscribed: false }
+      }
+      product = registerResult.data
     }
 
     const productId = product.id

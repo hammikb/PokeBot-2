@@ -155,6 +155,7 @@ export class TaskManager extends EventEmitter {
       productUrl: taskRow.product_url,
       retailer: taskRow.retailer,
       productKey: extractProductKey(taskRow.retailer, taskRow.product_url),
+      productName: taskRow.product_name || null,
       maxPrice: taskRow.max_price ?? null
     })
   }

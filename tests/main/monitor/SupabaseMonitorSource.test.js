@@ -3,19 +3,33 @@ import { SupabaseMonitorSource } from '../../../src/main/monitor/SupabaseMonitor
 
 // Fake supabase client. Captures upserts, channel creation, and lets the test
 // fire a broadcast into the registered handler.
-function makeFakeClient({ product, userId = 'user-1' }) {
-  const calls = { upserts: [], channels: [], removed: 0 }
+function makeFakeClient({
+  product,
+  userId = 'user-1',
+  registerResult = { data: { id: 'prod-new' }, error: null }
+}) {
+  const calls = { upserts: [], registerCalls: [], channels: [], removed: 0 }
   let dropHandler = null
   const client = {
-    from: (table) => ({
-      select: () => ({
-        match: () => ({ maybeSingle: async () => ({ data: product, error: null }) })
-      }),
-      upsert: async (row, opts) => {
-        calls.upserts.push({ table, row, opts })
-        return { error: null }
+    from: (table) => {
+      if (table === 'products') {
+        return {
+          select: () => ({
+            match: () => ({ maybeSingle: async () => ({ data: product, error: null }) })
+          }),
+          upsert: (row, opts) => {
+            calls.registerCalls.push({ row, opts })
+            return { select: () => ({ single: async () => registerResult }) }
+          }
+        }
       }
-    }),
+      return {
+        upsert: async (row, opts) => {
+          calls.upserts.push({ table, row, opts })
+          return { error: null }
+        }
+      }
+    },
     auth: { getUser: async () => ({ data: { user: { id: userId } }, error: null }) },
     channel: (name, opts) => {
       const ch = {
@@ -114,8 +128,37 @@ describe('SupabaseMonitorSource', () => {
     expect(drops).toEqual([])
   })
 
-  it('emits a notice and does not subscribe when the product is not in Supabase', async () => {
+  it('self-registers the product in Supabase when not already tracked centrally, then subscribes', async () => {
     const { client, calls } = makeFakeClient({ product: null })
+    const source = new SupabaseMonitorSource({ client })
+
+    const result = await source.addProduct({
+      productUrl: 'https://www.target.com/p/A-99999999',
+      retailer: 'target',
+      productKey: '99999999',
+      productName: 'Some New Item',
+      maxPrice: null
+    })
+
+    expect(result).toEqual({ subscribed: true, productId: 'prod-new' })
+    expect(calls.registerCalls[0]).toMatchObject({
+      row: {
+        retailer: 'target',
+        product_key: '99999999',
+        product_url: 'https://www.target.com/p/A-99999999',
+        name: 'Some New Item',
+        active: true
+      },
+      opts: { onConflict: 'retailer,product_key' }
+    })
+    expect(calls.channels[0].name).toBe('drops:product:prod-new')
+  })
+
+  it('emits a notice and does not subscribe when self-registration fails', async () => {
+    const { client, calls } = makeFakeClient({
+      product: null,
+      registerResult: { data: null, error: { message: 'permission denied' } }
+    })
     const source = new SupabaseMonitorSource({ client })
     const notices = []
     source.on('notice', (n) => notices.push(n))
@@ -129,7 +172,10 @@ describe('SupabaseMonitorSource', () => {
 
     expect(result).toEqual({ subscribed: false })
     expect(calls.channels).toHaveLength(0)
-    expect(notices[0]).toMatchObject({ productUrl: 'https://www.target.com/p/A-99999999' })
+    expect(notices[0]).toMatchObject({
+      productUrl: 'https://www.target.com/p/A-99999999',
+      message: 'Could not register this product centrally: permission denied'
+    })
   })
 
   it('removeProduct unsubscribes the channel', async () => {
