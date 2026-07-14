@@ -8,7 +8,7 @@ function makeFakeClient({
   userId = 'user-1',
   registerResult = { data: { id: 'prod-new' }, error: null }
 }) {
-  const calls = { upserts: [], registerCalls: [], channels: [], removed: 0 }
+  const calls = { upserts: [], registerCalls: [], deletes: [], channels: [], removed: 0 }
   let dropHandler = null
   const client = {
     from: (table) => {
@@ -27,7 +27,13 @@ function makeFakeClient({
         upsert: async (row, opts) => {
           calls.upserts.push({ table, row, opts })
           return { error: null }
-        }
+        },
+        delete: () => ({
+          eq: async (column, value) => {
+            calls.deletes.push({ table, column, value })
+            return { error: null }
+          }
+        })
       }
     },
     auth: { getUser: async () => ({ data: { user: { id: userId } }, error: null }) },
@@ -178,7 +184,7 @@ describe('SupabaseMonitorSource', () => {
     })
   })
 
-  it('removeProduct unsubscribes the channel', async () => {
+  it('removeProduct deletes the subscription row and unsubscribes the channel', async () => {
     const { client, calls } = makeFakeClient({ product: SEED })
     const source = new SupabaseMonitorSource({ client })
     await source.addProduct({
@@ -188,6 +194,9 @@ describe('SupabaseMonitorSource', () => {
       maxPrice: null
     })
     await source.removeProduct('https://www.target.com/p/A-94336414')
+    expect(calls.deletes).toEqual([
+      { table: 'subscriptions', column: 'product_id', value: 'prod-1' }
+    ])
     expect(calls.removed).toBe(1)
   })
 })
