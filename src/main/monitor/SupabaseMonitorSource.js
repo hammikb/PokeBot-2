@@ -89,6 +89,11 @@ export class SupabaseMonitorSource extends EventEmitter {
   async removeProduct(productUrl) {
     const entry = this._channels.get(productUrl)
     if (!entry) return
+    // RLS on `subscriptions` scopes every row to the caller's own user_id, so this can
+    // only ever delete our own subscription — no explicit user filter needed. This is
+    // what actually decrements the central ref count; the `subscriptions_sync_product_active`
+    // trigger then deactivates the product once the last subscriber's row is gone.
+    await this._client.from('subscriptions').delete().eq('product_id', entry.productId)
     await this._client.removeChannel(entry.channel)
     this._channels.delete(productUrl)
     this._byProduct.delete(entry.productId)
