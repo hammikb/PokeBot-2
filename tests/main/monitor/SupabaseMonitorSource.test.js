@@ -1,25 +1,34 @@
 import { describe, expect, it } from 'vitest'
 import { SupabaseMonitorSource } from '../../../src/main/monitor/SupabaseMonitorSource.js'
 
-// Fake supabase client. Captures upserts, channel creation, and lets the test
+// Fake supabase client. Captures upserts/inserts, channel creation, and lets the test
 // fire a broadcast into the registered handler.
 function makeFakeClient({
   product,
+  refetchResult = product,
   userId = 'user-1',
-  registerResult = { data: { id: 'prod-new' }, error: null }
+  insertResult = { data: { id: 'prod-new' }, error: null }
 }) {
-  const calls = { upserts: [], registerCalls: [], deletes: [], channels: [], removed: 0 }
+  const calls = { upserts: [], insertCalls: [], deletes: [], channels: [], removed: 0 }
   let dropHandler = null
+  let selectCallCount = 0
   const client = {
     from: (table) => {
       if (table === 'products') {
         return {
           select: () => ({
-            match: () => ({ maybeSingle: async () => ({ data: product, error: null }) })
+            match: () => ({
+              maybeSingle: async () => {
+                selectCallCount += 1
+                // First lookup returns `product`; a second lookup (the race-recovery
+                // re-fetch after a 23505) returns `refetchResult`.
+                return { data: selectCallCount === 1 ? product : refetchResult, error: null }
+              }
+            })
           }),
-          upsert: (row, opts) => {
-            calls.registerCalls.push({ row, opts })
-            return { select: () => ({ single: async () => registerResult }) }
+          insert: (row) => {
+            calls.insertCalls.push({ row })
+            return { select: () => ({ single: async () => insertResult }) }
           }
         }
       }
@@ -147,23 +156,41 @@ describe('SupabaseMonitorSource', () => {
     })
 
     expect(result).toEqual({ subscribed: true, productId: 'prod-new' })
-    expect(calls.registerCalls[0]).toMatchObject({
+    expect(calls.insertCalls[0]).toMatchObject({
       row: {
         retailer: 'target',
         product_key: '99999999',
         product_url: 'https://www.target.com/p/A-99999999',
         name: 'Some New Item',
         active: true
-      },
-      opts: { onConflict: 'retailer,product_key' }
+      }
     })
     expect(calls.channels[0].name).toBe('drops:product:prod-new')
+  })
+
+  it('re-fetches and subscribes when another caller registers the product first (race)', async () => {
+    const { client, calls } = makeFakeClient({
+      product: null,
+      refetchResult: { id: 'prod-raced' },
+      insertResult: { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint' } }
+    })
+    const source = new SupabaseMonitorSource({ client })
+
+    const result = await source.addProduct({
+      productUrl: 'https://www.target.com/p/A-99999999',
+      retailer: 'target',
+      productKey: '99999999',
+      maxPrice: null
+    })
+
+    expect(result).toEqual({ subscribed: true, productId: 'prod-raced' })
+    expect(calls.channels[0].name).toBe('drops:product:prod-raced')
   })
 
   it('emits a notice and does not subscribe when self-registration fails', async () => {
     const { client, calls } = makeFakeClient({
       product: null,
-      registerResult: { data: null, error: { message: 'permission denied' } }
+      insertResult: { data: null, error: { message: 'permission denied' } }
     })
     const source = new SupabaseMonitorSource({ client })
     const notices = []

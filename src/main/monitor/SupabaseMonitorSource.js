@@ -23,33 +23,51 @@ export class SupabaseMonitorSource extends EventEmitter {
 
     if (!product) {
       // Central monitoring needs a row in the shared `products` table before anything
-      // can watch it. RLS lets any authenticated user insert one (scoped to
-      // target/walmart), so self-register here instead of requiring a separate
-      // "publish from Catalog" step that no longer exists in the UI. Upsert (not
-      // insert) so two accounts starting the same product concurrently don't race
-      // each other into a unique-constraint error.
-      const registerResult = await this._client
+      // can watch it. `authenticated` only has an INSERT grant here (deliberately no
+      // UPDATE — only the subscriptions_sync_product_active trigger may ever flip
+      // `active`), so this must be a plain insert, not an upsert: upsert compiles to
+      // INSERT ... ON CONFLICT DO UPDATE, and Postgres requires the UPDATE privilege
+      // to plan that statement at all, even when no conflict occurs — it fails with
+      // "permission denied for table products" rather than an RLS error, which is
+      // easy to misdiagnose as an RLS gap when it's actually a missing GRANT.
+      const insertResult = await this._client
         .from('products')
-        .upsert(
-          {
-            retailer,
-            product_key: productKey,
-            product_url: productUrl,
-            name: productName || productKey,
-            active: true
-          },
-          { onConflict: 'retailer,product_key' }
-        )
+        .insert({
+          retailer,
+          product_key: productKey,
+          product_url: productUrl,
+          name: productName || productKey,
+          active: true
+        })
         .select('id')
         .single()
-      if (registerResult.error) {
+
+      if (insertResult.error?.code === '23505') {
+        // Lost the race — another caller registered this exact product between our
+        // lookup above and this insert. Their row is just as good as ours would have
+        // been; use it.
+        const refetch = await this._client
+          .from('products')
+          .select('id')
+          .match({ retailer, product_key: productKey })
+          .maybeSingle()
+        if (!refetch.data) {
+          this.emit('notice', {
+            productUrl,
+            message: `Could not register this product centrally: ${insertResult.error.message}`
+          })
+          return { subscribed: false }
+        }
+        product = refetch.data
+      } else if (insertResult.error) {
         this.emit('notice', {
           productUrl,
-          message: `Could not register this product centrally: ${registerResult.error.message}`
+          message: `Could not register this product centrally: ${insertResult.error.message}`
         })
         return { subscribed: false }
+      } else {
+        product = insertResult.data
       }
-      product = registerResult.data
     }
 
     const productId = product.id
