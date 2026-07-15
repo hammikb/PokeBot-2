@@ -69,6 +69,7 @@ export default function Tasks() {
   const [form, setForm] = useState(makeDefaultForm)
   const [taskActionMessage, setTaskActionMessage] = useState('')
   const [handledEditTaskId, setHandledEditTaskId] = useState(null)
+  const [handledChooseProduct, setHandledChooseProduct] = useState(null)
   const [catalogFilter, setCatalogFilter] = useState('')
   const [productUrl, setProductUrl] = useState('')
   const [productEntryMessage, setProductEntryMessage] = useState('')
@@ -249,10 +250,22 @@ export default function Tasks() {
     if (task) editTask(task, { isNew: Boolean(location.state?.newTask) })
   }
 
+  // Arriving from Catalog with a product to create a task from. This opens the
+  // builder in create mode via the same chooseProduct() path as the inline central-
+  // catalog search below — no task/monitor exists yet until the user actually submits,
+  // unlike the old flow that pre-created a bare task row Catalog-side.
+  const pendingChooseProduct = location.state?.chooseProduct ?? null
+  if (pendingChooseProduct && pendingChooseProduct !== handledChooseProduct) {
+    setHandledChooseProduct(pendingChooseProduct)
+    chooseProduct(pendingChooseProduct)
+  }
+
   // Clearing router state is a real side effect (history mutation), so it
   // stays in an Effect — but it never touches this component's own state.
   useEffect(() => {
-    if (location.state?.editTaskId) navigate(location.pathname, { replace: true, state: {} })
+    if (location.state?.editTaskId || location.state?.chooseProduct) {
+      navigate(location.pathname, { replace: true, state: {} })
+    }
   }, [location.state, location.pathname, navigate])
 
   const runCheckoutTest = async (task) => {

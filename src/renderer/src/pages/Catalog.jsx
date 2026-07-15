@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/appStore'
-import { RETAILER_BUY_LIMITS } from '../../../shared/constants'
 
 export default function Catalog() {
   const {
@@ -9,7 +8,6 @@ export default function Catalog() {
     catalogMessage,
     addCatalogUrl,
     deleteCatalogItem,
-    createTask,
     supabaseCatalog,
     loadSupabaseCatalog,
     tasks,
@@ -56,31 +54,16 @@ export default function Catalog() {
     }
   }
 
-  const createTaskFromItem = async (item) => {
+  const createTaskFromItem = (item) => {
     if (taskedProductUrls.has(item.product_url)) {
       setStatus('A task for this item already exists.')
       return
     }
-    setBusyId(item.id)
-    setStatus('Creating task...')
-    try {
-      const id = await createTask({
-        retailer: item.retailer,
-        productUrl: item.product_url,
-        productName: item.title,
-        productImageUrl: item.image_url,
-        buyLimit: RETAILER_BUY_LIMITS[item.retailer] || 1,
-        maxPrice: item.msrp || item.current_price || null,
-        mode: 'monitor-and-buy',
-        accountIds: [],
-        intervalMs: 4000
-      })
-      navigate('/tasks', { state: { editTaskId: id } })
-    } catch (err) {
-      setStatus(err.message || 'Could not create task')
-    } finally {
-      setBusyId('')
-    }
+    // Hand the product straight to the Tasks page's builder instead of pre-creating a
+    // bare `tasks` row here — that row had no matching `product_monitors`/`monitor_sources`
+    // entry, so editing it later always looked like a brand-new monitor and created a
+    // duplicate instead of updating it.
+    navigate('/tasks', { state: { chooseProduct: item } })
   }
 
   const refreshSupabaseCatalog = async () => {
@@ -93,30 +76,12 @@ export default function Catalog() {
     }
   }
 
-  const createTaskFromSupabaseItem = async (item) => {
+  const createTaskFromSupabaseItem = (item) => {
     if (taskedProductUrls.has(item.product_url)) {
       setStatus('A task for this item already exists.')
       return
     }
-    setBusyId(item.id)
-    setStatus('Creating task...')
-    try {
-      const id = await createTask({
-        retailer: item.retailer,
-        productUrl: item.product_url,
-        productName: item.name,
-        buyLimit: RETAILER_BUY_LIMITS[item.retailer] || 1,
-        maxPrice: null,
-        mode: 'monitor-and-buy',
-        accountIds: [],
-        intervalMs: 4000
-      })
-      navigate('/tasks', { state: { editTaskId: id } })
-    } catch (err) {
-      setStatus(err.message || 'Could not create task')
-    } finally {
-      setBusyId('')
-    }
+    navigate('/tasks', { state: { chooseProduct: item } })
   }
 
   const searchWalmartMatch = async (item) => {
@@ -132,30 +97,14 @@ export default function Catalog() {
     }
   }
 
-  const createWalmartTask = async (item, { productUrl, productName }) => {
+  const createWalmartTask = (item, { productUrl, productName }) => {
     if (taskedProductUrls.has(productUrl)) {
       setStatus('A task for this item already exists.')
       return
     }
-    setBusyId(item.id)
-    setStatus('Creating task...')
-    try {
-      const id = await createTask({
-        retailer: 'walmart',
-        productUrl,
-        productName,
-        buyLimit: RETAILER_BUY_LIMITS.walmart || 1,
-        maxPrice: null,
-        mode: 'monitor-and-buy',
-        accountIds: [],
-        intervalMs: 4000
-      })
-      navigate('/tasks', { state: { editTaskId: id } })
-    } catch (err) {
-      setStatus(err.message || 'Could not create task')
-    } finally {
-      setBusyId('')
-    }
+    navigate('/tasks', {
+      state: { chooseProduct: { retailer: 'walmart', product_url: productUrl, name: productName } }
+    })
   }
 
   const applyWalmartCandidate = async (item, candidate) => {
@@ -168,7 +117,8 @@ export default function Catalog() {
       setBusyId('')
       return
     }
-    await createWalmartTask(item, { productUrl: candidate.url, productName: candidate.name })
+    createWalmartTask(item, { productUrl: candidate.url, productName: candidate.name })
+    setBusyId('')
   }
 
   return (
