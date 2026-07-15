@@ -211,7 +211,7 @@ describe('SupabaseMonitorSource', () => {
     })
   })
 
-  it('removeProduct deletes the subscription row and unsubscribes the channel', async () => {
+  it('unsubscribe deletes the subscription row and tears down the channel', async () => {
     const { client, calls } = makeFakeClient({ product: SEED })
     const source = new SupabaseMonitorSource({ client })
     await source.addProduct({
@@ -220,10 +220,49 @@ describe('SupabaseMonitorSource', () => {
       productKey: '94336414',
       maxPrice: null
     })
-    await source.removeProduct('https://www.target.com/p/A-94336414')
+    await source.unsubscribe({
+      productUrl: 'https://www.target.com/p/A-94336414',
+      retailer: 'target',
+      productKey: '94336414'
+    })
     expect(calls.deletes).toEqual([
       { table: 'subscriptions', column: 'product_id', value: 'prod-1' }
     ])
     expect(calls.removed).toBe(1)
+  })
+
+  it('unsubscribe works without an active channel by looking the product up by key', async () => {
+    // A task deleted while not running never called addProduct this session,
+    // so there is no channel entry — the subscription row must still go away
+    // or the Pi keeps monitoring a product nobody is watching.
+    const { client, calls } = makeFakeClient({ product: SEED })
+    const source = new SupabaseMonitorSource({ client })
+
+    await source.unsubscribe({
+      productUrl: 'https://www.target.com/p/A-94336414',
+      retailer: 'target',
+      productKey: '94336414'
+    })
+
+    expect(calls.deletes).toEqual([
+      { table: 'subscriptions', column: 'product_id', value: 'prod-1' }
+    ])
+    expect(calls.removed).toBe(0)
+  })
+
+  it('stop() releases channels but keeps subscriptions (app quit is not "stop watching")', async () => {
+    const { client, calls } = makeFakeClient({ product: SEED })
+    const source = new SupabaseMonitorSource({ client })
+    await source.addProduct({
+      productUrl: 'https://www.target.com/p/A-94336414',
+      retailer: 'target',
+      productKey: '94336414',
+      maxPrice: null
+    })
+
+    await source.stop()
+
+    expect(calls.removed).toBe(1)
+    expect(calls.deletes).toEqual([])
   })
 })

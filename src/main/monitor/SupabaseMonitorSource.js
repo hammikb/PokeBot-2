@@ -104,22 +104,45 @@ export class SupabaseMonitorSource extends EventEmitter {
     })
   }
 
-  async removeProduct(productUrl) {
+  // Tear down the realtime channel for a product without touching the central
+  // subscription row. Used on app quit: closing the app is not "stop watching" —
+  // the Pi should keep monitoring while the user's task still exists.
+  async releaseChannel(productUrl) {
     const entry = this._channels.get(productUrl)
     if (!entry) return
-    // RLS on `subscriptions` scopes every row to the caller's own user_id, so this can
-    // only ever delete our own subscription — no explicit user filter needed. This is
-    // what actually decrements the central ref count; the `subscriptions_sync_product_active`
-    // trigger then deactivates the product once the last subscriber's row is gone.
-    await this._client.from('subscriptions').delete().eq('product_id', entry.productId)
     await this._client.removeChannel(entry.channel)
     this._channels.delete(productUrl)
     this._byProduct.delete(entry.productId)
   }
 
+  // Explicitly stop watching: delete this user's subscription row (the central
+  // ref-count decrement — the `subscriptions_sync_product_active` trigger then
+  // deactivates the product once the last subscriber leaves) and tear down the
+  // channel if one is open. Works without a channel too: a task deleted while
+  // not running never called addProduct this session, so the product id is
+  // looked up by (retailer, product_key) instead. RLS on `subscriptions` scopes
+  // deletes to the caller's own user_id — no explicit user filter needed.
+  async unsubscribe({ productUrl, retailer, productKey }) {
+    const entry = productUrl ? this._channels.get(productUrl) : null
+    let productId = entry?.productId ?? null
+    if (entry) await this.releaseChannel(productUrl)
+
+    if (!productId && retailer && productKey) {
+      const { data } = await this._client
+        .from('products')
+        .select('id')
+        .match({ retailer, product_key: productKey })
+        .maybeSingle()
+      productId = data?.id ?? null
+    }
+    if (!productId) return
+
+    await this._client.from('subscriptions').delete().eq('product_id', productId)
+  }
+
   async stop() {
     for (const productUrl of [...this._channels.keys()]) {
-      await this.removeProduct(productUrl)
+      await this.releaseChannel(productUrl)
     }
   }
 }

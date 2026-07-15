@@ -504,12 +504,14 @@ export function registerIpcHandlers({
     }
     return listProductMonitors(db).find((monitor) => monitor.id === monitorId)
   })
-  ipcMain.handle(IPC.MONITORS_DELETE, (_, id) => {
+  ipcMain.handle(IPC.MONITORS_DELETE, async (_, id) => {
     const db = getDb()
     const sources = db.prepare('SELECT task_id FROM monitor_sources WHERE monitor_id = ?').all(id)
     for (const source of sources) {
       if (!source.task_id) continue
+      const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(source.task_id)
       taskManager.stopTask(source.task_id)
+      if (task) await taskManager.unsubscribeCentral(task).catch(() => {})
       db.prepare('DELETE FROM tasks WHERE id = ?').run(source.task_id)
     }
     db.prepare('DELETE FROM monitor_sources WHERE monitor_id = ?').run(id)
@@ -540,8 +542,13 @@ export function registerIpcHandlers({
     taskManager.stopTask(id)
     return true
   })
-  ipcMain.handle(IPC.TASKS_DELETE, (_, id) => {
+  ipcMain.handle(IPC.TASKS_DELETE, async (_, id) => {
+    const task = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(id)
     taskManager.stopTask(id)
+    // stopTask only unsubscribes tasks running in this session; a deleted task
+    // that was stopped (or from a previous session) must still drop its central
+    // subscription or the Pi keeps monitoring it. Idempotent if both run.
+    if (task) await taskManager.unsubscribeCentral(task).catch(() => {})
     getDb().prepare('DELETE FROM tasks WHERE id = ?').run(id)
     return true
   })

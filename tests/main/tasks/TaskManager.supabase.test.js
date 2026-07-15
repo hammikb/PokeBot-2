@@ -13,7 +13,8 @@ import { TaskManager } from '../../../src/main/tasks/TaskManager.js'
 function makeFakeSource() {
   const source = new EventEmitter()
   source.addProduct = vi.fn(async () => ({ subscribed: true, productId: 'prod-1' }))
-  source.removeProduct = vi.fn(async () => {})
+  source.unsubscribe = vi.fn(async () => {})
+  source.releaseChannel = vi.fn(async () => {})
   source.stop = vi.fn(async () => {})
   return source
 }
@@ -78,6 +79,51 @@ describe('TaskManager monitor mode', () => {
       dropType: 'in_stock'
     })
     await vi.waitFor(() => expect(drops).toHaveLength(1))
+  })
+
+  it('stopTask unsubscribes centrally (explicit stop means stop watching)', async () => {
+    const { manager, source } = makeManager('supabase')
+    manager.startTask(TARGET_TASK)
+    await vi.waitFor(() => expect(source.addProduct).toHaveBeenCalled())
+
+    manager.stopTask('task-1')
+
+    expect(source.unsubscribe).toHaveBeenCalledWith({
+      productUrl: 'https://www.target.com/p/A-94336414',
+      retailer: 'target',
+      productKey: '94336414'
+    })
+  })
+
+  it('stopAll({ unsubscribe: false }) releases channels but keeps subscriptions (app quit)', async () => {
+    const { manager, source } = makeManager('supabase')
+    manager.startTask(TARGET_TASK)
+    await vi.waitFor(() => expect(source.addProduct).toHaveBeenCalled())
+
+    manager.stopAll({ unsubscribe: false })
+
+    expect(source.unsubscribe).not.toHaveBeenCalled()
+    expect(source.releaseChannel).toHaveBeenCalledWith('https://www.target.com/p/A-94336414')
+  })
+
+  it('unsubscribeCentral removes the subscription for a task that is not running', async () => {
+    const { manager, source } = makeManager('supabase')
+
+    await manager.unsubscribeCentral(TARGET_TASK)
+
+    expect(source.unsubscribe).toHaveBeenCalledWith({
+      productUrl: 'https://www.target.com/p/A-94336414',
+      retailer: 'target',
+      productKey: '94336414'
+    })
+  })
+
+  it('unsubscribeCentral is a no-op in local mode', async () => {
+    const { manager, source } = makeManager('local')
+
+    await manager.unsubscribeCentral(TARGET_TASK)
+
+    expect(source.unsubscribe).not.toHaveBeenCalled()
   })
 
   it('setMonitorMode stops active tasks and restarts them under the new source', async () => {

@@ -160,10 +160,24 @@ export class TaskManager extends EventEmitter {
     })
   }
 
-  stopTask(id) {
+  stopTask(id, { unsubscribe = true } = {}) {
     const entry = this._tasks.get(id)
     if (entry?.source === 'supabase') {
-      this._supabaseSource?.removeProduct(entry.product_url).catch(() => {})
+      if (unsubscribe) {
+        // Explicit stop = this user stops watching: decrement the central
+        // ref count so the Pi drops the product once nobody else watches it.
+        this._supabaseSource
+          ?.unsubscribe({
+            productUrl: entry.product_url,
+            retailer: entry.retailer,
+            productKey: extractProductKey(entry.retailer, entry.product_url)
+          })
+          .catch(() => {})
+      } else {
+        // App shutdown: close the realtime channel but keep the subscription —
+        // quitting the app is not "stop watching this product".
+        this._supabaseSource?.releaseChannel(entry.product_url).catch(() => {})
+      }
     } else {
       this._monitor.removeTask(id)
     }
@@ -171,8 +185,21 @@ export class TaskManager extends EventEmitter {
     this._emitStatus(id, 'idle')
   }
 
-  stopAll() {
-    for (const id of [...this._tasks.keys()]) this.stopTask(id)
+  stopAll({ unsubscribe = true } = {}) {
+    for (const id of [...this._tasks.keys()]) this.stopTask(id, { unsubscribe })
+  }
+
+  // Remove this user's central subscription for a task regardless of whether it
+  // is currently running — deleting a stopped task must still tell Supabase, or
+  // the Pi keeps monitoring a product nobody is watching. No-op in local mode.
+  async unsubscribeCentral(taskRow) {
+    if ((this._getSettings().monitorMode || 'local') !== 'supabase') return
+    const source = await this._getSupabaseSource()
+    await source.unsubscribe({
+      productUrl: taskRow.product_url,
+      retailer: taskRow.retailer,
+      productKey: extractProductKey(taskRow.retailer, taskRow.product_url)
+    })
   }
 
   async setMonitorMode() {

@@ -193,7 +193,10 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
-  taskManager?.stopAll()
+  // Keep central subscriptions on quit — closing the app is not "stop watching";
+  // the Pi should keep monitoring this user's products until they explicitly
+  // stop or delete the task.
+  taskManager?.stopAll({ unsubscribe: false })
   queueJoiner?.stopAll()
   if (process.platform !== 'darwin') app.quit()
 })

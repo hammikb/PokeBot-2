@@ -231,7 +231,7 @@ function createSqliteDb(dbPath) {
   }
 }
 
-class JsonDb {
+export class JsonDb {
   constructor(dbPath) {
     this.path = getJsonDbPath(dbPath)
     this.tables = loadTables(this.path)
@@ -308,12 +308,22 @@ class JsonStatement {
   }
 
   _select(args) {
-    const match = this.sql.match(/^SELECT (.+) FROM (\w+)(?: WHERE (\w+) = \?)?/)
+    const match = this.sql.match(/^SELECT (.+?) FROM (\w+)(?: WHERE (.+?))?(?: ORDER BY .+)?$/)
     if (!match) return []
 
-    const [, fields, table, whereColumn] = match
+    const [, fields, table, whereClause] = match
     let rows = [...(this.db.tables[table] || [])]
-    if (whereColumn) rows = rows.filter((row) => row[whereColumn] === args[0])
+    if (whereClause) {
+      // Only simple `col = ?` conditions joined by AND — everything this app's
+      // SQL actually uses. Placeholders map to args in order of appearance.
+      const conditions = whereClause
+        .split(/\s+AND\s+/i)
+        .map((part) => part.match(/^(\w+)\s*=\s*\?$/))
+      if (conditions.some((condition) => !condition)) return []
+      rows = rows.filter((row) =>
+        conditions.every((condition, index) => row[condition[1]] === args[index])
+      )
+    }
     if (fields === '*') return rows.map((row) => ({ ...row }))
 
     const columns = fields.split(',').map((field) => field.trim())
@@ -331,13 +341,30 @@ class JsonStatement {
     const row = Object.fromEntries(columns.map((column, index) => [column, args[index] ?? null]))
     applyDefaults(table, row)
 
+    // INSERT ... ON CONFLICT(cols) DO UPDATE SET a = excluded.a, ... — upsert.
+    // Without this branch every "update" from MONITORS_SAVE appended a duplicate
+    // row with the same id, which is exactly what real SQLite's conflict clause
+    // prevents. Match on every conflict column; update only the SET-listed
+    // columns (SQLite preserves the rest, e.g. created_at, so we must too).
+    const conflict = this.sql.match(/ON CONFLICT\s*\(([^)]+)\)\s*DO UPDATE SET\s+(.+)$/i)
+    if (conflict) {
+      const conflictColumns = conflict[1].split(',').map((column) => column.trim())
+      const setColumns = conflict[2]
+        .split(',')
+        .map((clause) => clause.match(/^\s*(\w+)\s*=\s*excluded\.\w+\s*$/i)?.[1])
+        .filter(Boolean)
+      const existing = (this.db.tables[table] || []).find((candidate) =>
+        conflictColumns.every((column) => candidate[column] === row[column])
+      )
+      if (existing) {
+        for (const column of setColumns) existing[column] = row[column]
+        this.db._flush()
+        return this._ok(1)
+      }
+    }
+
     if (this.sql.startsWith('INSERT OR REPLACE')) {
-      const primaryKey =
-        table === 'settings'
-          ? 'key'
-          : table === 'catalog_walmart_matches'
-            ? 'target_product_key'
-            : 'id'
+      const primaryKey = tablePrimaryKey(table)
       this.db.tables[table] = this.db.tables[table].filter(
         (existing) => existing[primaryKey] !== row[primaryKey]
       )
@@ -380,10 +407,26 @@ class JsonStatement {
   }
 }
 
+function tablePrimaryKey(table) {
+  if (table === 'settings') return 'key'
+  if (table === 'catalog_walmart_matches') return 'target_product_key'
+  return 'id'
+}
+
 function loadTables(path) {
   const tables = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {}
   for (const table of Object.keys(TABLE_COLUMNS)) {
     tables[table] ||= []
+  }
+  // Repair duplicate primary keys left behind by the pre-upsert _insert bug
+  // (ON CONFLICT statements used to append instead of update). Keep the last
+  // occurrence — it carries the most recent save.
+  for (const [table, rows] of Object.entries(tables)) {
+    if (!Array.isArray(rows)) continue
+    const primaryKey = tablePrimaryKey(table)
+    const byKey = new Map()
+    for (const row of rows) byKey.set(row[primaryKey], row)
+    if (byKey.size !== rows.length) tables[table] = [...byKey.values()]
   }
   return tables
 }
