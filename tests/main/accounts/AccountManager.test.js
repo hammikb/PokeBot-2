@@ -106,6 +106,41 @@ describe('AccountManager', () => {
     expect(accounts[0].proxy).toBe('new-proxy')
   })
 
+  it('prevents two accounts from sharing one sticky proxy', async () => {
+    await manager.create({
+      name: 'A',
+      retailer: 'target',
+      username: 'a',
+      password: 'p',
+      proxy: '1.2.3.4:8080:user:sticky-a'
+    })
+
+    await expect(
+      manager.create({
+        name: 'B',
+        retailer: 'target',
+        username: 'b',
+        password: 'p',
+        proxy: '1.2.3.4:8080:user:sticky-a'
+      })
+    ).rejects.toThrow('already assigned')
+  })
+
+  it('assigns a different available proxy to every account', async () => {
+    await manager.create({ name: 'A', retailer: 'target', username: 'a', password: 'p' })
+    await manager.create({ name: 'B', retailer: 'target', username: 'b', password: 'p' })
+
+    const result = manager.assignUniqueProxies([
+      '1.2.3.4:8080:user:sticky-a',
+      '1.2.3.4:8080:user:sticky-b'
+    ])
+    const assigned = manager.getAll().map((account) => account.proxy)
+
+    expect(result.unassigned).toHaveLength(0)
+    expect(new Set(assigned).size).toBe(2)
+    expect(assigned.every(Boolean)).toBe(true)
+  })
+
   it('assigns a payment method to a Target account', async () => {
     const id = await manager.create({
       name: 'Target',

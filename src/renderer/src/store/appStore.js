@@ -71,6 +71,11 @@ export const useAppStore = create((set, get) => ({
     const accounts = await invoke(IPC.ACCOUNTS_GET)
     set({ accounts })
   },
+  assignAccountProxies: async () => {
+    const result = await invoke(IPC.ACCOUNTS_ASSIGN_PROXIES)
+    await get().loadAccounts()
+    return result
+  },
   loadCatalog: async () => {
     try {
       const catalogItems = await invoke(IPC.CATALOG_GET)

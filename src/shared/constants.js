@@ -56,6 +56,7 @@ export const IPC = {
   ACCOUNTS_AUTO_LOGIN: 'accounts:auto-login',
   ACCOUNTS_WARMUP: 'accounts:warmup',
   ACCOUNTS_COOKIE_HEALTH: 'accounts:cookie-health',
+  ACCOUNTS_ASSIGN_PROXIES: 'accounts:assign-proxies',
   PROGRESS_STREAM_START: 'progress:stream:start',
   PROGRESS_STREAM_STEP: 'progress:stream:step',
   PROGRESS_STREAM_UPDATE: 'progress:stream:update',

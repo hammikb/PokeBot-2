@@ -27,6 +27,7 @@ const makeEmptyForm = () => ({
 export default function Accounts() {
   const {
     accounts,
+    settings,
     paymentMethods,
     createAccount,
     updateAccount,
@@ -37,7 +38,8 @@ export default function Accounts() {
     prepareAccountSession,
     inspectAccountCookies,
     checkAccountSession,
-    autoLoginTargetAccount
+    autoLoginTargetAccount,
+    assignAccountProxies
   } = useAppStore()
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(makeEmptyForm)
@@ -47,7 +49,9 @@ export default function Accounts() {
   const [sessionPreparingId, setSessionPreparingId] = useState('')
   const [cookieCheckingId, setCookieCheckingId] = useState('')
   const [autoLoginId, setAutoLoginId] = useState('')
+  const [proxyStatus, setProxyStatus] = useState('')
   const proxyCounts = getProxyCounts(accounts)
+  const proxies = Array.isArray(settings.proxies) ? settings.proxies : []
 
   useEffect(() => {
     loadPaymentMethods()
@@ -130,6 +134,21 @@ export default function Accounts() {
     }
   }
 
+  const assignProxies = async () => {
+    setProxyStatus('Assigning one sticky proxy per account...')
+    try {
+      const result = await assignAccountProxies()
+      const missing = result.unassigned.length
+        ? ` ${result.unassigned.length} account(s) still need a proxy.`
+        : ''
+      setProxyStatus(
+        `Assigned unique proxies to ${result.assignedCount}/${result.accountCount} accounts.${missing}`
+      )
+    } catch (err) {
+      setProxyStatus(err.message || 'Could not assign proxies')
+    }
+  }
+
   return (
     <div className="p-4 space-y-4 overflow-y-auto h-full">
       <div className="flex justify-between items-center">
@@ -148,7 +167,21 @@ export default function Accounts() {
         >
           {showForm ? 'Cancel' : '+ Add Account'}
         </button>
+        <button
+          type="button"
+          onClick={assignProxies}
+          disabled={accounts.length === 0 || proxies.length === 0}
+          className="text-sm border border-cyan-700 text-cyan-400 hover:border-cyan-500 disabled:border-gray-800 disabled:text-gray-700 px-4 py-2 rounded uppercase tracking-wider font-bold"
+        >
+          Assign unique proxies
+        </button>
       </div>
+
+      {proxyStatus && (
+        <div className="bg-[#111] border border-gray-800 rounded px-4 py-3 text-sm text-gray-500">
+          {proxyStatus}
+        </div>
+      )}
 
       {showForm && (
         <form
@@ -291,6 +324,35 @@ export default function Accounts() {
                     proxy: {proxyHost(account.proxy)} ({proxyCounts[account.proxy] || 0} accounts)
                   </div>
                 )}
+                <select
+                  value={account.proxy || ''}
+                  onChange={async (event) => {
+                    try {
+                      await updateAccount(account.id, { proxy: event.target.value })
+                      setProxyStatus(`Updated sticky proxy for ${account.name}`)
+                    } catch (err) {
+                      setProxyStatus(err.message || 'Could not update proxy')
+                    }
+                  }}
+                  className="mt-2 max-w-sm bg-[#0f0f0f] border border-gray-700 rounded px-2 py-1.5 text-gray-300"
+                  aria-label={`Sticky proxy for ${account.name}`}
+                >
+                  <option value="">No proxy (direct connection)</option>
+                  {account.proxy && !proxies.includes(account.proxy) && (
+                    <option value={account.proxy}>{maskProxy(account.proxy)} (current)</option>
+                  )}
+                  {proxies.map((proxy) => {
+                    const usedByAnother = accounts.some(
+                      (candidate) => candidate.id !== account.id && candidate.proxy === proxy
+                    )
+                    return (
+                      <option key={proxy} value={proxy} disabled={usedByAnother}>
+                        {maskProxy(proxy)}
+                        {usedByAnother ? ' (assigned)' : ''}
+                      </option>
+                    )
+                  })}
+                </select>
               </div>
               {account.status === 'unverified' && (
                 <button
@@ -378,6 +440,12 @@ function getProxyCounts(accounts) {
 function proxyHost(proxy) {
   const [host, port] = proxy.split(':')
   return host && port ? `${host}:${port}` : proxy
+}
+
+function maskProxy(proxy) {
+  const parts = String(proxy || '').split(':')
+  if (parts.length < 4) return proxy
+  return `${parts[0]}:${parts[1]}:${parts[2]}:password hidden`
 }
 
 function parseShipping(value) {

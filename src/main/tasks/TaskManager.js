@@ -655,7 +655,11 @@ export class TaskManager extends EventEmitter {
               },
               onMilestone: (stage, detail) => {
                 this._checkoutTelemetry?.record(attemptId, stage, `milestone:${detail}`)
-              }
+              },
+              // SHAPE COOKIE MANAGEMENT: Pass the browser pool and account ID
+              // so TargetFlow can monitor and refresh Shape session health
+              browserPool: this._pool,
+              accountId: accountId
             })
             if (
               !flowResult?.success &&

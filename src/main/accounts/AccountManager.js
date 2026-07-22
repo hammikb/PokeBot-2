@@ -35,6 +35,8 @@ export class AccountManager {
     shipping = {},
     status = 'active'
   }) {
+    const normalizedProxy = normalizeProxy(proxy)
+    this._assertProxyAvailable(normalizedProxy)
     const base = await this._getProfileBase()
     const id = randomUUID()
     const profilePath = join(base, id)
@@ -52,7 +54,7 @@ export class AccountManager {
         username,
         encrypt(password, this._key),
         cvv ? encrypt(cvv, this._key) : '',
-        proxy,
+        normalizedProxy,
         profilePath,
         JSON.stringify(shipping),
         paymentMethodId || null,
@@ -90,7 +92,73 @@ export class AccountManager {
     for (const [k, v] of Object.entries(fields)) {
       const column = allowed[k]
       if (!column) continue
-      this._getDb().prepare(`UPDATE accounts SET ${column} = ? WHERE id = ?`).run(v, id)
+      const value = k === 'proxy' ? normalizeProxy(v) : v
+      if (k === 'proxy') this._assertProxyAvailable(value, id)
+      this._getDb().prepare(`UPDATE accounts SET ${column} = ? WHERE id = ?`).run(value, id)
+    }
+  }
+
+  findAvailableProxy(proxies = []) {
+    const assigned = new Set(
+      this.getAll()
+        .map((account) => normalizeProxy(account.proxy))
+        .filter(Boolean)
+    )
+    return normalizeProxyPool(proxies).find((proxy) => !assigned.has(proxy)) || ''
+  }
+
+  assignUniqueProxies(proxies = []) {
+    const pool = normalizeProxyPool(proxies)
+    const accounts = this.getAll()
+    const claimed = new Set()
+    const needsAssignment = []
+    const assignments = []
+
+    for (const account of accounts) {
+      const current = normalizeProxy(account.proxy)
+      if (current && !claimed.has(current)) {
+        claimed.add(current)
+      } else {
+        needsAssignment.push({ account, current })
+      }
+    }
+
+    const available = pool.filter((proxy) => !claimed.has(proxy))
+    const unassigned = []
+
+    for (const { account, current } of needsAssignment) {
+      const next = available.shift() || ''
+      if (next) claimed.add(next)
+      if (next !== current) {
+        this._getDb().prepare('UPDATE accounts SET proxy = ? WHERE id = ?').run(next, account.id)
+        assignments.push({
+          accountId: account.id,
+          accountName: account.name,
+          from: current,
+          to: next
+        })
+      }
+      if (!next) unassigned.push({ accountId: account.id, accountName: account.name })
+    }
+
+    return {
+      assignments,
+      unassigned,
+      assignedCount: accounts.length - unassigned.length,
+      accountCount: accounts.length,
+      proxyCount: pool.length
+    }
+  }
+
+  _assertProxyAvailable(proxy, excludeAccountId = null) {
+    if (!proxy) return
+    const conflict = this.getAll().find(
+      (account) => account.id !== excludeAccountId && normalizeProxy(account.proxy) === proxy
+    )
+    if (conflict) {
+      throw new Error(
+        `Proxy is already assigned to ${conflict.name}; each account needs a unique proxy`
+      )
     }
   }
 
@@ -101,4 +169,13 @@ export class AccountManager {
   delete(id) {
     this._getDb().prepare('DELETE FROM accounts WHERE id = ?').run(id)
   }
+}
+
+function normalizeProxy(proxy) {
+  return String(proxy || '').trim()
+}
+
+function normalizeProxyPool(proxies) {
+  if (!Array.isArray(proxies)) return []
+  return [...new Set(proxies.map(normalizeProxy).filter(Boolean))]
 }

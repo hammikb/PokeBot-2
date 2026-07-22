@@ -252,10 +252,35 @@ export function registerIpcHandlers({
 
   // Accounts
   ipcMain.handle(IPC.ACCOUNTS_GET, () => accountManager.getAll())
-  ipcMain.handle(IPC.ACCOUNTS_CREATE, async (_, data) => accountManager.create(data))
-  ipcMain.handle(IPC.ACCOUNTS_UPDATE, (_, id, fields) => {
+  ipcMain.handle(IPC.ACCOUNTS_CREATE, async (_, data) => {
+    const accountData = { ...(data || {}) }
+    if (!String(accountData.proxy || '').trim()) {
+      accountData.proxy = accountManager.findAvailableProxy(getSettings().proxies)
+    }
+    return accountManager.create(accountData)
+  })
+  ipcMain.handle(IPC.ACCOUNTS_UPDATE, async (_, id, fields) => {
+    const account = accountManager.getDecrypted(id)
+    if (!account) throw new Error('Account not found')
+    if (
+      Object.hasOwn(fields || {}, 'proxy') &&
+      String(fields.proxy || '').trim() !== account.proxy
+    ) {
+      if (accountHasActiveTask(id, taskManager, getDb())) {
+        throw new Error('Stop this account task before changing its sticky proxy')
+      }
+      await browserPool.close(id)
+    }
     accountManager.update(id, fields)
     return true
+  })
+  ipcMain.handle(IPC.ACCOUNTS_ASSIGN_PROXIES, async () => {
+    if (taskManager.getActiveTasks().length > 0) {
+      throw new Error('Stop active tasks before assigning sticky proxies')
+    }
+    const result = accountManager.assignUniqueProxies(getSettings().proxies)
+    await Promise.all(result.assignments.map(({ accountId }) => browserPool.close(accountId)))
+    return result
   })
   ipcMain.handle(IPC.ACCOUNTS_DELETE, (_, id) => {
     accountManager.delete(id)
@@ -277,9 +302,14 @@ export function registerIpcHandlers({
       throw new Error('retailer, email, password, firstName, and lastName are required')
     }
 
+    const stickyProxy =
+      String(proxy || '').trim() || accountManager.findAvailableProxy(getSettings().proxies)
     const tempId = `reg-${randomUUID()}`
     const tempProfilePath = join(tmpdir(), tempId)
-    const context = await browserPool.launch(tempId, { profilePath: tempProfilePath, proxy })
+    const context = await browserPool.launch(tempId, {
+      profilePath: tempProfilePath,
+      proxy: stickyProxy
+    })
 
     let result
     try {
@@ -302,7 +332,7 @@ export function registerIpcHandlers({
         username: email,
         password,
         cvv,
-        proxy,
+        proxy: stickyProxy,
         shipping,
         status: 'unverified'
       })
@@ -823,6 +853,22 @@ export function registerIpcHandlers({
   // Push events to renderer
   taskManager.on('drop', (event) => mainWindow?.webContents?.send(IPC.FEED_EVENT, event))
   taskManager.on('taskStatus', (data) => mainWindow?.webContents?.send(IPC.TASK_STATUS, data))
+}
+
+function accountHasActiveTask(accountId, taskManager, db) {
+  const activeTaskIds = new Set(taskManager.getActiveTasks())
+  if (activeTaskIds.size === 0) return false
+  return db
+    .prepare('SELECT id, account_ids FROM tasks')
+    .all()
+    .some((task) => {
+      if (!activeTaskIds.has(task.id)) return false
+      try {
+        return JSON.parse(task.account_ids || '[]').includes(accountId)
+      } catch {
+        return false
+      }
+    })
 }
 
 async function emitCatalogLookupFallback({ mainWindow, notificationEngine, productUrl, error }) {
