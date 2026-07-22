@@ -59,10 +59,10 @@ export class DebugManager extends EventEmitter {
     }
 
     this.sessions.set(sessionId, session)
-    
+
     log.debug('Debug session started', { sessionId, metadata })
     this.emit('session:start', session)
-    
+
     return session
   }
 
@@ -379,7 +379,7 @@ export class DebugManager extends EventEmitter {
       this.metrics[type] = []
       log.info('Metrics cleared', { type })
     } else {
-      Object.keys(this.metrics).forEach(key => {
+      Object.keys(this.metrics).forEach((key) => {
         this.metrics[key] = []
       })
       log.info('All metrics cleared')
@@ -399,8 +399,8 @@ export class DebugManager extends EventEmitter {
   sanitizeHeaders(headers) {
     const sanitized = { ...headers }
     const sensitiveHeaders = ['authorization', 'cookie', 'x-api-key']
-    
-    sensitiveHeaders.forEach(header => {
+
+    sensitiveHeaders.forEach((header) => {
       if (sanitized[header]) {
         sanitized[header] = '***REDACTED***'
       }
@@ -431,7 +431,7 @@ export class DebugManager extends EventEmitter {
 
   calculateProxySuccessRate() {
     if (this.metrics.proxies.length === 0) return 0
-    const successful = this.metrics.proxies.filter(p => p.status === 'success').length
+    const successful = this.metrics.proxies.filter((p) => p.status === 'success').length
     return Math.round((successful / this.metrics.proxies.length) * 100)
   }
 }

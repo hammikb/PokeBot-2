@@ -10,7 +10,11 @@ const REFRESH_TOKEN_KEY = 'authRefreshTokenEnc'
 // so a signed-in user stays signed in across app restarts. Replaces the old shared
 // "bot account" mechanism (session.js's getSupabaseSession) with real per-user identity.
 export class AuthSessionManager extends EventEmitter {
-  constructor({ getDb, encryptionKey, client = new SupabaseClient({ url: SUPABASE_URL, key: SUPABASE_KEY }) }) {
+  constructor({
+    getDb,
+    encryptionKey,
+    client = new SupabaseClient({ url: SUPABASE_URL, key: SUPABASE_KEY })
+  }) {
     super()
     this._getDb = getDb
     this._key = encryptionKey
@@ -60,7 +64,9 @@ export class AuthSessionManager extends EventEmitter {
   }
 
   _readRefreshToken() {
-    const row = this._getDb().prepare('SELECT value FROM settings WHERE key = ?').get(REFRESH_TOKEN_KEY)
+    const row = this._getDb()
+      .prepare('SELECT value FROM settings WHERE key = ?')
+      .get(REFRESH_TOKEN_KEY)
     if (!row) return null
     try {
       return decrypt(JSON.parse(row.value), this._key)

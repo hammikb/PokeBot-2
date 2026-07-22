@@ -119,7 +119,6 @@ describe('supabase catalog IPC handlers', () => {
       }
     ])
   })
-
 })
 
 describe('auth IPC handlers', () => {
@@ -146,7 +145,10 @@ describe('auth IPC handlers', () => {
 
   it('AUTH_SIGN_IN passes rememberMe: false through when the caller opts out', async () => {
     const { handlers, authSessionManager } = setup()
-    await handlers.get(IPC.AUTH_SIGN_IN)({}, { email: 'a@b.com', password: 'pw', rememberMe: false })
+    await handlers.get(IPC.AUTH_SIGN_IN)(
+      {},
+      { email: 'a@b.com', password: 'pw', rememberMe: false }
+    )
     expect(authSessionManager.signIn).toHaveBeenCalledWith('a@b.com', 'pw', false)
   })
 

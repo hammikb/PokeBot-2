@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '../store/appStore'
 import { RETAILER_BUY_LIMITS, TASK_MODES } from '../../../shared/constants'
 
-const RETAILERS = ['target', 'walmart']
+const RETAILERS = ['target', 'walmart', 'pokemon-center', 'samsclub']
 
 export default function MonitorBuilder({
   product,
@@ -28,6 +28,7 @@ export default function MonitorBuilder({
     msrp: '',
     priceCeiling: '',
     buyLimit: RETAILER_BUY_LIMITS[retailer],
+    ordersPerDrop: 1,
     accountIds: [],
     verificationStatus: 'unverified'
   })
@@ -50,6 +51,7 @@ export default function MonitorBuilder({
               msrp: byRetailer.target.msrp ?? '',
               priceCeiling: byRetailer.target.price_ceiling ?? '',
               buyLimit: byRetailer.target.buy_limit || RETAILER_BUY_LIMITS.target,
+              ordersPerDrop: byRetailer.target.orders_per_drop || 1,
               accountIds: byRetailer.target.account_ids || [],
               verificationStatus: byRetailer.target.verification_status || 'unverified'
             }
@@ -62,10 +64,37 @@ export default function MonitorBuilder({
               msrp: byRetailer.walmart.msrp ?? '',
               priceCeiling: byRetailer.walmart.price_ceiling ?? '',
               buyLimit: byRetailer.walmart.buy_limit || RETAILER_BUY_LIMITS.walmart,
+              ordersPerDrop: 1,
               accountIds: byRetailer.walmart.account_ids || [],
               verificationStatus: byRetailer.walmart.verification_status || 'unverified'
             }
-          : defaultSource('walmart')
+          : defaultSource('walmart'),
+        'pokemon-center': byRetailer['pokemon-center']
+          ? {
+              retailer: 'pokemon-center',
+              enabled: true,
+              productUrl: byRetailer['pokemon-center'].product_url || '',
+              msrp: byRetailer['pokemon-center'].msrp ?? '',
+              priceCeiling: byRetailer['pokemon-center'].price_ceiling ?? '',
+              buyLimit: 1,
+              ordersPerDrop: 1,
+              accountIds: byRetailer['pokemon-center'].account_ids || [],
+              verificationStatus: byRetailer['pokemon-center'].verification_status || 'custom-url'
+            }
+          : defaultSource('pokemon-center'),
+        samsclub: byRetailer.samsclub
+          ? {
+              retailer: 'samsclub',
+              enabled: true,
+              productUrl: byRetailer.samsclub.product_url || '',
+              msrp: byRetailer.samsclub.msrp ?? '',
+              priceCeiling: byRetailer.samsclub.price_ceiling ?? '',
+              buyLimit: byRetailer.samsclub.buy_limit || RETAILER_BUY_LIMITS.samsclub,
+              ordersPerDrop: 1,
+              accountIds: byRetailer.samsclub.account_ids || [],
+              verificationStatus: byRetailer.samsclub.verification_status || 'custom-url'
+            }
+          : defaultSource('samsclub')
       }
     }
 
@@ -80,6 +109,7 @@ export default function MonitorBuilder({
         msrp: selectedRetailer === 'target' ? catalogMsrp : '',
         priceCeiling: '',
         buyLimit: RETAILER_BUY_LIMITS.target,
+        ordersPerDrop: 1,
         accountIds: [],
         verificationStatus: selectedRetailer === 'target' ? 'catalog-matched' : 'unverified'
       },
@@ -90,12 +120,35 @@ export default function MonitorBuilder({
         msrp: selectedRetailer === 'walmart' ? catalogMsrp : '',
         priceCeiling: '',
         buyLimit: RETAILER_BUY_LIMITS.walmart,
+        ordersPerDrop: 1,
         accountIds: [],
         verificationStatus: match
           ? 'manually-verified'
           : selectedRetailer === 'walmart'
             ? 'custom-url'
             : 'unverified'
+      },
+      'pokemon-center': {
+        retailer: 'pokemon-center',
+        enabled: selectedRetailer === 'pokemon-center',
+        productUrl: selectedRetailer === 'pokemon-center' ? product.productUrl : '',
+        msrp: '',
+        priceCeiling: '',
+        buyLimit: 1,
+        ordersPerDrop: 1,
+        accountIds: [],
+        verificationStatus: selectedRetailer === 'pokemon-center' ? 'custom-url' : 'unverified'
+      },
+      samsclub: {
+        retailer: 'samsclub',
+        enabled: selectedRetailer === 'samsclub',
+        productUrl: selectedRetailer === 'samsclub' ? product.productUrl : '',
+        msrp: selectedRetailer === 'samsclub' ? catalogMsrp : '',
+        priceCeiling: '',
+        buyLimit: RETAILER_BUY_LIMITS.samsclub,
+        ordersPerDrop: 1,
+        accountIds: [],
+        verificationStatus: selectedRetailer === 'samsclub' ? 'custom-url' : 'unverified'
       }
     }
   }, [product, walmartMatches, existingMonitor])
@@ -126,7 +179,11 @@ export default function MonitorBuilder({
     if (enabled.some((source) => !/^https?:\/\//i.test(source.productUrl))) {
       return setMessage('Every enabled retailer needs a valid product URL.')
     }
-    if (enabled.some((source) => !(Number(source.priceCeiling) > 0))) {
+    if (
+      enabled.some(
+        (source) => source.retailer !== 'pokemon-center' && !(Number(source.priceCeiling) > 0)
+      )
+    ) {
       return setMessage('Enter a price limit for every enabled retailer.')
     }
     setSaving(true)
@@ -265,7 +322,7 @@ function RetailerSource({ retailer, source, accounts, update, toggleAccount }) {
         placeholder={`${retailer} product URL`}
         className="w-full bg-[#0b0c0e] border border-white/10 rounded-lg px-3 py-2 text-gray-200"
       />
-      <div className="grid grid-cols-3 gap-3">
+      <div className={`grid gap-3 ${retailer === 'target' ? 'grid-cols-4' : 'grid-cols-3'}`}>
         <MoneyField
           label="Retailer MSRP"
           value={source.msrp}
@@ -287,6 +344,19 @@ function RetailerSource({ retailer, source, accounts, update, toggleAccount }) {
             className="mt-1 w-full bg-[#0b0c0e] border border-white/10 rounded-lg px-3 py-2 text-gray-200"
           />
         </label>
+        {retailer === 'target' && (
+          <label className="text-gray-500 text-xs">
+            Separate orders
+            <select
+              value={source.ordersPerDrop || 1}
+              onChange={(event) => update({ ordersPerDrop: Number(event.target.value) })}
+              className="mt-1 w-full bg-[#0b0c0e] border border-white/10 rounded-lg px-3 py-2 text-gray-200"
+            >
+              <option value="1">1 order</option>
+              <option value="2">2 orders</option>
+            </select>
+          </label>
+        )}
       </div>
       <div className="flex flex-wrap gap-2">
         {accounts.map((account) => (

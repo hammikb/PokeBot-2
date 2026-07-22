@@ -337,10 +337,7 @@ Verify bounded concurrency, jitter range, retailer-wide budgets, exponential bac
 ```ts
 export interface RetailerAdapter {
   retailer: ListingObservation['retailer']
-  observe(
-    listing: RetailerListing,
-    signal: AbortSignal
-  ): Promise<ListingObservation>
+  observe(listing: RetailerListing, signal: AbortSignal): Promise<ListingObservation>
 }
 ```
 
@@ -516,7 +513,7 @@ services:
     cap_drop:
       - ALL
     healthcheck:
-      test: ["CMD", "node", "dist/health.js"]
+      test: ['CMD', 'node', 'dist/health.js']
       interval: 30s
       timeout: 5s
       retries: 3

@@ -1,11 +1,13 @@
 # Target Auto-Checkout - Implementation Guide
 
 ## Overview
+
 Target auto-checkout has been fully implemented and integrated into PokeBot 2. This feature automates the entire checkout process from adding items to cart through order placement.
 
 ## Features
 
 ### ✅ Complete Automation
+
 - **Add to Cart** - Automatically adds products with configurable quantity
 - **Cart Navigation** - Handles cart modal and navigation
 - **Shipping Verification** - Verifies and updates shipping address if needed
@@ -13,6 +15,7 @@ Target auto-checkout has been fully implemented and integrated into PokeBot 2. T
 - **Order Placement** - Completes the checkout and confirms order
 
 ### ✅ Safety Features
+
 - **Test Mode** - Test checkout flow without placing actual orders
 - **Manual Fallback** - Keeps browser open if manual intervention needed
 - **Screenshot Capture** - Saves screenshots at key points
@@ -20,6 +23,7 @@ Target auto-checkout has been fully implemented and integrated into PokeBot 2. T
 - **Error Handling** - Comprehensive error handling with detailed logging
 
 ### ✅ Smart Features
+
 - **Quantity Support** - Respects buy limit settings (1-10 items)
 - **CVV Entry** - Automatically enters CVV when required
 - **Session Management** - Uses existing Target sessions via auto-login
@@ -29,6 +33,7 @@ Target auto-checkout has been fully implemented and integrated into PokeBot 2. T
 ## How to Use
 
 ### 1. Set Up Target Account
+
 ```javascript
 // In the Accounts page:
 1. Click "Register New Account" or "Add Account"
@@ -40,6 +45,7 @@ Target auto-checkout has been fully implemented and integrated into PokeBot 2. T
 ```
 
 ### 2. Create a Task
+
 ```javascript
 // In the Tasks page:
 1. Click "Create Task"
@@ -54,6 +60,7 @@ Target auto-checkout has been fully implemented and integrated into PokeBot 2. T
 ```
 
 ### 3. Test Checkout (Recommended)
+
 ```javascript
 // Before running live:
 1. Create task in "test-checkout" mode
@@ -64,6 +71,7 @@ Target auto-checkout has been fully implemented and integrated into PokeBot 2. T
 ```
 
 ### 4. Run Live Checkout
+
 ```javascript
 // For actual purchases:
 1. Set task mode to "monitor-and-buy"
@@ -75,6 +83,7 @@ Target auto-checkout has been fully implemented and integrated into PokeBot 2. T
 ## Checkout Flow Details
 
 ### Step-by-Step Process
+
 1. **Open Product Page** - Navigates to Target product URL
 2. **Sign In Check** - Ensures account is logged in
 3. **Set Quantity** - Selects buy limit quantity if > 1
@@ -89,7 +98,9 @@ Target auto-checkout has been fully implemented and integrated into PokeBot 2. T
 12. **Confirm Success** - Verifies order confirmation
 
 ### Selectors Used
+
 The flow uses multiple selector strategies for reliability:
+
 - `data-test` attributes (Target's test IDs)
 - Text-based selectors (button text)
 - Fallback selectors for robustness
@@ -97,18 +108,23 @@ The flow uses multiple selector strategies for reliability:
 ## Configuration
 
 ### Buy Limits
+
 Target typically allows 1-10 items per order. The bot respects this:
+
 ```javascript
-buyLimit: 1-10  // Configurable per task
+buyLimit: 1 - 10 // Configurable per task
 ```
 
 ### Timeouts
+
 - Page load: 30 seconds
 - Button clicks: 10-15 seconds
 - Order confirmation: 5 seconds
 
 ### Rate Limiting
+
 Target is configured with:
+
 - 30 requests per minute
 - Burst limit of 10 requests
 - Automatic retry-after handling
@@ -118,28 +134,36 @@ Target is configured with:
 ### Common Issues
 
 #### 1. "Place order button not found"
+
 **Cause**: Checkout page structure changed or payment issue
-**Solution**: 
+**Solution**:
+
 - Check if payment method is saved
 - Verify CVV is correct
 - Run in test mode to see exact state
 
 #### 2. "Order status unclear"
+
 **Cause**: Confirmation page didn't load or changed
 **Solution**:
+
 - Check Target account for order
 - Review screenshot in traces folder
 - Order may have succeeded - verify manually
 
 #### 3. "Manual intervention required"
+
 **Cause**: Payment method needs to be added
 **Solution**:
+
 - Browser stays open for manual completion
 - Add payment method in Target account
 - Re-run checkout
 
 ### Debug Mode
+
 Enable debug logging to see detailed flow:
+
 ```javascript
 // Logs are in: %APPDATA%/pokebot2/logs/
 // Look for [BrowserPool] and [target-checkout] entries
@@ -148,6 +172,7 @@ Enable debug logging to see detailed flow:
 ## Testing Recommendations
 
 ### Before Going Live
+
 1. ✅ Test with a cheap item first
 2. ✅ Verify shipping address is correct
 3. ✅ Confirm payment method works
@@ -155,6 +180,7 @@ Enable debug logging to see detailed flow:
 5. ✅ Check CVV is saved correctly
 
 ### During Live Use
+
 1. 📱 Enable notifications (SMS/Discord)
 2. 👀 Monitor the dashboard feed
 3. 📸 Check screenshots if issues occur
@@ -163,7 +189,9 @@ Enable debug logging to see detailed flow:
 ## Advanced Features
 
 ### Multiple Accounts
+
 Run checkout on multiple Target accounts simultaneously:
+
 ```javascript
 // Select multiple accounts in task
 accountIds: ['account-1', 'account-2', 'account-3']
@@ -171,27 +199,34 @@ accountIds: ['account-1', 'account-2', 'account-3']
 ```
 
 ### Proxy Support
+
 Use proxies to avoid rate limiting:
+
 ```javascript
 // In account settings:
-proxy: "host:port:username:password"
+proxy: 'host:port:username:password'
 ```
 
 ### Custom Intervals
+
 Adjust monitoring frequency:
+
 ```javascript
-intervalMs: 4000  // Check every 4 seconds (default)
+intervalMs: 4000 // Check every 4 seconds (default)
 ```
 
 ## Files Modified/Created
 
 ### New Files
+
 - `src/main/automation/flows/target.js` - Main checkout flow
 
 ### Modified Files
+
 - `src/main/tasks/TaskManager.js` - Added Target to FLOWS
 
 ### Dependencies
+
 - Uses existing `target-page-utils.js` for helper functions
 - Integrates with `TraceRecorder.js` for debugging
 - Uses `captcha.js` for CAPTCHA handling
@@ -199,12 +234,15 @@ intervalMs: 4000  // Check every 4 seconds (default)
 ## Performance
 
 ### Speed
+
 - Typical checkout: 15-30 seconds
 - With CAPTCHA: 30-60 seconds (manual solve)
 - Test mode: 10-20 seconds (stops before order)
 
 ### Success Rate
+
 Factors affecting success:
+
 - ✅ Account session validity
 - ✅ Payment method saved
 - ✅ Product availability
@@ -215,6 +253,7 @@ Factors affecting success:
 ## Future Enhancements
 
 Potential improvements:
+
 1. Auto-CAPTCHA solving (if service integrated)
 2. Pickup location selection
 3. Gift card support
@@ -224,16 +263,19 @@ Potential improvements:
 ## Support
 
 ### Logs Location
+
 ```
 %APPDATA%/pokebot2/logs/pokebot-YYYY-MM-DD.log
 ```
 
 ### Traces Location
+
 ```
 %APPDATA%/pokebot2/traces/target-[account]-[timestamp]/
 ```
 
 ### Screenshots Location
+
 ```
 %APPDATA%/pokebot2/traces/target-[account]-[timestamp]/screenshot.png
 ```
@@ -249,13 +291,13 @@ Potential improvements:
 
 ## Comparison with Other Retailers
 
-| Feature | Target | Walmart | Pokemon Center |
-|---------|--------|---------|----------------|
-| Auto-checkout | ✅ | ✅ | ✅ |
-| Test mode | ✅ | ✅ | ✅ |
-| Quantity support | ✅ | ✅ | ✅ |
-| CVV entry | ✅ | ✅ | ✅ |
-| Queue handling | ❌ | ✅ | ❌ |
-| Pickup option | 🚧 | ❌ | ❌ |
+| Feature          | Target | Walmart | Pokemon Center |
+| ---------------- | ------ | ------- | -------------- |
+| Auto-checkout    | ✅     | ✅      | ✅             |
+| Test mode        | ✅     | ✅      | ✅             |
+| Quantity support | ✅     | ✅      | ✅             |
+| CVV entry        | ✅     | ✅      | ✅             |
+| Queue handling   | ❌     | ✅      | ❌             |
+| Pickup option    | 🚧     | ❌      | ❌             |
 
 Legend: ✅ Implemented | ❌ Not applicable | 🚧 Planned

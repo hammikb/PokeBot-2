@@ -1,0 +1,97 @@
+--- SamsClubMonitor.py
++++ SamsClubMonitor.py
+@@ -14,3 +14,4 @@
+ import re
+ import signal
++import time
+ from dataclasses import dataclass
+@@ -40,1 +41,4 @@
+ ONE_SHOT_URL = os.getenv("SAMSCLUB_MONITOR_URL", "").strip()
++PROXY_FILE = Path(
++    os.getenv("SAMSCLUB_PROXY_FILE", "/home/hammikb/api-monitor-python/proxies.txt")
++)
+@@ -69,6 +73,19 @@
+ @dataclass(frozen=True)
+ class WatchItem:
+     product_key: str
+     name: str
+     product_url: str
+ 
++
++def load_proxies() -> list[str]:
++    proxies: list[str] = []
++    for raw in PROXY_FILE.read_text(encoding="utf-8").splitlines():
++        value = raw.strip()
++        if not value or value.startswith("#"):
++            continue
++        if "://" not in value:
++            value = f"http://{value}"
++        proxies.append(value)
++    if not proxies:
++        raise RuntimeError(f"No proxies loaded from {PROXY_FILE}; refusing direct Sam's Club traffic")
++    return proxies
+@@ -175,17 +193,36 @@
+ class SamsClubMonitor:
+     def __init__(self) -> None:
+         self.items: list[WatchItem] = []
+         self.etags: dict[str, str] = {}
+         self.last_modified: dict[str, str] = {}
+         self.states: dict[str, bool] = {}
+         self.backoff_until: dict[str, float] = {}
+         self.bytes_used = 0
+         self.checks = 0
+         self.stop_event = asyncio.Event()
+         self._load_state()
+-        self.client = httpx.AsyncClient(
++        self.proxies = load_proxies()
++        self.proxy_index = int(time.time()) % len(self.proxies)
++        self.control_client = httpx.AsyncClient(
+             headers=HEADERS,
+             follow_redirects=True,
+             timeout=httpx.Timeout(20.0),
+             trust_env=False,
+         )
++        self.retail_client = self._new_retail_client()
++
++    def _new_retail_client(self) -> httpx.AsyncClient:
++        return httpx.AsyncClient(
++            headers=HEADERS,
++            follow_redirects=True,
++            timeout=httpx.Timeout(20.0),
++            trust_env=False,
++            proxy=self.proxies[self.proxy_index],
++        )
++
++    async def _rotate_proxy(self) -> None:
++        await self.retail_client.aclose()
++        self.proxy_index = (self.proxy_index + 1) % len(self.proxies)
++        self.retail_client = self._new_retail_client()
+@@ -209,1 +246,1 @@
+-        response = await self.client.get(
++        response = await self.control_client.get(
+@@ -256,1 +293,1 @@
+-            response = await self.client.get(item.product_url, headers=headers)
++            response = await self.retail_client.get(item.product_url, headers=headers)
+@@ -290,2 +327,3 @@
+         except Exception as exc:
++            await self._rotate_proxy()
+             self.backoff_until[item.product_key] = loop.time() + CHALLENGE_BACKOFF
+@@ -308,1 +346,1 @@
+-        response = await self.client.post(
++        response = await self.control_client.post(
+@@ -317,1 +355,1 @@
+-                await self.client.post(
++                await self.control_client.post(
+@@ -365,3 +403,4 @@
+     async def close(self) -> None:
+         self.stop_event.set()
+-        await self.client.aclose()
++        await self.retail_client.aclose()
++        await self.control_client.aclose()
+@@ -378,4 +417,5 @@
+     print(
+         f"Sam's Club Pi monitor starting: interval={POLL_INTERVAL:g}s, "
+-        f"challenge_backoff={CHALLENGE_BACKOFF:g}s, direct_connection=true",
++        f"challenge_backoff={CHALLENGE_BACKOFF:g}s, proxy_required=true, "
++        f"proxies={len(monitor.proxies)}",
+         flush=True,

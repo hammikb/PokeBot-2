@@ -7,7 +7,10 @@ function makeFakeClient() {
     signIn: vi.fn(async () => ({ refresh_token: 'rt-1', user: { id: 'u1', email: 'a@b.com' } })),
     signUp: vi.fn(async () => ({ refresh_token: 'rt-2', user: { id: 'u2', email: 'c@d.com' } })),
     signOut: vi.fn(async () => {}),
-    restoreSession: vi.fn(async () => ({ refresh_token: 'rt-3', user: { id: 'u1', email: 'a@b.com' } })),
+    restoreSession: vi.fn(async () => ({
+      refresh_token: 'rt-3',
+      user: { id: 'u1', email: 'a@b.com' }
+    })),
     client: { fakeRawClient: true }
   }
 }
@@ -47,7 +50,10 @@ describe('AuthSessionManager', () => {
     const stored = JSON.parse(db._store.authRefreshTokenEnc)
     expect(decrypt(stored, KEY)).toBe('rt-1')
     expect(changes).toEqual([{ authenticated: true, user: { id: 'u1', email: 'a@b.com' } }])
-    expect(manager.getStatus()).toEqual({ authenticated: true, user: { id: 'u1', email: 'a@b.com' } })
+    expect(manager.getStatus()).toEqual({
+      authenticated: true,
+      user: { id: 'u1', email: 'a@b.com' }
+    })
   })
 
   it('restoreSession with a stored token restores it and re-saves the new one', async () => {
@@ -58,7 +64,10 @@ describe('AuthSessionManager', () => {
 
     expect(ok).toBe(true)
     expect(client.restoreSession).toHaveBeenCalledWith('rt-1')
-    expect(manager.getStatus()).toEqual({ authenticated: true, user: { id: 'u1', email: 'a@b.com' } })
+    expect(manager.getStatus()).toEqual({
+      authenticated: true,
+      user: { id: 'u1', email: 'a@b.com' }
+    })
   })
 
   it('restoreSession with no stored token reports unauthenticated without calling the client', async () => {
@@ -129,6 +138,9 @@ describe('AuthSessionManager', () => {
     await manager.signIn('a@b.com', 'pw', false)
 
     expect(db._store.authRefreshTokenEnc).toBeUndefined()
-    expect(manager.getStatus()).toEqual({ authenticated: true, user: { id: 'u1', email: 'a@b.com' } })
+    expect(manager.getStatus()).toEqual({
+      authenticated: true,
+      user: { id: 'u1', email: 'a@b.com' }
+    })
   })
 })

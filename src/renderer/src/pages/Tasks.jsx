@@ -4,8 +4,18 @@ import { useAppStore } from '../store/appStore'
 import MonitorBuilder from '../components/MonitorBuilder'
 import { RETAILERS, RETAILER_BUY_LIMITS, TASK_MODES } from '../../../shared/constants'
 
-const CHECKOUT_TEST_RETAILERS = new Set([RETAILERS.WALMART, RETAILERS.TARGET])
-const SUPPORTED_TASK_RETAILERS = [RETAILERS.TARGET, RETAILERS.WALMART]
+const CHECKOUT_TEST_RETAILERS = new Set([
+  RETAILERS.WALMART,
+  RETAILERS.TARGET,
+  RETAILERS.POKEMON_CENTER,
+  RETAILERS.SAMS_CLUB
+])
+const SUPPORTED_TASK_RETAILERS = [
+  RETAILERS.TARGET,
+  RETAILERS.WALMART,
+  RETAILERS.POKEMON_CENTER,
+  RETAILERS.SAMS_CLUB
+]
 const DEFAULT_RETAILER = RETAILERS.TARGET
 const SHOW_LEGACY_BUILDER = false
 
@@ -37,6 +47,7 @@ const makeDefaultForm = () => ({
   category: '',
   catalogMsrp: '',
   buyLimit: RETAILER_BUY_LIMITS[DEFAULT_RETAILER],
+  ordersPerDrop: 1,
   maxPrice: '',
   accountIds: [],
   intervalMs: 4000,
@@ -59,7 +70,6 @@ export default function Tasks() {
     addCatalogUrl,
     supabaseCatalog,
     loadSupabaseCatalog,
-    loadWalmartMatches,
     saveTaskTestResult
   } = useAppStore()
   const [showBuilder, setShowBuilder] = useState(false)
@@ -84,8 +94,7 @@ export default function Tasks() {
 
   useEffect(() => {
     loadSupabaseCatalog().catch(() => {})
-    loadWalmartMatches().catch(() => {})
-  }, [loadSupabaseCatalog, loadWalmartMatches])
+  }, [loadSupabaseCatalog])
 
   const filteredCentralCatalog = supabaseCatalog
     .filter((item) =>
@@ -109,6 +118,7 @@ export default function Tasks() {
         )
       ),
       buyLimit: RETAILER_BUY_LIMITS[item.retailer || 'target'] || 1,
+      ordersPerDrop: 1,
       maxPrice: f.maxPrice || ''
     }))
     setShowBuilder(true)
@@ -122,6 +132,28 @@ export default function Tasks() {
     setProductBusy(true)
     setProductEntryMessage('Reading product link...')
     try {
+      if (/^https?:\/\/(?:www\.)?pokemoncenter\.com(?:\/|$)/i.test(url)) {
+        chooseProduct({
+          retailer: RETAILERS.POKEMON_CENTER,
+          product_url: url,
+          name: 'Pokemon Center Queue'
+        })
+        setProductUrl('')
+        setProductEntryMessage(
+          'Pokemon Center queue monitor selected. Choose a Pokemon Center profile below.'
+        )
+        return
+      }
+      if (/^https?:\/\/(?:www\.)?samsclub\.com\/ip\//i.test(url)) {
+        chooseProduct({
+          retailer: RETAILERS.SAMS_CLUB,
+          product_url: url,
+          name: "Sam's Club product"
+        })
+        setProductUrl('')
+        setProductEntryMessage("Sam's Club link loaded. Select a Plus account and use Test first.")
+        return
+      }
       const item = await addCatalogUrl(url)
       chooseProduct({ ...item, product_url: item.product_url || url })
       setProductUrl('')
@@ -140,6 +172,7 @@ export default function Tasks() {
         accounts.some((account) => account.id === accountId && account.retailer === retailer)
       ),
       buyLimit: RETAILER_BUY_LIMITS[retailer],
+      ordersPerDrop: 1,
       mode: CHECKOUT_TEST_RETAILERS.has(retailer) ? f.mode : 'monitor-and-buy'
     }))
 
@@ -194,6 +227,7 @@ export default function Tasks() {
     const payload = {
       ...form,
       buyLimit: parseInt(form.buyLimit, 10),
+      ordersPerDrop: form.retailer === 'target' ? Number(form.ordersPerDrop) || 1 : 1,
       mode: supportsTestCheckout ? form.mode : 'monitor-and-buy',
       maxPrice: form.maxPrice ? parseFloat(form.maxPrice) : null
     }
@@ -228,6 +262,7 @@ export default function Tasks() {
       category: monitor?.category || '',
       catalogMsrp: monitor?.catalog_msrp ?? '',
       buyLimit: task.buy_limit || RETAILER_BUY_LIMITS[task.retailer] || 1,
+      ordersPerDrop: task.retailer === 'target' ? task.orders_per_drop || 1 : 1,
       maxPrice: task.max_price == null ? '' : task.max_price.toString(),
       accountIds,
       intervalMs: task.interval_ms || 4000,
@@ -304,7 +339,7 @@ export default function Tasks() {
           <p className="text-red-400 text-xs uppercase tracking-[0.25em] mb-2">New monitor</p>
           <h1 className="text-2xl text-gray-100 font-semibold">What do you want to watch?</h1>
           <p className="text-gray-500 text-sm mt-2">
-            Search the central catalog or paste a Target or Walmart link.
+            Search the central catalog or paste a Target, Walmart, or Pokemon Center link.
           </p>
         </div>
 
@@ -366,7 +401,7 @@ export default function Tasks() {
             <input
               value={productUrl}
               onChange={(event) => setProductUrl(event.target.value)}
-              placeholder="Paste a Target or Walmart link"
+              placeholder="Paste a Target, Walmart, or Pokemon Center link"
               className="flex-1 bg-transparent text-gray-100 placeholder:text-gray-600 focus:outline-none"
             />
             <button
@@ -505,6 +540,31 @@ export default function Tasks() {
               </div>
             </div>
           </div>
+          {form.retailer === 'target' && (
+            <div>
+              <label className={LABEL_CLASS}>Separate orders per drop</label>
+              <div className="grid grid-cols-2 gap-2">
+                {[1, 2].map((count) => (
+                  <button
+                    type="button"
+                    key={count}
+                    onClick={() => setF('ordersPerDrop', count)}
+                    className={`rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                      Number(form.ordersPerDrop) === count
+                        ? 'border-red-500/60 bg-red-500/10 text-gray-100'
+                        : 'border-white/10 bg-[#0b0c0e] text-gray-400'
+                    }`}
+                  >
+                    {count} {count === 1 ? 'order' : 'orders'}
+                  </button>
+                ))}
+              </div>
+              <p className="text-gray-600 text-xs mt-1.5">
+                Each Target order is capped at {form.buyLimit} and the second starts only after the
+                first is confirmed.
+              </p>
+            </div>
+          )}
 
           <div>
             <label className={LABEL_CLASS}>When it finds a match</label>
@@ -628,6 +688,11 @@ export default function Tasks() {
                 <span className="text-gray-500 text-xs shrink-0 border border-white/10 rounded-full px-2 py-0.5">
                   limit {task.buy_limit || 1}
                 </span>
+                {task.retailer === 'target' && (task.orders_per_drop || 1) > 1 && (
+                  <span className="text-red-300 text-xs shrink-0 border border-red-400/20 bg-red-400/10 rounded-full px-2 py-0.5">
+                    {task.orders_per_drop} orders
+                  </span>
+                )}
                 <span className="text-gray-500 text-xs shrink-0 border border-white/10 rounded-full px-2 py-0.5">
                   ${task.max_price ?? 'inf'}
                 </span>
@@ -655,11 +720,13 @@ export default function Tasks() {
                   {status === 'idle' || status === 'error' ? (
                     <button
                       onClick={() => startTask(task.id)}
-                      disabled={accountCount === 0}
+                      disabled={accountCount === 0 && task.retailer !== RETAILERS.POKEMON_CENTER}
                       title={
-                        accountCount === 0
+                        accountCount === 0 && task.retailer !== RETAILERS.POKEMON_CENTER
                           ? 'Edit task and select an account first'
-                          : 'Start monitoring'
+                          : task.retailer === RETAILERS.POKEMON_CENTER && accountCount === 0
+                            ? 'Start queue monitoring with a persistent guest browser'
+                            : 'Start monitoring'
                       }
                       className="text-emerald-400 hover:text-emerald-300 disabled:text-gray-700 transition-colors"
                     >

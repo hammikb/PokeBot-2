@@ -40,7 +40,13 @@ export const useAppStore = create((set, get) => ({
 
   loadTasks: async () => {
     const tasks = await invoke(IPC.TASKS_GET)
-    set({ tasks })
+    set((state) => ({
+      tasks,
+      taskStatuses: {
+        ...state.taskStatuses,
+        ...Object.fromEntries(tasks.map((task) => [task.id, task.status || 'idle']))
+      }
+    }))
     get().loadTaskReadiness()
   },
   loadTaskReadiness: async () => {
@@ -255,6 +261,8 @@ export const useAppStore = create((set, get) => ({
     get().loadAccounts()
   },
   openAccountSession: async (id) => invoke(IPC.ACCOUNTS_OPEN_SESSION, id),
+  prepareAccountSession: async (id) => invoke(IPC.ACCOUNTS_WARMUP, id),
+  inspectAccountCookies: async (id) => invoke(IPC.ACCOUNTS_COOKIE_HEALTH, id),
   checkAccountSession: async (id) => {
     const result = await invoke(IPC.ACCOUNTS_CHECK_SESSION, id)
     await get().loadAccounts()
@@ -271,8 +279,9 @@ export const useAppStore = create((set, get) => ({
       accountRegistrationStatuses: { ...s.accountRegistrationStatuses, [email]: data }
     })),
   saveSetting: async (key, value) => {
-    await invoke(IPC.SETTINGS_SET, key, value)
-    get().loadSettings()
+    const result = await invoke(IPC.SETTINGS_SET, key, value)
+    await get().loadSettings()
+    return result
   },
   setMonitorMode: async (mode) => {
     await invoke(IPC.MONITOR_SET_MODE, mode)
@@ -332,6 +341,17 @@ export const useAppStore = create((set, get) => ({
     const candidates = await invoke(IPC.CATALOG_FIND_WALMART_MATCH, { upc, name })
     set((s) => ({ walmartCandidates: { ...s.walmartCandidates, [productKey]: candidates } }))
   },
+  bulkFindWalmartMatches: async (items) => {
+    const rows = await invoke(IPC.CATALOG_BULK_FIND_WALMART_MATCHES, items)
+    await get().loadWalmartMatches()
+    const candidates = Object.fromEntries(
+      rows
+        .filter((row) => !row.saved && row.candidates?.length)
+        .map((row) => [row.productKey, row.candidates])
+    )
+    set({ walmartCandidates: candidates })
+    return rows
+  },
   dismissWalmartCandidates: (productKey) =>
     set((s) => {
       const next = { ...s.walmartCandidates }
@@ -342,6 +362,9 @@ export const useAppStore = create((set, get) => ({
     await invoke(IPC.CATALOG_SAVE_WALMART_MATCH, { productKey, candidate })
     get().dismissWalmartCandidates(productKey)
     await get().loadWalmartMatches()
+  },
+  skipWalmartMatch: async (productKey, reason) => {
+    await invoke(IPC.CATALOG_SKIP_WALMART_MATCH, { productKey, reason })
   },
   pushFeedEvent: (event) => set((s) => ({ feedEvents: [event, ...s.feedEvents].slice(0, 200) })),
   setTaskStatus: (taskId, status) =>

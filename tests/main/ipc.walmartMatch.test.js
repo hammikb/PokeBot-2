@@ -3,7 +3,13 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 const { handlers, findWalmartMatch } = vi.hoisted(() => {
   const handlers = new Map()
   const findWalmartMatch = vi.fn(async () => [
-    { retailer: 'walmart', name: 'Match', url: 'https://www.walmart.com/ip/1', itemId: '1', confidence: 'upc' }
+    {
+      retailer: 'walmart',
+      name: 'Match',
+      url: 'https://www.walmart.com/ip/1',
+      itemId: '1',
+      confidence: 'upc'
+    }
   ])
   return { handlers, findWalmartMatch }
 })
@@ -55,17 +61,34 @@ describe('Walmart match IPC handlers', () => {
 
   it('CATALOG_FIND_WALMART_MATCH delegates to findWalmartMatch and returns candidates', async () => {
     const { handlers } = setup()
-    const result = await handlers.get(IPC.CATALOG_FIND_WALMART_MATCH)({}, { upc: '123', name: 'Card' })
+    const result = await handlers.get(IPC.CATALOG_FIND_WALMART_MATCH)(
+      {},
+      { upc: '123', name: 'Card' }
+    )
     expect(findWalmartMatch).toHaveBeenCalledWith({ upc: '123', name: 'Card' })
     expect(result).toEqual([
-      { retailer: 'walmart', name: 'Match', url: 'https://www.walmart.com/ip/1', itemId: '1', confidence: 'upc' }
+      {
+        retailer: 'walmart',
+        name: 'Match',
+        url: 'https://www.walmart.com/ip/1',
+        itemId: '1',
+        confidence: 'upc'
+      }
     ])
   })
 
   it('CATALOG_SAVE_WALMART_MATCH persists the confirmed candidate keyed by Target product key', async () => {
     const { handlers, rows } = setup()
-    const candidate = { itemId: '1', url: 'https://www.walmart.com/ip/1', name: 'Match', confidence: 'upc' }
-    const result = await handlers.get(IPC.CATALOG_SAVE_WALMART_MATCH)({}, { productKey: 'TCIN1', candidate })
+    const candidate = {
+      itemId: '1',
+      url: 'https://www.walmart.com/ip/1',
+      name: 'Match',
+      confidence: 'upc'
+    }
+    const result = await handlers.get(IPC.CATALOG_SAVE_WALMART_MATCH)(
+      {},
+      { productKey: 'TCIN1', candidate }
+    )
     expect(result).toBe(true)
     expect(rows).toEqual([
       {
@@ -80,7 +103,12 @@ describe('Walmart match IPC handlers', () => {
 
   it('CATALOG_LIST_WALMART_MATCHES returns saved matches', async () => {
     const { handlers } = setup()
-    const candidate = { itemId: '1', url: 'https://www.walmart.com/ip/1', name: 'Match', confidence: 'upc' }
+    const candidate = {
+      itemId: '1',
+      url: 'https://www.walmart.com/ip/1',
+      name: 'Match',
+      confidence: 'upc'
+    }
     await handlers.get(IPC.CATALOG_SAVE_WALMART_MATCH)({}, { productKey: 'TCIN1', candidate })
     const result = await handlers.get(IPC.CATALOG_LIST_WALMART_MATCHES)({})
     expect(result).toEqual([

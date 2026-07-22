@@ -199,4 +199,3 @@ function interleaveResults(groups) {
   }
   return results
 }
-

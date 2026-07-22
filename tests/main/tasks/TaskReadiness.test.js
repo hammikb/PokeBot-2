@@ -26,6 +26,13 @@ function manager(row) {
   }
 }
 
+const paymentManager = {
+  get: (id) =>
+    id === 'payment-1'
+      ? { id, name: 'Target Visa', cardNumber: '4111111111111111', cvv: '456' }
+      : null
+}
+
 describe('buildTaskReadiness', () => {
   it('marks a task ready when product, account, cvv, proxy, and test are good', () => {
     const readiness = buildTaskReadiness({
@@ -58,12 +65,20 @@ describe('buildTaskReadiness', () => {
     )
   })
 
-  it('marks Target checkout as reset even when the account data is otherwise complete', () => {
+  it('marks Target checkout ready when its account has an assigned payment method', () => {
     const readiness = buildTaskReadiness({
       tasks: [
         { ...task, retailer: 'target', product_url: 'https://www.target.com/p/example/A-123' }
       ],
-      accountManager: manager(account({ retailer: 'target', name: 'Target Account' })),
+      accountManager: manager(
+        account({
+          retailer: 'target',
+          name: 'Target Account',
+          cvv: '',
+          payment_method_id: 'payment-1'
+        })
+      ),
+      paymentManager,
       settings: {
         taskTestResults: {
           'task-1': { success: true, testedAt: '2026-05-31T00:00:00.000Z' }
@@ -71,15 +86,42 @@ describe('buildTaskReadiness', () => {
       }
     })
 
-    expect(readiness['task-1'].ready).toBe(false)
+    expect(readiness['task-1'].ready).toBe(true)
     expect(readiness['task-1'].checks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           label: 'Checkout Flow',
-          ok: false,
-          message: 'target checkout automation is reset'
+          ok: true
+        }),
+        expect.objectContaining({
+          label: 'Payment',
+          ok: true,
+          message: 'Target Account uses Target Visa ending in 1111'
         })
       ])
+    )
+  })
+
+  it('blocks Target readiness when no payment method or legacy CVV is available', () => {
+    const readiness = buildTaskReadiness({
+      tasks: [{ ...task, retailer: 'target' }],
+      accountManager: manager(
+        account({ retailer: 'target', name: 'Target Account', cvv: '', payment_method_id: null })
+      ),
+      paymentManager,
+      settings: {
+        taskTestResults: {
+          'task-1': { success: true, testedAt: '2026-05-31T00:00:00.000Z' }
+        }
+      }
+    })
+
+    expect(readiness['task-1'].checks).toContainEqual(
+      expect.objectContaining({
+        label: 'Payment',
+        ok: false,
+        message: 'Target Account needs a Target payment method'
+      })
     )
   })
 })

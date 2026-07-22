@@ -35,14 +35,20 @@ export function parseQp(urlOrToken) {
   const d = JSON.parse(raw)
   const cm = d.customMetadata || {}
   const item = cm.item || {}
+  const yourTurn =
+    d.state === 'valid' ||
+    d.queued === false ||
+    ['ready', 'admitted', 'checkout'].includes(d.status)
   return {
     state: d.state, // 'pending' | 'valid'
-    inQueue: d.state === 'pending',
-    yourTurn: d.state === 'valid', // CTA becomes "Buy"
+    queued: d.queued === true,
+    inQueue: d.state === 'pending' || d.queued === true,
+    yourTurn, // CTA becomes "Buy" / checkout when Walmart admits the session
     ticket: d.ticket,
     queueId: d.queue,
     shard: d.shard,
-    itemId: d.itemId,
+    itemId: d.itemId || item.itemID || null,
+    itemUrl: item.itemURL || null,
     offerId: d.offerId,
     itemName: item.name || null,
     price: item.currentPrice || null,

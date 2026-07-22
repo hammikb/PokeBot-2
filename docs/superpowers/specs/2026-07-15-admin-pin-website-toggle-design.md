@@ -38,6 +38,7 @@ active = pinned OR EXISTS(subscription for this product)
   subscribing to an inactive product still reactivates it via the trigger.
 
 **Website changes (pokealert-web):**
+
 - `api/products/route.js` POST: adds with `pinned=true` (admin adds are pins).
 - `api/products/[id]/route.js` PATCH: accepts `{ pinned }`, calls the RPC. DELETE unchanged
   (FK already cascades subscriptions).

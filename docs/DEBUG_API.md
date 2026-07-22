@@ -27,11 +27,13 @@
 ### Step 2: What to Copy
 
 #### Request Headers
+
 ```
 Right-click request → Copy → Copy as fetch (Node.js)
 ```
 
 Look for these important headers:
+
 - `cookie:` - All cookies
 - `x-application-name:` - Usually "web"
 - `x-csrf-token:` - CSRF protection token
@@ -39,7 +41,9 @@ Look for these important headers:
 - `user-agent:` - Browser identifier
 
 #### Request Payload
+
 Click "Payload" tab and copy the JSON body:
+
 ```json
 {
   "cart_type": "REGULAR",
@@ -58,6 +62,7 @@ Click "Payload" tab and copy the JSON body:
 Open `src/main/automation/api/targetApi.js` and update:
 
 #### Update Headers (Line ~195)
+
 ```javascript
 _getHeaders() {
   const cookieString = Object.entries(this.cookies)
@@ -81,6 +86,7 @@ _getHeaders() {
 ```
 
 #### Update API Key (Line ~207)
+
 ```javascript
 _getApiKey() {
   // Replace with the key from your captured request
@@ -97,33 +103,36 @@ Instead of axios, use Playwright's page.evaluate to run the API call in the brow
 // In target.js, add this method:
 async function apiAddToCartInBrowser(page, tcin, quantity) {
   try {
-    const result = await page.evaluate(async ({ tcin, quantity }) => {
-      const response = await fetch('https://carts.target.com/web_checkouts/v1/cart_items', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-application-name': 'web'
-        },
-        body: JSON.stringify({
-          cart_type: 'REGULAR',
-          channel_id: '10',
-          shopping_context: 'DIGITAL',
-          cart_item: {
-            tcin: tcin,
-            quantity: quantity,
-            item_channel_id: '10'
-          }
+    const result = await page.evaluate(
+      async ({ tcin, quantity }) => {
+        const response = await fetch('https://carts.target.com/web_checkouts/v1/cart_items', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-application-name': 'web'
+          },
+          body: JSON.stringify({
+            cart_type: 'REGULAR',
+            channel_id: '10',
+            shopping_context: 'DIGITAL',
+            cart_item: {
+              tcin: tcin,
+              quantity: quantity,
+              item_channel_id: '10'
+            }
+          })
         })
-      })
-      
-      if (!response.ok) {
-        return { success: false, error: `HTTP ${response.status}` }
-      }
-      
-      const data = await response.json()
-      return { success: true, data }
-    }, { tcin, quantity })
-    
+
+        if (!response.ok) {
+          return { success: false, error: `HTTP ${response.status}` }
+        }
+
+        const data = await response.json()
+        return { success: true, data }
+      },
+      { tcin, quantity }
+    )
+
     return result
   } catch (err) {
     return { success: false, error: err.message }
@@ -143,19 +152,25 @@ This runs the fetch **inside the browser** so it has all the right cookies and c
 ### Step 6: Common Issues & Solutions
 
 #### Issue: 400 Bad Request
+
 **Solution**: Missing or wrong headers
+
 - Check CSRF token
 - Verify API key
 - Match all headers from captured request
 
 #### Issue: 401 Unauthorized
+
 **Solution**: Authentication problem
+
 - Ensure cookies are being sent
 - Check if session is valid
 - May need to refresh cookies
 
 #### Issue: 403 Forbidden
+
 **Solution**: CORS or security block
+
 - Use the browser-based approach (page.evaluate)
 - Ensures same origin and context
 
@@ -170,45 +185,48 @@ This is the easiest and most reliable approach:
 if (useApi) {
   try {
     onStep(`Adding ${buyLimit} item(s) to cart via API...`)
-    
+
     // Execute API call IN the browser context
-    const result = await page.evaluate(async ({ tcin, quantity }) => {
-      try {
-        const response = await fetch('https://carts.target.com/web_checkouts/v1/cart_items', {
-          method: 'POST',
-          credentials: 'include',  // Important!
-          headers: {
-            'Content-Type': 'application/json',
-            'x-application-name': 'web'
-          },
-          body: JSON.stringify({
-            cart_type: 'REGULAR',
-            channel_id: '10',
-            shopping_context: 'DIGITAL',
-            cart_item: {
-              tcin: tcin,
-              quantity: quantity,
-              item_channel_id: '10'
-            }
+    const result = await page.evaluate(
+      async ({ tcin, quantity }) => {
+        try {
+          const response = await fetch('https://carts.target.com/web_checkouts/v1/cart_items', {
+            method: 'POST',
+            credentials: 'include', // Important!
+            headers: {
+              'Content-Type': 'application/json',
+              'x-application-name': 'web'
+            },
+            body: JSON.stringify({
+              cart_type: 'REGULAR',
+              channel_id: '10',
+              shopping_context: 'DIGITAL',
+              cart_item: {
+                tcin: tcin,
+                quantity: quantity,
+                item_channel_id: '10'
+              }
+            })
           })
-        })
-        
-        if (!response.ok) {
-          const text = await response.text()
-          return { success: false, error: `${response.status}: ${text}` }
+
+          if (!response.ok) {
+            const text = await response.text()
+            return { success: false, error: `${response.status}: ${text}` }
+          }
+
+          const data = await response.json()
+          return { success: true, cartId: data.cart_id }
+        } catch (err) {
+          return { success: false, error: err.message }
         }
-        
-        const data = await response.json()
-        return { success: true, cartId: data.cart_id }
-      } catch (err) {
-        return { success: false, error: err.message }
-      }
-    }, { tcin, quantity: buyLimit })
-    
+      },
+      { tcin, quantity: buyLimit }
+    )
+
     if (result.success) {
       onStep('✓ Added to cart via API (lightning fast!)')
       log.info('Browser API add to cart successful', { cartId: result.cartId })
-      
+
       // Navigate to checkout
       await page.goto('https://www.target.com/co-cart', {
         waitUntil: 'domcontentloaded',

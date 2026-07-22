@@ -1,16 +1,6 @@
 import { useAppStore } from '../store/appStore'
 
 const FIELDS = [
-  {
-    key: 'discordWebhook',
-    label: 'Discord Webhook URL',
-    type: 'text',
-    placeholder: 'https://discord.com/api/webhooks/...'
-  },
-  { key: 'twilioSid', label: 'Twilio Account SID', type: 'text', placeholder: 'ACxxxxxxxx' },
-  { key: 'twilioToken', label: 'Twilio Auth Token', type: 'password', placeholder: '••••••••' },
-  { key: 'twilioFrom', label: 'Twilio From Number', type: 'text', placeholder: '+1XXXXXXXXXX' },
-  { key: 'twilioTo', label: 'SMS Alert Number', type: 'text', placeholder: '+1XXXXXXXXXX' },
   { key: 'maxConcurrent', label: 'Max Concurrent Browsers', type: 'number', placeholder: '3' }
 ]
 
@@ -54,6 +44,117 @@ export default function Settings() {
           {mode === 'local'
             ? 'This computer polls retailers directly.'
             : 'Receives drops from the central Supabase monitor. Restarts running tasks.'}
+        </div>
+      </div>
+
+      <div>
+        <label className="text-gray-500 uppercase tracking-wider text-sm block mb-1.5">
+          Walmart Monitor Method
+        </label>
+        <select
+          value={settings.walmartMonitorMethod || 'axios'}
+          onChange={(e) => saveSetting('walmartMonitorMethod', e.target.value)}
+          className="w-full bg-[#111] border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:border-red-500 outline-none"
+        >
+          <option value="axios">Lightweight HTTP (recommended)</option>
+          <option value="browser">Browser interception (fallback)</option>
+        </select>
+        <div className="text-gray-600 text-sm mt-1.5">
+          HTTP uses far less bandwidth and proxy data. Use browser mode only when a listing blocks
+          HTTP checks.
+        </div>
+      </div>
+
+      <div>
+        <label className="text-gray-500 uppercase tracking-wider text-sm block mb-1.5">
+          Pokemon Center Queue Browser
+        </label>
+        <select
+          value={settings.pokemonCenterQueueBrowser || 'managed'}
+          onChange={(e) => saveSetting('pokemonCenterQueueBrowser', e.target.value)}
+          className="w-full bg-[#111] border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:border-red-500 outline-none"
+        >
+          <option value="managed">Managed Chromium (automatic tracking)</option>
+          <option value="system">System browser (survives app exit)</option>
+        </select>
+        <div className="text-gray-600 text-sm mt-1.5">
+          System browser opens your normal Chrome or default browser and remains open if PokeBot
+          closes. Managed mode can track the queue and notify you when your turn arrives.
+        </div>
+      </div>
+
+      <div className="border border-gray-800 rounded-lg p-3 bg-[#0d0d0f]">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <div className="text-gray-300 uppercase tracking-wider text-sm">Target Cart API</div>
+            <div className="text-gray-600 text-sm mt-1">
+              Experimental. Browser-first is recommended while Target is rate limiting the API.
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={settings.targetCartApiEnabled === true}
+            onClick={() =>
+              saveSetting('targetCartApiEnabled', settings.targetCartApiEnabled !== true)
+            }
+            className={`relative w-12 h-7 rounded-full shrink-0 transition-colors ${
+              settings.targetCartApiEnabled === true ? 'bg-red-600' : 'bg-gray-700'
+            }`}
+          >
+            <span
+              className={`pointer-events-none absolute left-0 top-1 w-5 h-5 bg-white rounded-full transition-transform ${
+                settings.targetCartApiEnabled === true ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+            <span className="sr-only">
+              {settings.targetCartApiEnabled === true
+                ? 'Disable Target cart API'
+                : 'Enable Target cart API'}
+            </span>
+          </button>
+        </div>
+        <div className="text-xs mt-2 text-gray-500">
+          Current: {settings.targetCartApiEnabled === true ? 'API on' : 'Browser-first'}
+        </div>
+      </div>
+
+      <div className="border border-gray-800 rounded-lg p-3 bg-[#0d0d0f]">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <div className="text-gray-300 uppercase tracking-wider text-sm">
+              Target Checkout Lite Mode
+            </div>
+            <div className="text-gray-600 text-sm mt-1">
+              Blocks media, fonts, and known third-party ads while preserving checkout and challenge
+              traffic.
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={settings.targetCheckoutLiteMode === true}
+            onClick={() =>
+              saveSetting('targetCheckoutLiteMode', settings.targetCheckoutLiteMode !== true)
+            }
+            className={`relative w-12 h-7 rounded-full shrink-0 transition-colors ${
+              settings.targetCheckoutLiteMode === true ? 'bg-red-600' : 'bg-gray-700'
+            }`}
+          >
+            <span
+              className={`pointer-events-none absolute left-0 top-1 w-5 h-5 bg-white rounded-full transition-transform ${
+                settings.targetCheckoutLiteMode === true ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+            <span className="sr-only">
+              {settings.targetCheckoutLiteMode === true
+                ? 'Disable Target checkout lite mode'
+                : 'Enable Target checkout lite mode'}
+            </span>
+          </button>
+        </div>
+        <div className="text-xs mt-2 text-gray-500">
+          Current: {settings.targetCheckoutLiteMode === true ? 'Lite mode on' : 'Full page loading'}
         </div>
       </div>
 

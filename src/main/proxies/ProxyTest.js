@@ -3,7 +3,6 @@
 // engine CloakBrowser is built on (already a dependency, no patchright needed).
 import { request } from 'playwright-core'
 
-
 const RETAILER_TEST_URLS = {
   target: 'https://www.target.com/',
   walmart: 'https://www.walmart.com/'

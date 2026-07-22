@@ -204,9 +204,7 @@ export default function PaymentMethods() {
           >
             <div>
               <h3 className="font-bold text-lg">{method.name}</h3>
-              <p className="text-sm text-gray-400">
-                ****-****-****-{method.cardNumber.slice(-4)}
-              </p>
+              <p className="text-sm text-gray-400">****-****-****-{method.cardLast4}</p>
               <p className="text-sm text-gray-400">
                 Expires: {method.expiryMonth}/{method.expiryYear}
               </p>

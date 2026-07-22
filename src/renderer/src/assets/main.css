@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 * {
   scrollbar-width: thin;
@@ -28,6 +28,8 @@ body {
   user-select: none;
 }
 
-input, textarea, select {
+input,
+textarea,
+select {
   user-select: text;
 }

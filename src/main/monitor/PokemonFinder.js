@@ -49,11 +49,9 @@ export class PokemonFinder extends EventEmitter {
    */
   _loadKnownItems() {
     try {
-      const items = this._getDb()
-        .prepare('SELECT product_url FROM pokemon_items')
-        .all()
-      
-      items.forEach(item => this._knownItems.add(item.product_url))
+      const items = this._getDb().prepare('SELECT product_url FROM pokemon_items').all()
+
+      items.forEach((item) => this._knownItems.add(item.product_url))
       log.info('Loaded known Pokemon items', { count: this._knownItems.size })
     } catch (err) {
       log.error('Failed to load known items', { error: err.message })
@@ -65,14 +63,17 @@ export class PokemonFinder extends EventEmitter {
    */
   startScanning(intervalMinutes = 30) {
     log.info('Starting Pokemon item scanner', { intervalMinutes })
-    
+
     // Scan immediately
     this.scanAll()
-    
+
     // Then scan periodically
-    this._scanTimer = setInterval(() => {
-      this.scanAll()
-    }, intervalMinutes * 60 * 1000)
+    this._scanTimer = setInterval(
+      () => {
+        this.scanAll()
+      },
+      intervalMinutes * 60 * 1000
+    )
   }
 
   /**
@@ -91,15 +92,10 @@ export class PokemonFinder extends EventEmitter {
    */
   async scanAll() {
     log.info('Scanning for new Pokemon items...')
-    
-    const results = await Promise.allSettled([
-      this.scanTarget(),
-      this.scanWalmart()
-    ])
 
-    const newItems = results
-      .filter(r => r.status === 'fulfilled')
-      .flatMap(r => r.value)
+    const results = await Promise.allSettled([this.scanTarget(), this.scanWalmart()])
+
+    const newItems = results.filter((r) => r.status === 'fulfilled').flatMap((r) => r.value)
 
     if (newItems.length > 0) {
       log.info('Found new Pokemon items', { count: newItems.length })
@@ -117,7 +113,7 @@ export class PokemonFinder extends EventEmitter {
   async scanTarget() {
     try {
       log.info('Scanning Target for Pokemon items...')
-      
+
       // Target search API with advanced bot detection bypass
       const { data } = await axios.get(
         'https://redsky.target.com/redsky_aggregations/v1/web/plp_search_v2',
@@ -133,13 +129,14 @@ export class PokemonFinder extends EventEmitter {
             keyword: 'pokemon cards'
           },
           headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'application/json',
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            Accept: 'application/json',
             'Accept-Language': 'en-US,en;q=0.9',
             'Accept-Encoding': 'gzip, deflate, br',
-            'Referer': 'https://www.target.com/s/pokemon+cards',
-            'Origin': 'https://www.target.com',
-            'Connection': 'keep-alive',
+            Referer: 'https://www.target.com/s/pokemon+cards',
+            Origin: 'https://www.target.com',
+            Connection: 'keep-alive',
             'Sec-Fetch-Dest': 'empty',
             'Sec-Fetch-Mode': 'cors',
             'Sec-Fetch-Site': 'same-site',
@@ -173,7 +170,7 @@ export class PokemonFinder extends EventEmitter {
           this._saveItem(item)
           this._knownItems.add(url)
           newItems.push(item)
-          
+
           log.info('New Pokemon item found on Target', { name, tcin, price })
         }
       }
@@ -191,22 +188,19 @@ export class PokemonFinder extends EventEmitter {
   async scanWalmart() {
     try {
       log.info('Scanning Walmart for Pokemon items...')
-      
+
       // Walmart search API
-      const { data } = await axios.get(
-        'https://www.walmart.com/orchestra/home/graphql/search',
-        {
-          params: {
-            query: 'pokemon cards',
-            page: 1,
-            affinityOverride: 'default'
-          },
-          headers: {
-            'User-Agent': 'Mozilla/5.0',
-            'WM_CONSUMER.ID': '0f3e4a3e-d47e-4d6e-9e6e-3c3e3e3e3e3e'
-          }
+      const { data } = await axios.get('https://www.walmart.com/orchestra/home/graphql/search', {
+        params: {
+          query: 'pokemon cards',
+          page: 1,
+          affinityOverride: 'default'
+        },
+        headers: {
+          'User-Agent': 'Mozilla/5.0',
+          'WM_CONSUMER.ID': '0f3e4a3e-d47e-4d6e-9e6e-3c3e3e3e3e3e'
         }
-      )
+      })
 
       const products = data?.data?.search?.searchResult?.itemStacks?.[0]?.items || []
       const newItems = []
@@ -230,7 +224,7 @@ export class PokemonFinder extends EventEmitter {
           this._saveItem(item)
           this._knownItems.add(url)
           newItems.push(item)
-          
+
           log.info('New Pokemon item found on Walmart', { name, id, price })
         }
       }
@@ -248,10 +242,12 @@ export class PokemonFinder extends EventEmitter {
   _saveItem(item) {
     try {
       this._getDb()
-        .prepare(`
+        .prepare(
+          `
           INSERT INTO pokemon_items (id, retailer, product_name, product_url, tcin, price)
           VALUES (?, ?, ?, ?, ?, ?)
-        `)
+        `
+        )
         .run(
           `${item.retailer}_${item.tcin}_${Date.now()}`,
           item.retailer,
@@ -270,9 +266,7 @@ export class PokemonFinder extends EventEmitter {
    */
   getAllItems() {
     try {
-      return this._getDb()
-        .prepare('SELECT * FROM pokemon_items ORDER BY discovered_at DESC')
-        .all()
+      return this._getDb().prepare('SELECT * FROM pokemon_items ORDER BY discovered_at DESC').all()
     } catch {
       return []
     }
@@ -296,9 +290,7 @@ export class PokemonFinder extends EventEmitter {
    */
   markAsSeen(id) {
     try {
-      this._getDb()
-        .prepare('UPDATE pokemon_items SET is_new = 0 WHERE id = ?')
-        .run(id)
+      this._getDb().prepare('UPDATE pokemon_items SET is_new = 0 WHERE id = ?').run(id)
     } catch (err) {
       log.error('Failed to mark item as seen', { error: err.message })
     }

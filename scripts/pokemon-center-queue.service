@@ -1,0 +1,21 @@
+[Unit]
+Description=PokeAlert Pokemon Center Queue Detector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hammikb
+WorkingDirectory=/home/hammikb/api-monitor-python
+Environment=PYTHONUNBUFFERED=1
+Environment=MONITOR_BROWSER_EXECUTABLE=/usr/bin/chromium
+Environment=MONITOR_PROXY_FILE=/home/hammikb/api-monitor-python/proxies.txt
+Environment=POKEMON_CENTER_CHECK_SECONDS=30
+Environment=POKEMON_CENTER_OPEN_CHECK_SECONDS=600
+Environment=POKEMON_CENTER_CLOSE_CONFIRMATIONS=2
+ExecStart=/home/hammikb/api-monitor-python/.venv/bin/python /home/hammikb/api-monitor-python/pokemon_center_queue_monitor.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,25 +1,41 @@
 /* eslint-disable react/prop-types */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAppStore } from '../store/appStore'
 import { RETAILERS } from '../../../shared/constants'
 
-const SUPPORTED_ACCOUNT_RETAILERS = [RETAILERS.TARGET, RETAILERS.WALMART]
+const SUPPORTED_ACCOUNT_RETAILERS = [
+  RETAILERS.TARGET,
+  RETAILERS.WALMART,
+  RETAILERS.POKEMON_CENTER,
+  RETAILERS.SAMS_CLUB
+]
+const PAYMENT_ACCOUNT_RETAILERS = new Set([
+  RETAILERS.TARGET,
+  RETAILERS.POKEMON_CENTER,
+  RETAILERS.SAMS_CLUB
+])
 const INPUT_CLASS = 'w-full bg-[#0f0f0f] border border-gray-700 rounded px-3 py-2 text-gray-200'
 
 const makeEmptyForm = () => ({
   name: '',
   retailer: RETAILERS.TARGET,
   username: '',
-  password: ''
+  password: '',
+  paymentMethodId: ''
 })
 
 export default function Accounts() {
   const {
     accounts,
+    paymentMethods,
     createAccount,
+    updateAccount,
+    loadPaymentMethods,
     deleteAccount,
     setAccountStatus,
     openAccountSession,
+    prepareAccountSession,
+    inspectAccountCookies,
     checkAccountSession,
     autoLoginTargetAccount
   } = useAppStore()
@@ -28,8 +44,14 @@ export default function Accounts() {
   const [showPassword, setShowPassword] = useState(false)
   const [sessionStatus, setSessionStatus] = useState('')
   const [sessionCheckingId, setSessionCheckingId] = useState('')
+  const [sessionPreparingId, setSessionPreparingId] = useState('')
+  const [cookieCheckingId, setCookieCheckingId] = useState('')
   const [autoLoginId, setAutoLoginId] = useState('')
   const proxyCounts = getProxyCounts(accounts)
+
+  useEffect(() => {
+    loadPaymentMethods()
+  }, [loadPaymentMethods])
 
   const setF = (key, value) => setForm((current) => ({ ...current, [key]: value }))
 
@@ -42,11 +64,11 @@ export default function Accounts() {
   }
 
   const openSession = async (account) => {
-    setSessionStatus(`Opening browser for ${account.name}... Browse naturally to warm up the profile!`)
+    setSessionStatus(`Opening the saved browser profile for ${account.name}...`)
     try {
       await openAccountSession(account.id)
       setSessionStatus(
-        `Browser opened for ${account.name}. Browse naturally for 2-3 minutes to warm up the profile, then log in. This profile will be reused for tasks.`
+        `Browser opened for ${account.name}. Sign in if needed; this profile will be reused for tasks.`
       )
     } catch (err) {
       setSessionStatus(err.message || 'Could not open account browser')
@@ -64,6 +86,33 @@ export default function Accounts() {
       setSessionStatus(err.message || 'Could not check saved session')
     } finally {
       setSessionCheckingId('')
+    }
+  }
+
+  const prepareSession = async (account) => {
+    setSessionPreparingId(account.id)
+    setSessionStatus(`Preparing the saved ${account.retailer} session for ${account.name}...`)
+    try {
+      const result = await prepareAccountSession(account.id)
+      setSessionStatus(result.message || result.error || 'Session preparation finished')
+    } catch (err) {
+      setSessionStatus(err.message || 'Could not prepare account session')
+    } finally {
+      setSessionPreparingId('')
+    }
+  }
+
+  const inspectCookies = async (account) => {
+    setCookieCheckingId(account.id)
+    setSessionStatus(`Checking saved ${account.retailer} cookies for ${account.name}...`)
+    try {
+      const result = await inspectAccountCookies(account.id)
+      const domains = result.domains?.length ? ` Domains: ${result.domains.join(', ')}.` : ''
+      setSessionStatus(`${result.message || 'Cookie check finished'}${domains}`)
+    } catch (err) {
+      setSessionStatus(err.message || 'Could not inspect account cookies')
+    } finally {
+      setCookieCheckingId('')
     }
   }
 
@@ -89,7 +138,8 @@ export default function Accounts() {
             Accounts ({accounts.length})
           </h2>
           <p className="text-gray-600 text-sm mt-1">
-            Store customer-provided Target and Walmart account details for checkout tasks.
+            Store customer-provided retailer accounts and link each checkout profile to its saved
+            payment.
           </p>
         </div>
         <button
@@ -128,6 +178,23 @@ export default function Accounts() {
               </select>
             </Field>
           </div>
+
+          {PAYMENT_ACCOUNT_RETAILERS.has(form.retailer) && (
+            <Field label="Checkout Payment Method">
+              <select
+                value={form.paymentMethodId}
+                onChange={(event) => setF('paymentMethodId', event.target.value)}
+                className={INPUT_CLASS}
+              >
+                <option value="">Use payment already saved on retailer</option>
+                {paymentMethods.map((method) => (
+                  <option key={method.id} value={method.id}>
+                    {method.name} •••• {method.cardLast4}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="Email / Username">
@@ -197,6 +264,23 @@ export default function Accounts() {
                 <div className="text-gray-500">
                   {account.retailer} - {account.username}
                 </div>
+                {PAYMENT_ACCOUNT_RETAILERS.has(account.retailer) && (
+                  <select
+                    value={account.payment_method_id || ''}
+                    onChange={(event) =>
+                      updateAccount(account.id, { paymentMethodId: event.target.value || null })
+                    }
+                    className="mt-2 max-w-sm bg-[#0f0f0f] border border-gray-700 rounded px-2 py-1.5 text-gray-300"
+                    aria-label={`Payment method for ${account.name}`}
+                  >
+                    <option value="">Use payment already saved on retailer</option>
+                    {paymentMethods.map((method) => (
+                      <option key={method.id} value={method.id}>
+                        {method.name} •••• {method.cardLast4}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 {shipping.address1 && (
                   <div className="text-gray-600 truncate">
                     {shipping.address1}, {shipping.city}, {shipping.state} {shipping.zip}
@@ -219,9 +303,25 @@ export default function Accounts() {
               <button
                 onClick={() => openSession(account)}
                 className="text-blue-500 hover:text-blue-300 shrink-0 text-sm"
-                title="Open browser to manually warm up profile (browse for 2-3 min, then log in)"
+                title="Open the saved browser profile for this retailer account"
               >
-                open & warm up
+                open profile
+              </button>
+              <button
+                onClick={() => prepareSession(account)}
+                disabled={sessionPreparingId === account.id}
+                className="text-cyan-500 hover:text-cyan-300 disabled:text-gray-700 shrink-0 text-sm"
+                title="Load this retailer's checkout pages into the saved profile"
+              >
+                {sessionPreparingId === account.id ? 'preparing...' : 'prepare session'}
+              </button>
+              <button
+                onClick={() => inspectCookies(account)}
+                disabled={cookieCheckingId === account.id}
+                className="text-purple-500 hover:text-purple-300 disabled:text-gray-700 shrink-0 text-sm"
+                title="Inspect cookie counts and expiry without exposing cookie values"
+              >
+                {cookieCheckingId === account.id ? 'checking...' : 'cookie health'}
               </button>
               {account.retailer === RETAILERS.TARGET && (
                 <>

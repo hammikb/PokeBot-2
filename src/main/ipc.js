@@ -14,17 +14,20 @@ import { checkTargetSession } from './automation/flows/check-target-session.js'
 import { runTargetAutoLogin } from './automation/flows/target-auto-login.js'
 import { runTargetRegistration } from './automation/flows/register-target.js'
 import { runWalmartRegistration } from './automation/flows/register-walmart.js'
+import { cookieManager } from './automation/cookieManager.js'
 import { buildTaskReadiness } from './tasks/TaskReadiness.js'
 import { getPublicClient } from './supabase/session.js'
-import { findWalmartMatch } from './products/WalmartMatch.js'
+import { findWalmartMatch, findWalmartMatchCached } from './products/WalmartMatch.js'
+import { persistTaskState, TASK_STATE } from './tasks/TaskState.js'
 
-const SUPPORTED_TASK_RETAILERS = new Set(['target', 'walmart'])
+const SUPPORTED_TASK_RETAILERS = new Set(['target', 'walmart', 'pokemon-center', 'samsclub'])
 const TASK_UPDATE_COLUMNS = {
   retailer: 'retailer',
   productUrl: 'product_url',
   productName: 'product_name',
   productImageUrl: 'product_image_url',
   buyLimit: 'buy_limit',
+  ordersPerDrop: 'orders_per_drop',
   maxPrice: 'max_price',
   mode: 'mode',
   accountIds: 'account_ids',
@@ -45,15 +48,51 @@ export function registerIpcHandlers({
   browserPool,
   notificationEngine,
   queueJoiner,
+  pokemonCenterQueueJoiner,
   authSessionManager
 }) {
+  async function syncWalmartListing(productKey, candidate, verificationStatus = 'unverified') {
+    try {
+      const client = authSessionManager?.getClient?.()
+      if (!client || !productKey || !candidate?.url) return
+      const { data: item, error: itemError } = await client
+        .from('catalog_items')
+        .select('id')
+        .eq('product_key', productKey)
+        .maybeSingle()
+      if (itemError || !item) return
+      const { error } = await client.from('catalog_listings').upsert(
+        {
+          catalog_item_id: item.id,
+          retailer: 'walmart',
+          retailer_item_id: candidate.itemId || null,
+          product_url: candidate.url,
+          title: candidate.name || null,
+          image_url: candidate.imageUrl || null,
+          seller: candidate.sellerName || null,
+          confidence: candidate.confidence || null,
+          verification_status: verificationStatus
+        },
+        { onConflict: 'catalog_item_id,retailer' }
+      )
+      if (error) console.warn('Supabase Walmart listing sync skipped', error.message)
+    } catch (error) {
+      console.warn('Supabase Walmart listing sync skipped', error.message)
+    }
+  }
+
   // Settings
   ipcMain.handle(IPC.SETTINGS_GET, () => getSettings())
-  ipcMain.handle(IPC.SETTINGS_SET, (_, key, value) => {
+  ipcMain.handle(IPC.SETTINGS_SET, async (_, key, value) => {
     if (typeof key !== 'string' || !key) throw new Error('settings key must be a non-empty string')
+    // Persist intent before activating integrations. A temporary auth/network
+    // failure must not make a durable dashboard setting impossible to save.
     getDb()
       .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
       .run(key, JSON.stringify(value))
+    if (key === 'pokemonCenterAutoJoin') {
+      return taskManager.setPokemonCenterAutoJoin(value === true)
+    }
     return true
   })
 
@@ -126,9 +165,64 @@ export function registerIpcHandlers({
     return findWalmartMatch({ upc, name })
   })
 
+  // Search the central catalog in a throttled, cache-backed pass. Exact UPC
+  // matches are safe to save automatically; name matches remain review-only.
+  ipcMain.handle(IPC.CATALOG_BULK_FIND_WALMART_MATCHES, async (_, items = []) => {
+    const db = getDb()
+    const rows = []
+    let searched = 0
+    for (const item of Array.isArray(items) ? items.slice(0, 2000) : []) {
+      const productKey = item.productKey || item.product_key
+      if (!productKey || (!item.upc && !item.name)) continue
+      const existing = db
+        .prepare('SELECT * FROM catalog_walmart_matches WHERE target_product_key = ?')
+        .get(productKey)
+      const skipped = db
+        .prepare('SELECT * FROM catalog_walmart_skips WHERE target_product_key = ?')
+        .get(productKey)
+      if (existing) {
+        rows.push({ productKey, match: existing, saved: true, cached: true })
+        continue
+      }
+      if (skipped) {
+        rows.push({ productKey, skipped: true, saved: true, cached: true })
+        continue
+      }
+      const query = item.upc ? String(item.upc).trim() : String(item.name || '').trim()
+      const queryKey = `${item.upc ? 'upc' : 'name'}:${query.toLowerCase()}`
+      const cached = db
+        .prepare('SELECT 1 FROM walmart_match_search_cache WHERE query_key = ? AND expires_at > ?')
+        .get(queryKey, Math.floor(Date.now() / 1000))
+      if (!cached && searched > 0) {
+        // Keep the bulk pass gentle on Walmart. Cached entries never incur a delay.
+        await new Promise((resolve) => setTimeout(resolve, 750))
+      }
+      if (!cached) searched += 1
+      const candidates = await findWalmartMatchCached({ db, upc: item.upc, name: item.name })
+      const exact = item.upc && candidates.length === 1 ? candidates[0] : null
+      if (exact) {
+        db.prepare(
+          `INSERT OR REPLACE INTO catalog_walmart_matches
+              (target_product_key, walmart_item_id, walmart_url, walmart_name, confidence)
+             VALUES (?, ?, ?, ?, ?)`
+        ).run(productKey, exact.itemId, exact.url, exact.name, 'upc')
+        await syncWalmartListing(productKey, exact, 'auto-matched')
+      }
+      rows.push({
+        productKey,
+        candidates,
+        match: exact,
+        saved: Boolean(exact),
+        sourceName: item.name,
+        sourceUrl: item.productUrl || item.product_url
+      })
+    }
+    return rows
+  })
+
   // Persist the confirmed match locally. This never touches the shared
   // Supabase target_catalog — it's PokeBot-only enrichment data.
-  ipcMain.handle(IPC.CATALOG_SAVE_WALMART_MATCH, (_, { productKey, candidate }) => {
+  ipcMain.handle(IPC.CATALOG_SAVE_WALMART_MATCH, async (_, { productKey, candidate }) => {
     getDb()
       .prepare(
         `
@@ -138,12 +232,23 @@ export function registerIpcHandlers({
     `
       )
       .run(productKey, candidate.itemId, candidate.url, candidate.name, candidate.confidence)
+    await syncWalmartListing(productKey, candidate, 'verified')
     return true
   })
 
   ipcMain.handle(IPC.CATALOG_LIST_WALMART_MATCHES, () =>
     getDb().prepare('SELECT * FROM catalog_walmart_matches').all()
   )
+
+  ipcMain.handle(IPC.CATALOG_SKIP_WALMART_MATCH, (_, { productKey, reason = 'not-carried' }) => {
+    getDb()
+      .prepare(
+        `INSERT OR REPLACE INTO catalog_walmart_skips (target_product_key, reason)
+         VALUES (?, ?)`
+      )
+      .run(productKey, reason)
+    return true
+  })
 
   // Accounts
   ipcMain.handle(IPC.ACCOUNTS_GET, () => accountManager.getAll())
@@ -231,8 +336,18 @@ export function registerIpcHandlers({
         waitUntil: 'domcontentloaded',
         timeout: 30000
       })
+    } else if (account.retailer === 'pokemon-center') {
+      await page.goto('https://www.pokemoncenter.com/', {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000
+      })
+    } else if (account.retailer === 'samsclub') {
+      await page.goto('https://www.samsclub.com/account', {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000
+      })
     } else {
-      throw new Error('Only Target and Walmart account sessions are supported')
+      throw new Error('This retailer account session is not supported')
     }
     return true
   })
@@ -307,44 +422,58 @@ export function registerIpcHandlers({
   ipcMain.handle(IPC.ACCOUNTS_WARMUP, async (_, id, options) => {
     const account = accountManager.getDecrypted(id)
     if (!account) throw new Error('Account not found')
-    if (account.retailer !== 'walmart') {
-      throw new Error('Profile warmup is currently only supported for Walmart accounts')
-    }
-
-    const result = await profileWarmup.warmupWalmartProfile(account, options)
+    const result = await profileWarmup.prepareProfile(account, options)
 
     // Notify renderer of progress
     mainWindow?.webContents?.send(IPC.FEED_EVENT, {
       id: randomUUID(),
-      retailer: 'walmart',
-      productName: `Profile Warmup: ${account.name}`,
-      dropType: 'profile_warmup',
+      retailer: account.retailer,
+      productName: `Session preparation: ${account.name}`,
+      dropType: 'session_preparation',
       message: result.success ? result.message : `Failed: ${result.error}`,
       createdAt: new Date().toISOString()
     })
 
     return result
   })
+  ipcMain.handle(IPC.ACCOUNTS_COOKIE_HEALTH, async (_, id) => {
+    const account = accountManager.getDecrypted(id)
+    if (!account) throw new Error('Account not found')
+    const context = await browserPool.launch(account.id, {
+      profilePath: account.profile_path,
+      proxy: account.proxy
+    })
+    return cookieManager.inspectCookies(context, account.retailer)
+  })
 
   // Tasks
-  ipcMain.handle(IPC.TASKS_GET, () => getDb().prepare('SELECT * FROM tasks').all())
+  ipcMain.handle(IPC.TASKS_GET, () => {
+    const activeTaskIds = new Set(taskManager.getActiveTasks())
+    return getDb()
+      .prepare('SELECT * FROM tasks')
+      .all()
+      .map((task) => ({
+        ...task,
+        status: activeTaskIds.has(task.id) ? 'monitoring' : task.status || 'idle'
+      }))
+  })
   ipcMain.handle(IPC.TASKS_READINESS, () => {
     const tasks = getDb().prepare('SELECT * FROM tasks').all()
-    return buildTaskReadiness({ tasks, accountManager, settings: getSettings() })
+    return buildTaskReadiness({ tasks, accountManager, paymentManager, settings: getSettings() })
   })
   ipcMain.handle(IPC.TASKS_CREATE, (_, data) => {
     if (!data?.retailer || !data?.productUrl) {
       throw new Error('retailer and productUrl are required to create a task')
     }
     if (!SUPPORTED_TASK_RETAILERS.has(data.retailer)) {
-      throw new Error('Task creation is currently supported for Target and Walmart only')
+      throw new Error('Task creation is not supported for this retailer')
     }
     const id = randomUUID()
     getDb()
       .prepare(
         `
-      INSERT INTO tasks (id, retailer, product_url, product_name, product_image_url, buy_limit, max_price, mode, account_ids, interval_ms)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (id, retailer, product_url, product_name, product_image_url, buy_limit, orders_per_drop, max_price, mode, account_ids, interval_ms)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
       )
       .run(
@@ -354,6 +483,7 @@ export function registerIpcHandlers({
         data.productName || null,
         data.productImageUrl || null,
         normalizeBuyLimit(data.buyLimit, data.retailer),
+        normalizeOrdersPerDrop(data.ordersPerDrop, data.retailer),
         data.maxPrice || null,
         data.mode || 'monitor-and-buy',
         JSON.stringify(data.accountIds || []),
@@ -366,13 +496,14 @@ export function registerIpcHandlers({
     if (!task) throw new Error('Task not found')
     const retailer = data.retailer || task.retailer
     if (!SUPPORTED_TASK_RETAILERS.has(retailer)) {
-      throw new Error('Task editing is currently supported for Target and Walmart only')
+      throw new Error('Task editing is not supported for this retailer')
     }
 
     const fields = {
       ...data,
       retailer,
       buyLimit: normalizeBuyLimit(data.buyLimit, retailer),
+      ordersPerDrop: normalizeOrdersPerDrop(data.ordersPerDrop, retailer),
       accountIds: JSON.stringify(data.accountIds || [])
     }
     for (const [key, column] of Object.entries(TASK_UPDATE_COLUMNS)) {
@@ -425,7 +556,7 @@ export function registerIpcHandlers({
       const enabled = source.enabled === true && Boolean(source.productUrl)
       const msrp = toNullablePrice(source.msrp)
       const priceCeiling = toNullablePrice(source.priceCeiling)
-      if (enabled && !(priceCeiling > 0)) {
+      if (enabled && source.retailer !== 'pokemon-center' && !(priceCeiling > 0)) {
         throw new Error(`A price limit is required for ${source.retailer}`)
       }
       const accountIds = Array.isArray(source.accountIds) ? source.accountIds : []
@@ -434,14 +565,15 @@ export function registerIpcHandlers({
         taskId ||= randomUUID()
         db.prepare(
           `INSERT INTO tasks
-            (id, retailer, product_url, product_name, product_image_url, buy_limit, max_price, mode, account_ids, interval_ms)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, retailer, product_url, product_name, product_image_url, buy_limit, orders_per_drop, max_price, mode, account_ids, interval_ms)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
             retailer = excluded.retailer,
             product_url = excluded.product_url,
             product_name = excluded.product_name,
             product_image_url = excluded.product_image_url,
             buy_limit = excluded.buy_limit,
+            orders_per_drop = excluded.orders_per_drop,
             max_price = excluded.max_price,
             mode = excluded.mode,
             account_ids = excluded.account_ids,
@@ -453,6 +585,7 @@ export function registerIpcHandlers({
           source.productName || data.name,
           source.imageUrl || data.imageUrl || null,
           normalizeBuyLimit(source.buyLimit, source.retailer),
+          normalizeOrdersPerDrop(source.ordersPerDrop, source.retailer),
           priceCeiling,
           source.actionMode || data.actionMode || 'auto-checkout',
           JSON.stringify(accountIds),
@@ -467,9 +600,9 @@ export function registerIpcHandlers({
       db.prepare(
         `INSERT INTO monitor_sources
           (id, monitor_id, retailer, product_url, retailer_item_id, msrp, current_price,
-           price_ceiling, buy_limit, account_ids, action_mode, enabled, verification_status,
+           price_ceiling, buy_limit, orders_per_drop, account_ids, action_mode, enabled, verification_status,
            task_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(monitor_id, retailer) DO UPDATE SET
           product_url = excluded.product_url,
           retailer_item_id = excluded.retailer_item_id,
@@ -477,6 +610,7 @@ export function registerIpcHandlers({
           current_price = excluded.current_price,
           price_ceiling = excluded.price_ceiling,
           buy_limit = excluded.buy_limit,
+          orders_per_drop = excluded.orders_per_drop,
           account_ids = excluded.account_ids,
           action_mode = excluded.action_mode,
           enabled = excluded.enabled,
@@ -493,6 +627,7 @@ export function registerIpcHandlers({
         toNullablePrice(source.currentPrice),
         priceCeiling,
         normalizeBuyLimit(source.buyLimit, source.retailer),
+        normalizeOrdersPerDrop(source.ordersPerDrop, source.retailer),
         JSON.stringify(accountIds),
         source.actionMode || data.actionMode || 'auto-checkout',
         enabled ? 1 : 0,
@@ -529,8 +664,12 @@ export function registerIpcHandlers({
   ipcMain.handle(IPC.PROXIES_DOWNLOAD, async (_, url) => downloadProxies(url))
   ipcMain.handle(IPC.PROXIES_TEST, async (_, proxy) => testProxy(proxy))
   ipcMain.handle(IPC.TASKS_START, (_, id) => {
-    const task = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(id)
-    if (task) taskManager.startTask(task)
+    const db = getDb()
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)
+    if (task) {
+      persistTaskState(db, id, TASK_STATE.MONITORING)
+      taskManager.startTask({ ...task, status: TASK_STATE.MONITORING })
+    }
     return true
   })
   ipcMain.handle(IPC.TASKS_TEST, async (_, id) => {
@@ -539,6 +678,7 @@ export function registerIpcHandlers({
     return taskManager.testTask(task)
   })
   ipcMain.handle(IPC.TASKS_STOP, (_, id) => {
+    persistTaskState(getDb(), id, TASK_STATE.IDLE)
     taskManager.stopTask(id)
     return true
   })
@@ -554,7 +694,7 @@ export function registerIpcHandlers({
   })
 
   // Payment Methods
-  ipcMain.handle(IPC.PAYMENTS_GET, () => paymentManager.getAll())
+  ipcMain.handle(IPC.PAYMENTS_GET, () => paymentManager.getAllSafe())
   ipcMain.handle(IPC.PAYMENTS_CREATE, (_, data) => paymentManager.create(data))
   ipcMain.handle(IPC.PAYMENTS_UPDATE, (_, id, fields) => {
     paymentManager.update(id, fields)
@@ -655,7 +795,10 @@ export function registerIpcHandlers({
     queueJoiner.start(id, { productUrl, label, account })
     return true
   })
-  ipcMain.handle(IPC.QUEUE_STOP, (_, id) => queueJoiner.stop(id))
+  ipcMain.handle(IPC.QUEUE_STOP, (_, id) => {
+    if (queueJoiner.isJoining(id)) return queueJoiner.stop(id)
+    return pokemonCenterQueueJoiner?.stop(id)
+  })
 
   queueJoiner.on('progress', (p) => mainWindow?.webContents?.send(IPC.QUEUE_PROGRESS, p))
   queueJoiner.on('turn', ({ label, status }) =>
@@ -664,6 +807,16 @@ export function registerIpcHandlers({
       productName: `🎟️ YOUR TURN: ${status?.itemName || label}`,
       dropType: DROP_TYPES.QUEUE_OPEN,
       price: status?.price
+    })
+  )
+  pokemonCenterQueueJoiner?.on('progress', (p) =>
+    mainWindow?.webContents?.send(IPC.QUEUE_PROGRESS, p)
+  )
+  pokemonCenterQueueJoiner?.on('turn', ({ label }) =>
+    notificationEngine?.fire({
+      retailer: 'pokemon-center',
+      productName: `POKEMON CENTER ADMITTED: ${label}`,
+      dropType: DROP_TYPES.QUEUE_OPEN
     })
   )
 
@@ -707,6 +860,12 @@ function normalizeBuyLimit(value, retailer) {
   const numericValue = Number.parseInt(value, 10)
   if (!Number.isFinite(numericValue) || numericValue < 1) return fallback
   return Math.min(numericValue, fallback)
+}
+
+function normalizeOrdersPerDrop(value, retailer) {
+  if (retailer !== 'target') return 1
+  const numericValue = Number.parseInt(value, 10)
+  return numericValue === 2 ? 2 : 1
 }
 
 function toNullablePrice(value) {

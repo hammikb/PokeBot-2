@@ -50,7 +50,10 @@ describe('SupabaseClient', () => {
       data: { session: { access_token: 'jwt-signup', refresh_token: 'rt-signup' } },
       error: null
     }))
-    createClient.mockReturnValueOnce({ auth: { signInWithPassword, signUp }, realtime: { setAuth } })
+    createClient.mockReturnValueOnce({
+      auth: { signInWithPassword, signUp },
+      realtime: { setAuth }
+    })
     const sc = new SupabaseClient({ url: 'https://x.supabase.co', key: 'k' })
 
     const session = await sc.signUp('new@example.com', 'pw123')
@@ -62,7 +65,10 @@ describe('SupabaseClient', () => {
 
   it('signUp throws when Supabase returns no session (e.g. email confirmation still required)', async () => {
     const signUp = vi.fn(async () => ({ data: { session: null }, error: null }))
-    createClient.mockReturnValueOnce({ auth: { signInWithPassword, signUp }, realtime: { setAuth } })
+    createClient.mockReturnValueOnce({
+      auth: { signInWithPassword, signUp },
+      realtime: { setAuth }
+    })
     const sc = new SupabaseClient({ url: 'https://x.supabase.co', key: 'k' })
 
     await expect(sc.signUp('new@example.com', 'pw123')).rejects.toThrow(
@@ -103,7 +109,10 @@ describe('SupabaseClient', () => {
 
   it('signs out', async () => {
     const signOut = vi.fn(async () => ({ error: null }))
-    createClient.mockReturnValueOnce({ auth: { signInWithPassword, signOut }, realtime: { setAuth } })
+    createClient.mockReturnValueOnce({
+      auth: { signInWithPassword, signOut },
+      realtime: { setAuth }
+    })
     const sc = new SupabaseClient({ url: 'https://x.supabase.co', key: 'k' })
 
     await sc.signOut()

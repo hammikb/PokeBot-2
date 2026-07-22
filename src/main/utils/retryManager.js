@@ -38,7 +38,7 @@ export class RetryManager {
         return await fn(attempt)
       } catch (err) {
         lastError = err
-        
+
         // Check if we should retry this error
         if (!shouldRetry(err)) {
           log.warn('Error not retryable', { error: err.message })
@@ -52,10 +52,7 @@ export class RetryManager {
         }
 
         // Calculate delay with exponential backoff
-        const delay = Math.min(
-          initialDelay * Math.pow(backoffMultiplier, attempt - 1),
-          maxDelay
-        )
+        const delay = Math.min(initialDelay * Math.pow(backoffMultiplier, attempt - 1), maxDelay)
 
         log.warn('Operation failed, retrying', {
           attempt,
@@ -149,11 +146,12 @@ function isNetworkError(err) {
     'ERR_INTERNET_DISCONNECTED'
   ]
 
-  return networkErrors.some(code => 
-    err.code === code || 
-    err.message?.includes(code) ||
-    err.message?.includes('network') ||
-    err.message?.includes('connection')
+  return networkErrors.some(
+    (code) =>
+      err.code === code ||
+      err.message?.includes(code) ||
+      err.message?.includes('network') ||
+      err.message?.includes('connection')
   )
 }
 
@@ -172,7 +170,7 @@ function isTimeoutError(err) {
  * Sleep utility
  */
 function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms))
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /**

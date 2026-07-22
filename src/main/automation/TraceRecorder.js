@@ -36,6 +36,7 @@ export async function startTrace(context, { retailer, accountName, taskId = 'che
       if (tracingStarted && context?.tracing?.stop) {
         await context.tracing.stop({ path: tracePath }).catch(() => {})
       }
+      return { tracePath, screenshotPath }
     }
   }
 }

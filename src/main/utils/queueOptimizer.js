@@ -35,21 +35,36 @@ export class QueueOptimizer {
 
       // Decision logic
       if (queueInfo.position > maxPosition) {
-        log.warn('Queue position too high, skipping', { position: queueInfo.position, max: maxPosition })
-        return { action: 'skip', reason: `Queue position ${queueInfo.position} exceeds max ${maxPosition}` }
+        log.warn('Queue position too high, skipping', {
+          position: queueInfo.position,
+          max: maxPosition
+        })
+        return {
+          action: 'skip',
+          reason: `Queue position ${queueInfo.position} exceeds max ${maxPosition}`
+        }
       }
 
       if (queueInfo.estimatedMinutes > maxWaitMinutes) {
-        log.warn('Wait time too long, skipping', { minutes: queueInfo.estimatedMinutes, max: maxWaitMinutes })
-        return { action: 'skip', reason: `Wait time ${queueInfo.estimatedMinutes}min exceeds max ${maxWaitMinutes}min` }
+        log.warn('Wait time too long, skipping', {
+          minutes: queueInfo.estimatedMinutes,
+          max: maxWaitMinutes
+        })
+        return {
+          action: 'skip',
+          reason: `Wait time ${queueInfo.estimatedMinutes}min exceeds max ${maxWaitMinutes}min`
+        }
       }
 
       // Monitor queue progress
-      log.info('Waiting in queue', { position: queueInfo.position, estimated: queueInfo.estimatedMinutes })
-      
+      log.info('Waiting in queue', {
+        position: queueInfo.position,
+        estimated: queueInfo.estimatedMinutes
+      })
+
       while (await this.isInQueue(page)) {
         const currentInfo = await this.getQueueInfo(page)
-        
+
         if (onUpdate) {
           onUpdate({
             position: currentInfo.position,
@@ -142,7 +157,7 @@ export class QueueOptimizer {
    * Sleep utility
    */
   sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms))
+    return new Promise((resolve) => setTimeout(resolve, ms))
   }
 }
 

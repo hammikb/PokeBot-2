@@ -1,6 +1,7 @@
 import { waitForCaptchaIfNeeded } from '../captcha.js'
 import { startTrace } from '../TraceRecorder.js'
 import { NativeInputBridge } from '../NativeInputBridge.js'
+import { startCheckoutDiagnostics } from '../CheckoutDiagnostics.js'
 
 export async function runWalmartFlow(
   context,
@@ -15,6 +16,12 @@ export async function runWalmartFlow(
     retailer: 'walmart',
     accountName: account?.name,
     taskId: dropEvent?.productName || 'checkout'
+  })
+  const diagnostics = await startCheckoutDiagnostics(page, {
+    retailer: 'walmart',
+    accountName: account?.name,
+    taskId: dropEvent?.productName || 'checkout',
+    tracePath: trace.tracePath
   })
   const isTestMode = mode === 'test-checkout'
   let requiresManual = false
@@ -40,24 +47,25 @@ export async function runWalmartFlow(
       )
     }
 
-    // Add to cart with human-like behavior
+    // The extension clicks after a short interaction settle rather than sleeping
+    // for several seconds. Keep a minimal pause, then wait on real page state.
     onStep('Clicking Add to cart')
     const atcBtn = page.locator('button[data-automation-id="atc"], button:has-text("Add to cart")')
 
     // Hover before clicking (more human-like, optional for environments that don't support it)
     await atcBtn.first().hover?.()
-    await page.waitForTimeout?.(300 + Math.random() * 500) // Random delay 300-800ms
+    await page.waitForTimeout?.(100)
 
     await atcBtn.first().click({ timeout: 15000 })
     await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
 
-    // Wait for cart to update with random delay (more human-like)
-    onStep('Waiting for cart to update')
-    await page.waitForTimeout?.(2000 + Math.random() * 1000) // Random 2-3s
-
-    // Scroll a bit (human behavior)
-    await page.evaluate?.(() => window.scrollBy(0, 100))
-    await page.waitForTimeout?.(500 + Math.random() * 500)
+    onStep('Waiting for cart confirmation')
+    const cartSignal = page
+      .locator(
+        '[data-automation-id="cart-item-count"]:visible, [aria-label*="cart" i]:visible:has-text("1"), [role="alert"]:visible:has-text("Added to cart"), button:visible:has-text("View cart")'
+      )
+      .first()
+    await cartSignal.waitFor({ state: 'visible', timeout: 1200 }).catch(() => {})
 
     // Go to checkout
     onStep('Opening checkout')
@@ -67,8 +75,12 @@ export async function runWalmartFlow(
     })
     await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
 
-    // Wait for checkout page to fully load
-    await page.waitForTimeout?.(1500 + Math.random() * 1000) // Random 1.5-2.5s
+    const checkoutReady = page
+      .locator(
+        'input[name="cvv"]:visible, input[autocomplete="cc-csc"]:visible, button[data-automation-id="place-order"]:visible, button:visible:has-text("Place order")'
+      )
+      .first()
+    await checkoutReady.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {})
 
     // Enter CVV
     onStep('Checking CVV field')
@@ -110,7 +122,6 @@ export async function runWalmartFlow(
       'button:has-text("Place order"), button[data-automation-id="place-order"], button:has-text("Place Order")'
     await input.click(placeOrderSelector)
 
-
     // Wait for confirmation
     onStep('Waiting for order confirmation')
     await page.waitForSelector(
@@ -128,6 +139,7 @@ export async function runWalmartFlow(
     await trace.stop()
     return { success: true, orderId: orderId?.trim() || 'unknown', tracePath: trace.tracePath }
   } catch (err) {
+    const diagnosticsPath = await diagnostics.capture(err)
     await trace.capture(page)
     await trace.stop()
     if (isTestMode) {
@@ -139,9 +151,11 @@ export async function runWalmartFlow(
       error: err.message,
       requiresManualCheckout: isTestMode,
       tracePath: trace.tracePath,
-      screenshotPath: trace.screenshotPath
+      screenshotPath: trace.screenshotPath,
+      diagnosticsPath
     }
   } finally {
+    diagnostics.dispose()
     if (!requiresManual) {
       try {
         await page.close()
@@ -152,7 +166,14 @@ export async function runWalmartFlow(
   }
 }
 
-async function ensureWalmartSignedIn(page, account, notificationEngine, dropEvent, onStep, productUrl) {
+async function ensureWalmartSignedIn(
+  page,
+  account,
+  notificationEngine,
+  dropEvent,
+  onStep,
+  productUrl
+) {
   onStep('Checking Walmart sign-in state')
   const signInLink = page.locator(
     'a:has-text("Sign in"), button:has-text("Sign in"), button:has-text("Sign In"), [data-automation-id="sign-in"]'

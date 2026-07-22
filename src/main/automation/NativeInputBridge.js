@@ -121,7 +121,10 @@ export class NativeInputBridge {
       // Clear existing value
       await this._page.evaluate((sel) => {
         const el = document.querySelector(sel)
-        if (el) { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })) }
+        if (el) {
+          el.value = ''
+          el.dispatchEvent(new Event('input', { bubbles: true }))
+        }
       }, selector)
 
       // Type each character via nut-js keyboard
@@ -198,7 +201,11 @@ export class NativeInputBridge {
     const jitterX = Math.round((Math.random() - 0.5) * 4)
     const jitterY = Math.round((Math.random() - 0.5) * 4)
 
-    log.debug('Native click', { selector: opts._selector, screenX: screenX + jitterX, screenY: screenY + jitterY })
+    log.debug('Native click', {
+      selector: opts._selector,
+      screenX: screenX + jitterX,
+      screenY: screenY + jitterY
+    })
 
     // Move mouse to position with human-like curve
     await this._nut.mouse.setPosition(new this._nut.Point(screenX + jitterX, screenY + jitterY))

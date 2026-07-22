@@ -98,6 +98,65 @@ describe('JsonDb SELECT with AND-chained WHERE', () => {
       .get('m1', 'walmart')
     expect(row.id).toBe('s2')
   })
+
+  it('supports literal and IS NOT NULL filters used by pending checkout uploads', () => {
+    const insert = db.prepare(
+      'INSERT INTO checkout_attempts (id, upload_status, completed_at) VALUES (?, ?, ?)'
+    )
+    insert.run('pending', 'pending', 123)
+    insert.run('running', 'pending', null)
+    insert.run('uploaded', 'uploaded', 456)
+
+    const rows = db
+      .prepare("SELECT * FROM checkout_attempts WHERE upload_status = 'pending' AND completed_at IS NOT NULL")
+      .all()
+
+    expect(rows.map((row) => row.id)).toEqual(['pending'])
+  })
+})
+
+describe('JsonDb UPDATE statements', () => {
+  it('updates multiple placeholder and literal assignments atomically', () => {
+    db.prepare(
+      'INSERT INTO checkout_attempts (id, outcome, final_stage, upload_status) VALUES (?, ?, ?, ?)'
+    ).run('a1', 'running', 'drop_detected', 'pending')
+
+    const result = db
+      .prepare(
+        "UPDATE checkout_attempts SET completed_at = ?, duration_ms = ?, outcome = ?, final_stage = ?, upload_status = 'pending' WHERE id = ?"
+      )
+      .run(200, 150, 'failed', 'failed', 'a1')
+
+    expect(result.changes).toBe(1)
+    expect(db.prepare('SELECT * FROM checkout_attempts WHERE id = ?').get('a1')).toMatchObject({
+      completed_at: 200,
+      duration_ms: 150,
+      outcome: 'failed',
+      final_stage: 'failed',
+      upload_status: 'pending'
+    })
+  })
+
+  it('supports literal updates without a WHERE clause', () => {
+    const insert = db.prepare('INSERT INTO shipping_addresses (id, is_default) VALUES (?, ?)')
+    insert.run('one', 1)
+    insert.run('two', 1)
+
+    expect(db.prepare('UPDATE shipping_addresses SET is_default = 0').run().changes).toBe(2)
+    expect(db.prepare('SELECT * FROM shipping_addresses').all().every((row) => row.is_default === 0)).toBe(true)
+  })
+})
+
+describe('JsonDb aggregate queries', () => {
+  it('returns the latest migration version for SELECT MAX', () => {
+    const insert = db.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)')
+    insert.run(1, 'initial_schema')
+    insert.run(9, 'add_checkout_telemetry')
+
+    expect(db.prepare('SELECT MAX(version) as version FROM schema_migrations').get()).toEqual({
+      version: 9
+    })
+  })
 })
 
 describe('JsonDb load-time repair', () => {

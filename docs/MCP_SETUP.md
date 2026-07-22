@@ -11,11 +11,13 @@ To let me (Cline) access the Walmart MCP server tools, you need to add it to you
 ### Step 1: Find Your MCP Config File
 
 The config file is located at:
+
 ```
 %APPDATA%\Code\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json
 ```
 
 Or navigate to:
+
 ```
 C:\Users\kaib1\AppData\Roaming\Code\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json
 ```
@@ -29,9 +31,7 @@ Open the file and add this configuration:
   "mcpServers": {
     "walmart": {
       "command": "npx",
-      "args": [
-        "@striderlabs/mcp-walmart"
-      ]
+      "args": ["@striderlabs/mcp-walmart"]
     }
   }
 }
@@ -48,9 +48,7 @@ If the file already has other servers, add the walmart entry:
     },
     "walmart": {
       "command": "npx",
-      "args": [
-        "@striderlabs/mcp-walmart"
-      ]
+      "args": ["@striderlabs/mcp-walmart"]
     }
   }
 }
@@ -59,6 +57,7 @@ If the file already has other servers, add the walmart entry:
 ### Step 3: Restart VS Code
 
 After saving the config:
+
 1. Close VS Code completely
 2. Reopen VS Code
 3. The Walmart MCP server will be available
@@ -66,6 +65,7 @@ After saving the config:
 ### Step 4: Verify It's Working
 
 Once configured, I'll be able to:
+
 - See what tools the Walmart MCP provides
 - Use those tools to interact with Walmart
 - Analyze how it bypasses detection

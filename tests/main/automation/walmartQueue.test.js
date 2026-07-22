@@ -35,6 +35,30 @@ describe('walmartQueue', () => {
     expect(s.inQueue).toBe(false)
   })
 
+  it('preserves the newer queued format and item metadata', () => {
+    const url =
+      'https://www.walmart.com/qp?qpdata=' +
+      encodeURIComponent(
+        JSON.stringify({
+          queued: true,
+          queue: 'q1',
+          customMetadata: {
+            item: {
+              itemID: '19380764160',
+              itemURL: '/ip/item/19380764160',
+              name: 'Perfect Order Booster Bundle'
+            }
+          }
+        })
+      )
+    const s = parseQp(url)
+    expect(s.queued).toBe(true)
+    expect(s.inQueue).toBe(true)
+    expect(s.yourTurn).toBe(false)
+    expect(s.itemId).toBe('19380764160')
+    expect(s.itemUrl).toBe('/ip/item/19380764160')
+  })
+
   it('detects an active queue from url or body', () => {
     expect(isQueueActive({ url: QP_URL })).toBe(true)
     expect(isQueueActive({ url: 'https://www.walmart.com/qp' })).toBe(true)

@@ -5,6 +5,7 @@ const PHASE = {
   watching: { label: 'Watching', color: 'text-blue-400', dot: 'bg-blue-400 animate-pulse' },
   'in-queue': { label: 'In queue', color: 'text-yellow-400', dot: 'bg-yellow-400' },
   'no-queue': { label: 'No queue', color: 'text-gray-400', dot: 'bg-gray-500' },
+  'external-open': { label: 'Opened', color: 'text-green-400', dot: 'bg-green-400' },
   turn: { label: 'YOUR TURN', color: 'text-green-400', dot: 'bg-green-400' },
   timeout: { label: 'Timed out', color: 'text-gray-400', dot: 'bg-gray-500' },
   error: { label: 'Error', color: 'text-red-400', dot: 'bg-red-400' }
@@ -25,14 +26,15 @@ export default function QueuePanel() {
     <div className="bg-[#111] border border-gray-800 rounded p-4">
       <div className="text-sm text-gray-500 uppercase tracking-widest mb-3 flex items-center gap-2">
         <span>🎟️</span>
-        <span>Walmart Queues ({jobs.length})</span>
-        <span className="text-gray-700 normal-case tracking-normal">· 1 ticket each, no extra windows</span>
+        <span>Retail queues ({jobs.length})</span>
+        <span className="text-gray-700 normal-case tracking-normal">
+          · persistent browser sessions
+        </span>
       </div>
       <div className="space-y-3">
         {jobs.map((j) => {
           const ph = PHASE[j.phase] || PHASE.joining
-          const pct =
-            j.phase === 'turn' ? 100 : j.phase === 'in-queue' ? (j.percent ?? 2) : 0
+          const pct = j.phase === 'turn' ? 100 : j.phase === 'in-queue' ? (j.percent ?? 2) : 0
           const odds = j.admissionLikelihood
           return (
             <div key={j.id} className="bg-[#1a1a1a] rounded p-3">
@@ -41,7 +43,10 @@ export default function QueuePanel() {
                 <span className={`text-sm font-semibold uppercase tracking-wider ${ph.color}`}>
                   {ph.label}
                 </span>
-                {j.ticket != null && <span className="text-gray-500 text-sm">ticket {j.ticket}</span>}
+                {j.ticket != null && (
+                  <span className="text-gray-500 text-sm">ticket {j.ticket}</span>
+                )}
+                {j.retailer && <span className="text-gray-500 text-sm">{j.retailer}</span>}
                 {odds && (
                   <span
                     className={`text-sm ${odds === 'unlikely' ? 'text-red-400' : 'text-gray-400'}`}

@@ -28,7 +28,6 @@ vi.mock('../../../../src/main/automation/NativeInputBridge.js', () => ({
   }
 }))
 
-
 function makePage({ counts = {}, throws = {}, orderId = 'order-123' } = {}) {
   const page = {
     fills: [],

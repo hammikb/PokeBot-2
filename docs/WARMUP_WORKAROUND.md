@@ -91,12 +91,12 @@ If you don't want to use real Chrome profiles:
 
 ## Quick Comparison
 
-| Method | Bot's "Open Browser" | Real Chrome Warmup |
-|--------|---------------------|-------------------|
-| Uses Playwright | ✅ Yes | ❌ No |
-| Walmart detects | ✅ Yes | ❌ No |
-| Can warm up | ❌ No | ✅ Yes |
-| Can automate | ✅ Yes | ❌ No |
+| Method          | Bot's "Open Browser" | Real Chrome Warmup |
+| --------------- | -------------------- | ------------------ |
+| Uses Playwright | ✅ Yes               | ❌ No              |
+| Walmart detects | ✅ Yes               | ❌ No              |
+| Can warm up     | ❌ No                | ✅ Yes             |
+| Can automate    | ✅ Yes               | ❌ No              |
 
 **Solution**: Use Real Chrome for warmup, then bot for automation!
 
@@ -119,6 +119,7 @@ If you don't want to use real Chrome profiles:
 ## Example: 3 Accounts
 
 **Account 1**:
+
 ```
 Chrome Profile: Walmart1
 Path: C:\Users\YourName\AppData\Local\Google\Chrome\User Data\Profile 1
@@ -126,6 +127,7 @@ Warmed up: ✅ Yes (browsed for 3 minutes)
 ```
 
 **Account 2**:
+
 ```
 Chrome Profile: Walmart2
 Path: C:\Users\YourName\AppData\Local\Google\Chrome\User Data\Profile 2
@@ -133,6 +135,7 @@ Warmed up: ✅ Yes (browsed for 3 minutes)
 ```
 
 **Account 3**:
+
 ```
 Chrome Profile: Walmart3
 Path: C:\Users\YourName\AppData\Local\Google\Chrome\User Data\Profile 3
@@ -154,16 +157,19 @@ Warmed up: ✅ Yes (browsed for 3 minutes)
 ## Troubleshooting
 
 **"Profile is in use" error**:
+
 - Close all Chrome windows
 - Wait 10 seconds
 - Try again
 
 **Still getting "Robot or Human"**:
+
 - Warm up wasn't long enough (browse for 5 minutes)
 - Profile too new (make a test purchase first)
 - IP flagged (try different network or residential proxy)
 
 **Can't find profile path**:
+
 - Use Method 1 (create new Chrome profile)
 - Path is always in `%LOCALAPPDATA%\Google\Chrome\User Data\`
 

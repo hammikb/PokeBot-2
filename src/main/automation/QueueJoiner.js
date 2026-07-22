@@ -1,9 +1,5 @@
 import { EventEmitter } from 'events'
-import {
-  parseQp,
-  extractQpdataFromText,
-  secondsUntilTurn
-} from './walmartQueue.js'
+import { parseQp, extractQpdataFromText, secondsUntilTurn } from './walmartQueue.js'
 import { createModuleLogger } from '../utils/logger.js'
 
 const log = createModuleLogger('QueueJoiner')
@@ -31,9 +27,20 @@ export class QueueJoiner extends EventEmitter {
     return this._jobs.has(id)
   }
 
+  /** True while any queue page is using an account's shared persistent context. */
+  isUsingAccount(accountId) {
+    return [...this._jobs.values()].some((job) => job.accountId === accountId && !job.stopped)
+  }
+
   start(id, { productUrl, label, account }) {
     if (this._jobs.has(id)) return
-    const job = { context: null, page: null, ownsContext: false, stopped: false }
+    const job = {
+      context: null,
+      page: null,
+      ownsContext: false,
+      accountId: account?.id || null,
+      stopped: false
+    }
     this._jobs.set(id, job)
     this._run(id, job, { productUrl, label: label || id, account }).catch((err) => {
       log.error('Queue join crashed', { id, error: err.message })
@@ -101,7 +108,9 @@ export class QueueJoiner extends EventEmitter {
     const watchDeadline = Date.now() + this.maxWaitMin * 60_000
     let qpUrl = null
     while (!job.stopped && Date.now() < watchDeadline) {
-      await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => {})
+      await page
+        .goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+        .catch(() => {})
       qpUrl = await this._waitForQueue(page, 8_000)
       if (qpUrl || job.stopped) break
       this.emit('progress', {
@@ -123,12 +132,30 @@ export class QueueJoiner extends EventEmitter {
       return
     }
 
+    await this._holdQueueSpot(page, id, label)
     this.emit('progress', { id, label, phase: 'in-queue', message: 'In line. Holding spot.' })
     const startedAt = Date.now()
     const deadline = startedAt + this.maxWaitMin * 60_000
 
     while (!job.stopped && Date.now() < deadline) {
       const url = page.url()
+      if (await this._pageSaysCheckoutReady(page)) {
+        this.emit('progress', {
+          id,
+          label,
+          phase: 'turn',
+          message: 'READY FOR CHECKOUT — starting checkout.',
+          status: { yourTurn: true }
+        })
+        this.emit('turn', {
+          id,
+          label,
+          status: { yourTurn: true },
+          context: job.context,
+          page: job.page
+        })
+        return
+      }
       if (url.includes('qpdata=')) {
         let st = null
         try {
@@ -137,8 +164,14 @@ export class QueueJoiner extends EventEmitter {
           /* token not ready this tick */
         }
         if (st?.yourTurn) {
-          this.emit('progress', { id, label, phase: 'turn', status: st, message: 'YOUR TURN — buy now!' })
-          this.emit('turn', { id, label, status: st })
+          this.emit('progress', {
+            id,
+            label,
+            phase: 'turn',
+            status: st,
+            message: 'YOUR TURN — buy now!'
+          })
+          this.emit('turn', { id, label, status: st, context: job.context, page: job.page })
           return
         }
         if (st) {
@@ -157,10 +190,21 @@ export class QueueJoiner extends EventEmitter {
         // honor the page's own ~30s cadence so we don't look like a bot
         await page.waitForTimeout(Math.max(2000, (st?.refreshSec || 30) * 1000)).catch(() => {})
       } else if (!url.includes('/qp')) {
-        // bounced off the waiting room entirely = admitted
-        this.emit('progress', { id, label, phase: 'turn', message: 'Admitted — checkout open!' })
-        this.emit('turn', { id, label })
-        return
+        // Walmart may leave the /qp URL while the page still shows its
+        // "You're in line" side panel. Only explicit checkout-ready copy is
+        // authoritative; a URL change alone is not admission.
+        if (await this._pageSaysCheckoutReady(page)) {
+          this.emit('progress', { id, label, phase: 'turn', message: 'Admitted — checkout open!' })
+          this.emit('turn', { id, label, context: job.context, page: job.page })
+          return
+        }
+        this.emit('progress', {
+          id,
+          label,
+          phase: 'in-queue',
+          message: 'Still in Walmart’s waiting room.'
+        })
+        await page.waitForTimeout(2000).catch(() => {})
       } else {
         await page.waitForTimeout(2000).catch(() => {})
       }
@@ -181,13 +225,80 @@ export class QueueJoiner extends EventEmitter {
     const deadline = Date.now() + ms
     while (Date.now() < deadline) {
       const url = page.url()
-      if (url.includes('qpdata=') || url.includes('/qp')) return url
+      if (url.includes('qpdata=') || url.includes('/qp')) {
+        await this._waitForHoldButton(page, Math.min(3000, Math.max(0, deadline - Date.now())))
+        return url
+      }
       const body = await page.content().catch(() => '')
       const tok = extractQpdataFromText(body)
       if (tok) return `https://www.walmart.com/qp?qpdata=${tok}`
       await page.waitForTimeout(1000).catch(() => {})
     }
     return null
+  }
+
+  async _pageSaysCheckoutReady(page) {
+    const body = await page
+      .locator('body')
+      .innerText()
+      .catch(async () => page.content().catch(() => ''))
+    // Keep this strict: generic Walmart pages often contain "Buy now" or
+    // "your turn" in hidden/support copy while the queue is still pending.
+    return /ready\s+to\s+checkout|continue\s+to\s+checkout|proceed\s+to\s+checkout|queue\s+(?:complete|admitted)/i.test(
+      body
+    )
+  }
+
+  async _holdQueueSpot(page, id, label) {
+    const holdButton = this._getHoldButton(page)
+    const count = await holdButton.count().catch(() => 0)
+    if (count === 0) {
+      this.emit('progress', {
+        id,
+        label,
+        phase: 'in-queue',
+        message: 'Queue page found, but the Hold my spot button is not rendered yet.'
+      })
+      return false
+    }
+
+    this.emit('progress', {
+      id,
+      label,
+      phase: 'in-queue',
+      message: 'Holding the Walmart queue spot…'
+    })
+    try {
+      await holdButton.waitFor({ state: 'visible', timeout: 10000 })
+      await holdButton.click({ timeout: 10000 })
+      await page.waitForTimeout(750).catch(() => {})
+      return true
+    } catch (error) {
+      this.emit('progress', {
+        id,
+        label,
+        phase: 'in-queue',
+        message: `Queue spot detected, but Walmart hold button could not be clicked: ${error.message}`
+      })
+      return false
+    }
+  }
+
+  _getHoldButton(page) {
+    return page.getByRole
+      ? page.getByRole('button', { name: /Hold my spot and Keep shopping/i }).first()
+      : page.locator('button:has-text("Hold my spot and Keep shopping")').first()
+  }
+
+  async _waitForHoldButton(page, ms) {
+    if (ms <= 0) return false
+    const holdButton = this._getHoldButton(page)
+    try {
+      await holdButton.waitFor({ state: 'visible', timeout: ms })
+      return true
+    } catch {
+      return false
+    }
   }
 
   // Rough % from the token's own ETA: elapsed / (elapsed + remaining).

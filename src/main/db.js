@@ -19,6 +19,7 @@ const TABLE_COLUMNS = {
     'proxy',
     'profile_path',
     'shipping_json',
+    'payment_method_id',
     'status',
     'created_at'
   ],
@@ -29,6 +30,7 @@ const TABLE_COLUMNS = {
     'product_name',
     'product_image_url',
     'buy_limit',
+    'orders_per_drop',
     'max_price',
     'mode',
     'account_ids',
@@ -37,6 +39,35 @@ const TABLE_COLUMNS = {
     'created_at'
   ],
   settings: ['key', 'value'],
+  payment_methods: [
+    'id',
+    'name',
+    'card_number_enc',
+    'expiry_month',
+    'expiry_year',
+    'cvv_enc',
+    'billing_address1',
+    'billing_address2',
+    'billing_city',
+    'billing_state',
+    'billing_zip',
+    'billing_phone',
+    'created_at'
+  ],
+  shipping_addresses: [
+    'id',
+    'name',
+    'first_name',
+    'last_name',
+    'address1',
+    'address2',
+    'city',
+    'state',
+    'zip',
+    'phone',
+    'is_default',
+    'created_at'
+  ],
   drop_history: [
     'id',
     'retailer',
@@ -79,6 +110,8 @@ const TABLE_COLUMNS = {
     'confidence',
     'created_at'
   ],
+  walmart_match_search_cache: ['query_key', 'candidates_json', 'expires_at', 'created_at'],
+  catalog_walmart_skips: ['target_product_key', 'reason', 'created_at'],
   product_monitors: [
     'id',
     'product_key',
@@ -100,6 +133,7 @@ const TABLE_COLUMNS = {
     'current_price',
     'price_ceiling',
     'buy_limit',
+    'orders_per_drop',
     'account_ids',
     'action_mode',
     'enabled',
@@ -107,6 +141,38 @@ const TABLE_COLUMNS = {
     'task_id',
     'created_at',
     'updated_at'
+  ],
+  checkout_attempts: [
+    'id',
+    'user_id',
+    'device_ref',
+    'task_id',
+    'retailer',
+    'product_key',
+    'product_name',
+    'mode',
+    'experiment_json',
+    'account_ref',
+    'started_at',
+    'completed_at',
+    'duration_ms',
+    'outcome',
+    'final_stage',
+    'failure_stage',
+    'failure_code',
+    'error_summary',
+    'event_count',
+    'upload_status',
+    'uploaded_at'
+  ],
+  checkout_attempt_events: [
+    'id',
+    'attempt_id',
+    'sequence',
+    'stage',
+    'detail',
+    'elapsed_ms',
+    'created_at'
   ]
 }
 
@@ -138,6 +204,7 @@ export function initDb(dbPath) {
       proxy TEXT,
       profile_path TEXT,
       shipping_json TEXT,
+      payment_method_id TEXT,
       status TEXT NOT NULL DEFAULT 'active',
       created_at INTEGER DEFAULT (strftime('%s','now'))
     );
@@ -148,6 +215,7 @@ export function initDb(dbPath) {
       product_name TEXT,
       product_image_url TEXT,
       buy_limit INTEGER DEFAULT 1,
+      orders_per_drop INTEGER NOT NULL DEFAULT 1,
       max_price REAL,
       mode TEXT NOT NULL,
       account_ids TEXT NOT NULL,
@@ -206,6 +274,9 @@ export function initDb(dbPath) {
   if (!taskColumns.includes('buy_limit')) {
     db.prepare('ALTER TABLE tasks ADD COLUMN buy_limit INTEGER DEFAULT 1').run()
   }
+  if (!taskColumns.includes('orders_per_drop')) {
+    db.prepare('ALTER TABLE tasks ADD COLUMN orders_per_drop INTEGER NOT NULL DEFAULT 1').run()
+  }
 
   const accountColumns = db
     .prepare('PRAGMA table_info(accounts)')
@@ -222,10 +293,30 @@ export function getDb() {
 }
 
 function createSqliteDb(dbPath) {
+  // Early packaged builds stored JSON directly at the `.db` path. Passing that
+  // file to SQLite produces a noisy "file is not a database" warning on every
+  // launch even though the adjacent JSON fallback contains the live data.
+  if (looksLikeJsonDatabase(dbPath)) {
+    log.info('Using legacy JSON database store', { dbPath: getJsonDbPath(dbPath) })
+    return null
+  }
+
+  let candidate
   try {
     const Database = require('better-sqlite3')
-    return new Database(dbPath)
+    candidate = new Database(dbPath)
+
+    // better-sqlite3 opens some malformed/legacy files successfully and only
+    // reports "file is not a database" on the first pragma or query. Validate
+    // here so initDb can still select the JSON store used by older installs.
+    candidate.pragma('user_version')
+    return candidate
   } catch (err) {
+    try {
+      candidate?.close()
+    } catch {
+      // The failed handle may already be closed.
+    }
     console.warn(`Using JSON database fallback: ${firstLine(err.message)}`)
     return null
   }
@@ -308,6 +399,15 @@ class JsonStatement {
   }
 
   _select(args) {
+    const maxMatch = this.sql.match(/^SELECT MAX\((\w+)\) as (\w+) FROM (\w+)$/i)
+    if (maxMatch) {
+      const [, column, alias, table] = maxMatch
+      const values = (this.db.tables[table] || [])
+        .map((row) => Number(row[column]))
+        .filter(Number.isFinite)
+      return [{ [alias]: values.length ? Math.max(...values) : null }]
+    }
+
     const match = this.sql.match(/^SELECT (.+?) FROM (\w+)(?: WHERE (.+?))?(?: ORDER BY .+)?$/)
     if (!match) return []
 
@@ -316,13 +416,9 @@ class JsonStatement {
     if (whereClause) {
       // Only simple `col = ?` conditions joined by AND — everything this app's
       // SQL actually uses. Placeholders map to args in order of appearance.
-      const conditions = whereClause
-        .split(/\s+AND\s+/i)
-        .map((part) => part.match(/^(\w+)\s*=\s*\?$/))
-      if (conditions.some((condition) => !condition)) return []
-      rows = rows.filter((row) =>
-        conditions.every((condition, index) => row[condition[1]] === args[index])
-      )
+      const matchesWhere = buildJsonWherePredicate(whereClause, args)
+      if (!matchesWhere) return []
+      rows = rows.filter(matchesWhere)
     }
     if (fields === '*') return rows.map((row) => ({ ...row }))
 
@@ -376,16 +472,46 @@ class JsonStatement {
   }
 
   _update(args) {
-    const match = this.sql.match(/^UPDATE (\w+) SET (\w+) = \? WHERE (\w+) = \?/)
+    const match = this.sql.match(/^UPDATE (\w+) SET (.+?)(?: WHERE (.+))?$/i)
     if (!match) return this._ok()
 
-    const [, table, column, whereColumn] = match
+    const [, table, setClause, whereClause] = match
+    const assignments = setClause.split(',').map((clause) => clause.trim())
+    let argumentIndex = 0
+    const setters = assignments.map((assignment) => {
+      let valueMatch = assignment.match(/^(\w+)\s*=\s*\?$/i)
+      if (valueMatch) {
+        const argument = argumentIndex++
+        return { column: valueMatch[1], valueFor: () => args[argument] }
+      }
+
+      valueMatch = assignment.match(/^(\w+)\s*=\s*'(.*)'$/i)
+      if (valueMatch) return { column: valueMatch[1], valueFor: () => valueMatch[2] }
+
+      valueMatch = assignment.match(/^(\w+)\s*=\s*(-?\d+(?:\.\d+)?)$/i)
+      if (valueMatch) return { column: valueMatch[1], valueFor: () => Number(valueMatch[2]) }
+
+      valueMatch = assignment.match(/^(\w+)\s*=\s*(\w+)\s*\+\s*(-?\d+(?:\.\d+)?)$/i)
+      if (valueMatch) {
+        return {
+          column: valueMatch[1],
+          valueFor: (row) => Number(row[valueMatch[2]] || 0) + Number(valueMatch[3])
+        }
+      }
+
+      return null
+    })
+    if (setters.some((setter) => !setter)) return this._ok()
+
+    const whereArguments = args.slice(argumentIndex)
+    const matchesWhere = buildJsonWherePredicate(whereClause, whereArguments)
+    if (!matchesWhere) return this._ok()
+
     let changes = 0
     for (const row of this.db.tables[table] || []) {
-      if (row[whereColumn] === args[1]) {
-        row[column] = args[0]
-        changes += 1
-      }
+      if (!matchesWhere(row)) continue
+      for (const setter of setters) row[setter.column] = setter.valueFor(row)
+      changes += 1
     }
     this.db._flush()
     return this._ok(changes)
@@ -407,9 +533,42 @@ class JsonStatement {
   }
 }
 
+function buildJsonWherePredicate(whereClause, args = []) {
+  if (!whereClause) return () => true
+  let argumentIndex = 0
+  const predicates = whereClause.split(/\s+AND\s+/i).map((part) => {
+    const condition = part.trim()
+    let match = condition.match(/^(\w+)\s*(=|>)\s*\?$/i)
+    if (match) {
+      const argument = argumentIndex++
+      return (row) =>
+        match[2] === '>' ? row[match[1]] > args[argument] : row[match[1]] === args[argument]
+    }
+
+    match = condition.match(/^(\w+)\s*=\s*'(.*)'$/i)
+    if (match) return (row) => row[match[1]] === match[2]
+
+    match = condition.match(/^(\w+)\s*=\s*(-?\d+(?:\.\d+)?)$/i)
+    if (match) return (row) => row[match[1]] === Number(match[2])
+
+    match = condition.match(/^(\w+)\s+IS\s+(NOT\s+)?NULL$/i)
+    if (match) {
+      return match[2]
+        ? (row) => row[match[1]] !== null && row[match[1]] !== undefined
+        : (row) => row[match[1]] === null || row[match[1]] === undefined
+    }
+
+    return null
+  })
+  if (predicates.some((predicate) => !predicate)) return null
+  return (row) => predicates.every((predicate) => predicate(row))
+}
+
 function tablePrimaryKey(table) {
   if (table === 'settings') return 'key'
   if (table === 'catalog_walmart_matches') return 'target_product_key'
+  if (table === 'walmart_match_search_cache') return 'query_key'
+  if (table === 'catalog_walmart_skips') return 'target_product_key'
   return 'id'
 }
 
@@ -447,6 +606,19 @@ function isJsonDbFile(path) {
   }
 }
 
+function looksLikeJsonDatabase(path) {
+  if (!existsSync(path)) return false
+  try {
+    const data = JSON.parse(readFileSync(path, 'utf8'))
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return false
+    return Object.keys(data).some(
+      (table) => Object.hasOwn(TABLE_COLUMNS, table) && Array.isArray(data[table])
+    )
+  } catch {
+    return false
+  }
+}
+
 function firstLine(value) {
   return String(value).split(/\r?\n/)[0]
 }
@@ -468,4 +640,5 @@ function applyDefaults(table, row) {
     row.status ??= 'active'
   }
   if (table === 'catalog_walmart_matches') row.created_at ??= now
+  if (table === 'catalog_walmart_skips') row.created_at ??= now
 }

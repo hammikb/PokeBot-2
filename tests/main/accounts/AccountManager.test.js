@@ -106,6 +106,21 @@ describe('AccountManager', () => {
     expect(accounts[0].proxy).toBe('new-proxy')
   })
 
+  it('assigns a payment method to a Target account', async () => {
+    const id = await manager.create({
+      name: 'Target',
+      retailer: 'target',
+      username: 'target@test.com',
+      password: 'p',
+      paymentMethodId: 'payment-1'
+    })
+
+    expect(manager.getAll()[0].payment_method_id).toBe('payment-1')
+
+    manager.update(id, { paymentMethodId: 'payment-2' })
+    expect(manager.getDecrypted(id).payment_method_id).toBe('payment-2')
+  })
+
   it('returns saved shipping details for account management', async () => {
     await manager.create({
       name: 'Ship',

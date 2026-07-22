@@ -6,7 +6,6 @@ vi.mock('cloakbrowser', () => ({
   launch: vi.fn()
 }))
 
-
 function mockBrowserSnapshot(snapshot) {
   const page = {
     goto: vi.fn(),

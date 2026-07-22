@@ -9,6 +9,7 @@ This guide will help you test all the new features added in the recent improveme
 ## ✅ Pre-Testing Checklist
 
 Before starting tests:
+
 - [ ] App starts without errors (`npm run dev`)
 - [ ] No console errors on startup
 - [ ] Database initialized successfully
@@ -23,18 +24,21 @@ Before starting tests:
 **What it does**: Shows real-time progress updates for tasks
 
 **How to test**:
+
 1. Create a task (any retailer)
 2. Start the task
 3. Watch for progress updates in the UI
 4. Check console for progress events
 
 **Expected behavior**:
+
 - Progress bar updates in real-time
 - Step messages appear (e.g., "Checking stock", "Adding to cart")
 - Duration counter increments
 - Success/error messages display
 
 **Logs to check**:
+
 ```
 [ProgressStreamer] Stream started
 [ProgressStreamer] Step: {message}
@@ -48,12 +52,14 @@ Before starting tests:
 **What it does**: Simulates 3 minutes of human browsing on Walmart
 
 **How to test**:
+
 1. Go to **Accounts** page
 2. Find a Walmart account
 3. Click **"warm up (3min)"** button
 4. Watch the browser automation
 
 **Expected behavior**:
+
 - Browser opens to Walmart.com
 - Performs 8-15 random actions:
   - Searches for products
@@ -66,11 +72,13 @@ Before starting tests:
 - Closes browser when done
 
 **Success indicators**:
+
 - ✅ "Profile warmup completed successfully"
 - ✅ Account status updates
 - ✅ No errors in console
 
 **Logs to check**:
+
 ```
 [ProfileWarmup] Starting warmup
 [ProfileWarmup] Action 1/12: search
@@ -85,18 +93,21 @@ Before starting tests:
 **What it does**: Intelligently retries failed operations with error classification
 
 **How to test**:
+
 1. Create a task with invalid product URL
 2. Start the task
 3. Watch it fail and retry
 4. Check error classification
 
 **Expected behavior**:
+
 - Classifies error type (network, timeout, bot detection, etc.)
 - Applies appropriate delay based on error
 - Provides recommendations
 - Tracks failure patterns
 
 **Error types to look for**:
+
 - `RATE_LIMIT` - 30-60s delay
 - `BOT_DETECTION` - 60-120s delay
 - `NETWORK_ERROR` - 5-10s delay
@@ -104,6 +115,7 @@ Before starting tests:
 - `CAPTCHA` - 120-300s delay
 
 **Logs to check**:
+
 ```
 [SmartRetry] Attempt 1 failed: {error}
 [SmartRetry] Error classified as: RATE_LIMIT
@@ -118,11 +130,13 @@ Before starting tests:
 **What it does**: Automatically monitors proxy health and disables bad ones
 
 **How to test**:
+
 1. Add some proxies in Settings
 2. The system will auto-check them every 1 minute
 3. Watch for health status updates
 
 **Expected behavior**:
+
 - Checks all proxies every 60 seconds
 - Tracks success/failure rates
 - Calculates response times
@@ -130,12 +144,14 @@ Before starting tests:
 - Status levels: unknown → healthy → degraded → unhealthy → disabled
 
 **To manually test**:
+
 ```javascript
 // In DevTools console (F12)
 // This would be exposed via IPC in production
 ```
 
 **Logs to check**:
+
 ```
 [ProxyHealthMonitor] Starting proxy health monitoring
 [ProxyHealthMonitor] Checking proxy health {count: 5}
@@ -151,18 +167,21 @@ Before starting tests:
 **What it does**: Generates and rotates cookies to bypass detection
 
 **How to test**:
+
 1. Start a task
 2. Watch for cookie generation in logs
 3. Check browser cookies
 
 **Expected behavior**:
+
 - Generates retailer-specific cookies
-- Walmart: _pxvid, _px3, akavpau_vp_walmart, ACID
+- Walmart: \_pxvid, \_px3, akavpau_vp_walmart, ACID
 - Target: visitorId, TealeafAkaSid, UserLocation
 - Validates cookies before use
 - Rotates cookies when needed
 
 **Logs to check**:
+
 ```
 [CookieManager] Generating fresh cookies {retailer: walmart}
 [CookieManager] Generated Walmart cookies {count: 4}
@@ -177,11 +196,13 @@ Before starting tests:
 **What it does**: Tracks all operations with detailed metrics
 
 **How to test**:
+
 1. Enable debug mode: `DEBUG=true npm run dev`
 2. Perform any operation
 3. Check logs and metrics
 
 **Expected behavior**:
+
 - Session tracking for each task
 - Event logging with timestamps
 - Error tracking with stack traces
@@ -189,10 +210,12 @@ Before starting tests:
 - Export debug data to JSON
 
 **Debug data location**:
+
 - Logs: `%APPDATA%/pokebot2/logs/`
 - Debug exports: `%APPDATA%/pokebot2/debug/`
 
 **Logs to check**:
+
 ```
 [DebugManager] Debug session started {sessionId: xxx}
 [DebugManager] [xxx] Event: Adding to cart
@@ -207,6 +230,7 @@ Before starting tests:
 ### Test Scenario 1: Complete Task Flow
 
 **Steps**:
+
 1. Create Walmart account
 2. Warm up profile (3 min)
 3. Create task for Pokemon product
@@ -216,6 +240,7 @@ Before starting tests:
 7. Check debug logs
 
 **Expected**:
+
 - ✅ Profile warmup completes
 - ✅ Progress updates in real-time
 - ✅ Smart retry on failures
@@ -227,12 +252,14 @@ Before starting tests:
 ### Test Scenario 2: Proxy Management
 
 **Steps**:
+
 1. Add 5 proxies (mix of good and bad)
 2. Wait for health checks
 3. Watch status changes
 4. See bad proxies get disabled
 
 **Expected**:
+
 - ✅ All proxies checked
 - ✅ Success rates calculated
 - ✅ Bad proxies auto-disabled
@@ -243,6 +270,7 @@ Before starting tests:
 ### Test Scenario 3: Error Recovery
 
 **Steps**:
+
 1. Create task with rate-limited URL
 2. Start task
 3. Watch smart retry classify error
@@ -250,6 +278,7 @@ Before starting tests:
 5. Get recommendations
 
 **Expected**:
+
 - ✅ Error classified correctly
 - ✅ Appropriate delay applied
 - ✅ Recommendation provided
@@ -262,12 +291,14 @@ Before starting tests:
 ### Metrics to Track
 
 **Response Times**:
+
 - Profile warmup: ~3 minutes
 - Cookie generation: <100ms
 - Proxy health check: <5 seconds
 - Smart retry delay: Varies by error type
 
 **Resource Usage**:
+
 - Memory: Should stay under 500MB
 - CPU: Spikes during browser automation
 - Network: Depends on task frequency
@@ -277,12 +308,14 @@ Before starting tests:
 ## 🐛 Known Issues & Workarounds
 
 ### Issue 1: ConfigManager Disabled
+
 **Status**: Temporarily disabled due to build issues  
 **Impact**: Cannot import/export config files  
 **Workaround**: Manual account/task creation  
 **Fix**: Will be re-implemented later
 
 ### Issue 2: PokemonFinder Disabled
+
 **Status**: Auto-scan disabled to reduce noise  
 **Impact**: No automatic Pokemon item scanning  
 **Workaround**: Manual product monitoring  
@@ -293,6 +326,7 @@ Before starting tests:
 ## ✅ Testing Checklist
 
 ### Basic Functionality
+
 - [ ] App starts without errors
 - [ ] Can create accounts
 - [ ] Can create tasks
@@ -300,6 +334,7 @@ Before starting tests:
 - [ ] Settings save correctly
 
 ### New Features
+
 - [ ] Profile warmup works (3 min test)
 - [ ] Progress streaming shows updates
 - [ ] Smart retry classifies errors
@@ -308,12 +343,14 @@ Before starting tests:
 - [ ] Debug logs are created
 
 ### Error Handling
+
 - [ ] Invalid URLs handled gracefully
 - [ ] Network errors trigger retry
 - [ ] Bad proxies get disabled
 - [ ] Error messages are clear
 
 ### Performance
+
 - [ ] No memory leaks
 - [ ] Responsive UI
 - [ ] Fast startup time
@@ -327,11 +364,13 @@ Before starting tests:
 ## Test Results - [Date]
 
 ### Environment
+
 - OS: Windows 11
 - Node: v20.x
 - Electron: v32.x
 
 ### Tests Performed
+
 1. Profile Warmup: ✅ PASS
    - Duration: 3:05 minutes
    - Actions: 12
@@ -348,9 +387,11 @@ Before starting tests:
    - Disabled: 2
 
 ### Issues Found
+
 - None
 
 ### Notes
+
 - All features working as expected
 - Performance is good
 - No errors in console
@@ -361,6 +402,7 @@ Before starting tests:
 ## 🎯 Success Criteria
 
 **All tests pass if**:
+
 - ✅ App starts without errors
 - ✅ Profile warmup completes successfully
 - ✅ Progress streaming works in real-time
@@ -386,6 +428,7 @@ Before starting tests:
 ## 📞 Support
 
 If you encounter issues:
+
 1. Check logs in `%APPDATA%/pokebot2/logs/`
 2. Export debug data
 3. Review error classifications
@@ -395,6 +438,6 @@ If you encounter issues:
 
 ---
 
-*Last Updated: June 3, 2026*  
-*Version: 2.0*  
-*Status: Ready for Testing* ✅
+_Last Updated: June 3, 2026_  
+_Version: 2.0_  
+_Status: Ready for Testing_ ✅

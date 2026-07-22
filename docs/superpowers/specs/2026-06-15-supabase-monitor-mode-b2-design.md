@@ -13,7 +13,7 @@ Add a **monitoring mode toggle** to PokeBot:
 - **Local (ON, default, today's behavior):** PokeBot polls retailers itself via `MonitorEngine` + per-retailer pollers.
 - **Supabase (OFF):** PokeBot stops polling. It signs into Supabase, subscribes to the products it cares about, and receives in-stock drops over Realtime that the central ServerSide bot produces. One central check serves all clients (Guppy fan-out).
 
-Checkout **always runs locally** (BrowserPool + local accounts) in both modes. The toggle only changes *where the "in stock" signal comes from*.
+Checkout **always runs locally** (BrowserPool + local accounts) in both modes. The toggle only changes _where the "in stock" signal comes from_.
 
 Plus a second capability: **publish catalog items to Supabase `products`** so the central monitor knows what to watch.
 
@@ -31,25 +31,31 @@ Plus a second capability: **publish catalog items to Supabase `products`** so th
 Verified by reading `ServerSide Alert Bot/supabase/migrations/` and the B1 design doc.
 
 ### Tables (RLS enabled on all)
+
 - **`products`**: `id uuid pk`, `retailer text`, `product_url text`, `product_key text` (TCIN / Walmart itemId), `name text`, `active bool default true`, `created_at`. **`unique (retailer, product_key)`** — shared monitored product across users.
 - **`subscriptions`**: `id uuid pk`, `user_id uuid → auth.users`, `product_id uuid → products`, `max_price numeric null`, `created_at`. **`unique (user_id, product_id)`**.
 - **`drops`**: `id uuid pk`, `product_id uuid → products`, `retailer text`, `name text`, `price numeric null`, `drop_type text`, `created_at`. Insert-only; broadcast source.
 
 ### RLS / authorization
+
 - `products`: `select` true for authenticated; `insert` for authenticated `with check (retailer in ('target','walmart'))`. No client update/delete.
 - `subscriptions`: full CRUD where `user_id = auth.uid()`.
 - `drops`: `select` for authenticated **only for subscribed products**. Inserts are service-role (server only).
 - `realtime.messages`: `select` (receive) for authenticated **only on `drops:product:{id}` where the user holds a matching subscription** (policy `subscribed users receive drops`, scoped to `extension = 'broadcast'`).
 
 ### Realtime fan-out — **Broadcast, not postgres_changes**
+
 Trigger `drops_broadcast` after insert on `drops` runs:
+
 ```sql
 realtime.send(to_jsonb(new), 'drop', 'drops:product:'||new.product_id, true /* private */)
 ```
+
 So the client joins a **private** channel **per product**: topic `drops:product:{product_id}`, event `drop`, payload = the full `drops` row.
 
 ### Behavior change that B2 MUST honor
-The serverside worker **drops the per-product `maxPrice` gate** and publishes **every** in-stock transition (price included). Per the B1 spec: *"per-user max_price filtering happens client-side in B2."* → **B2 applies each task's `max_price` before triggering checkout.**
+
+The serverside worker **drops the per-product `maxPrice` gate** and publishes **every** in-stock transition (price included). Per the B1 spec: _"per-user max_price filtering happens client-side in B2."_ → **B2 applies each task's `max_price` before triggering checkout.**
 
 ## Prerequisites already completed (2026-06-14, via MCP)
 
@@ -68,6 +74,7 @@ Supabase mode: SupabaseMonitorSource (realtime) ─┘
 ```
 
 ### New files
+
 - **`src/main/supabase/SupabaseClient.js`** — lazy singleton wrapping `@supabase/supabase-js` (new dependency). Responsibilities: `createClient(url, publishableKey)`, `signIn(email, password)`, hold/refresh session, `realtime.setAuth()` so **private** channels authorize, expose `.client`. One instance shared across the app.
 - **`src/main/monitor/SupabaseMonitorSource.js`** — `EventEmitter`, emits `drop`. API parallels `MonitorEngine`:
   - `start()` — ensure signed in + realtime auth set.
@@ -78,6 +85,7 @@ Supabase mode: SupabaseMonitorSource (realtime) ─┘
   - Resolution misses (product not in Supabase yet) → emit a feed notice ("not tracked centrally — publish it from Catalog first"), no crash.
 
 ### Changed files
+
 - **`src/main/tasks/TaskManager.js`**
   - Constructor takes `getSettings` (wired in `src/main/index.js`).
   - Lazy `_getSupabaseSource()` builds `SupabaseMonitorSource` from settings (url, key, email, decrypted password) and wires its `drop` → existing `_onDrop`.
@@ -98,6 +106,7 @@ Supabase mode: SupabaseMonitorSource (realtime) ─┘
 ## Feature B — publish Catalog item → Supabase `products`
 
 `CATALOG_PUSH_SUPABASE(id)`:
+
 1. Read local catalog row (`product_catalog`): has `retailer`, `retailer_item_id`, `product_url`, `title`.
 2. Sign in (shared `SupabaseClient`).
 3. Upsert `products` `{ retailer, product_url, product_key: retailer_item_id, name: title, active: true }` with `onConflict: 'retailer,product_key', ignoreDuplicates: false` → returns the row (existing or new).
@@ -118,9 +127,11 @@ docker compose up -d --build redis warmer worker
 docker compose run --rm scheduler          # seed BullMQ queue from Supabase products
 docker compose logs worker | grep "Worker up"   # expect "sinks":{"supabase":true,...}
 ```
+
 The `sinks.supabase:true` line confirms the worker is publishing to Supabase (both `SUPABASE_URL` + service-role key set). Service-role key is server-only — never in PokeBot.
 
 ## Config / secrets (PokeBot settings table, key/value JSON)
+
 - `monitorMode`: `'local'` (default) | `'supabase'`.
 - `supabaseUrl`: default `https://jbnnouwhesexfllninwb.supabase.co`.
 - `supabaseKey`: publishable key `sb_publishable_ISHuDgo14iTtTsRdJFnkYQ__6e9nYlx` (client-safe).
@@ -128,6 +139,7 @@ The `sinks.supabase:true` line confirms the worker is publishing to Supabase (bo
 - `supabasePassword`: **encrypted at rest** via existing `src/main/crypto.js` + in-memory vault key (matches how account passwords are handled); never stored plaintext.
 
 ## Error handling
+
 - Not signed in / auth failure → feed error, mode stays idle, never crash monitoring.
 - Product not in Supabase → feed notice to publish from Catalog; task stays idle.
 - Realtime disconnect → supabase-js auto-reconnect; re-assert `realtime.setAuth()` on token refresh.
@@ -135,6 +147,7 @@ The `sinks.supabase:true` line confirms the worker is publishing to Supabase (bo
 - Toggle restart-live must not double-arm: `setMonitorMode` fully stops the old source before starting the new.
 
 ## Testing
+
 - **Unit (fakes, no network):**
   - payload → `dropEvent` mapping, incl. `max_price` gate (skip when `price > max_price`).
   - `addProduct` resolves `(retailer, product_key)` → id, upserts subscription, opens the right topic.
@@ -143,12 +156,14 @@ The `sinks.supabase:true` line confirms the worker is publishing to Supabase (bo
 - **Live (MCP):** with the existing bot user + seed subscription, insert a test `drops` row for the seed product and confirm the realtime authorization policy + delivery (full socket delivery exercised by the running app).
 
 ## Out of scope
+
 - Repo A (producer) code changes.
 - Admin / product-deactivation UI; multi-retailer beyond target/walmart.
 - Per-subscription `max_price` stored in Supabase (PokeBot filters locally via task `max_price`).
 - Rotating the bot password (manual; recommended before real use).
 
 ## Rollout order
+
 1. Add `@supabase/supabase-js`; build `SupabaseClient` + `SupabaseMonitorSource` with unit tests.
 2. Wire `TaskManager` mode switch + `getSettings`; restart-live.
 3. Settings toggle + fields + IPC.

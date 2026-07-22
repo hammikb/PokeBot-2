@@ -19,9 +19,22 @@ const STATUS_COLOR = {
 }
 
 export default function Dashboard() {
-  const { feedEvents, tasks, taskStatuses, accounts, startTask, stopTask, queueJobs, joinQueue } =
-    useAppStore()
+  const {
+    feedEvents,
+    tasks,
+    taskStatuses,
+    accounts,
+    settings,
+    saveSetting,
+    startTask,
+    stopTask,
+    queueJobs,
+    joinQueue
+  } = useAppStore()
   const [now, setNow] = useState(() => Date.now())
+  const [queueToggleBusy, setQueueToggleBusy] = useState(false)
+  const [queueToggleError, setQueueToggleError] = useState('')
+  const [queueToggleNotice, setQueueToggleNotice] = useState('')
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 60000)
@@ -32,9 +45,61 @@ export default function Dashboard() {
   const wins = last24h.filter((e) => e.productName?.includes('ORDER CONFIRMED'))
   const captchas = last24h.filter((e) => e.dropType === 'captcha')
   const alerts = feedEvents.filter((e) => e.productName?.includes('🔔 ALERT:'))
+  const pokemonCenterAutoJoin = settings.pokemonCenterAutoJoin === true
+
+  const togglePokemonCenterAutoJoin = async () => {
+    setQueueToggleBusy(true)
+    setQueueToggleError('')
+    setQueueToggleNotice('')
+    try {
+      const next = !pokemonCenterAutoJoin
+      const result = await saveSetting('pokemonCenterAutoJoin', next)
+      if (next && result?.connected === false) {
+        setQueueToggleNotice(
+          'Armed locally. Electron will connect automatically when Supabase is available.'
+        )
+      }
+    } catch (error) {
+      setQueueToggleError(error.message || 'Could not change Pokemon Center auto-join')
+    } finally {
+      setQueueToggleBusy(false)
+    }
+  }
 
   return (
     <div className="flex flex-col h-full p-3 gap-3 overflow-hidden">
+      <div className="bg-[#111] border border-gray-800 rounded p-4 flex items-center gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="text-sm text-gray-200 font-semibold">Auto-join Pokémon Center queue</div>
+          <div className="text-xs text-gray-500 mt-1">
+            The Pi detects the waiting room and Electron opens one tab in your trusted default
+            browser. No task is required.
+          </div>
+          {queueToggleError && <div className="text-xs text-red-400 mt-1">{queueToggleError}</div>}
+          {queueToggleNotice && (
+            <div className="text-xs text-amber-400 mt-1">{queueToggleNotice}</div>
+          )}
+        </div>
+        <span
+          className={`text-xs uppercase tracking-wider ${pokemonCenterAutoJoin ? 'text-emerald-400' : 'text-gray-600'}`}
+        >
+          {pokemonCenterAutoJoin ? 'armed' : 'off'}
+        </span>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={pokemonCenterAutoJoin}
+          aria-label="Auto-join Pokémon Center queue"
+          disabled={queueToggleBusy}
+          onClick={togglePokemonCenterAutoJoin}
+          className={`w-12 h-7 rounded-full p-1 transition-colors disabled:opacity-50 ${pokemonCenterAutoJoin ? 'bg-emerald-500' : 'bg-gray-700'}`}
+        >
+          <span
+            className={`block w-5 h-5 rounded-full bg-white transition-transform ${pokemonCenterAutoJoin ? 'translate-x-5' : ''}`}
+          />
+        </button>
+      </div>
+
       {/* Top: Live Feed + Active Tasks */}
       <div className="flex gap-3 flex-1 min-h-0">
         {/* Live Feed */}
@@ -97,7 +162,9 @@ export default function Dashboard() {
                       </span>
                     ) : (
                       <button
-                        onClick={() => joinQueue(t.id, t.product_url, t.product_name || t.product_url)}
+                        onClick={() =>
+                          joinQueue(t.id, t.product_url, t.product_name || t.product_url)
+                        }
                         className="text-yellow-500 hover:text-yellow-300 shrink-0 text-xs uppercase tracking-wider"
                         title="Auto-join Walmart waiting room"
                       >
@@ -159,7 +226,10 @@ export default function Dashboard() {
           </div>
           <div className="space-y-2 max-h-32 overflow-y-auto">
             {alerts.slice(0, 10).map((e) => (
-              <div key={e.id} className="text-sm flex gap-2 items-baseline bg-yellow-900/10 px-3 py-2 rounded">
+              <div
+                key={e.id}
+                className="text-sm flex gap-2 items-baseline bg-yellow-900/10 px-3 py-2 rounded"
+              >
                 <span className="text-gray-600 shrink-0">
                   {new Date(e.timestamp).toLocaleTimeString()}
                 </span>

@@ -1,19 +1,24 @@
-const CHECKOUT_FLOW_RETAILERS = new Set(['walmart'])
+const CHECKOUT_FLOW_RETAILERS = new Set(['target', 'walmart', 'pokemon-center', 'samsclub'])
 
-export function buildTaskReadiness({ tasks, accountManager, settings = {} }) {
+export function buildTaskReadiness({
+  tasks,
+  accountManager,
+  paymentManager = null,
+  settings = {}
+}) {
   const taskTestResults = settings.taskTestResults || {}
   return Object.fromEntries(
     tasks.map((task) => [
       task.id,
-      buildSingleTaskReadiness(task, accountManager, settings, taskTestResults)
+      buildSingleTaskReadiness(task, accountManager, paymentManager, settings, taskTestResults)
     ])
   )
 }
 
-function buildSingleTaskReadiness(task, accountManager, settings, taskTestResults) {
+function buildSingleTaskReadiness(task, accountManager, paymentManager, settings, taskTestResults) {
   const accountIds = parseAccountIds(task.account_ids)
   const accountChecks = accountIds.map((accountId) =>
-    checkAccount(task, accountManager, settings, accountId)
+    checkAccount(task, accountManager, paymentManager, settings, accountId)
   )
   const checks = [
     check(
@@ -39,7 +44,7 @@ function buildSingleTaskReadiness(task, accountManager, settings, taskTestResult
       summarizeAccountCheck(accountChecks, 'session')
     ),
     check(
-      'CVV',
+      task.retailer === 'walmart' ? 'CVV' : 'Payment',
       accountChecks.length > 0 && accountChecks.every((entry) => entry.cvv.ok),
       summarizeAccountCheck(accountChecks, 'cvv')
     ),
@@ -57,12 +62,22 @@ function buildSingleTaskReadiness(task, accountManager, settings, taskTestResult
   }
 }
 
-function checkAccount(task, accountManager, settings, accountId) {
+function checkAccount(task, accountManager, paymentManager, settings, accountId) {
   const account = accountManager.getDecrypted(accountId)
   if (!account) {
     const missing = check('Account', false, `Account ${accountId} not found`)
     return { session: missing, cvv: missing, proxy: missing }
   }
+
+  const payment = account.payment_method_id ? paymentManager?.get(account.payment_method_id) : null
+  const hasCheckoutCvv = Boolean(payment?.cvv || account.cvv)
+  const paymentMessage = payment
+    ? `${account.name} uses ${payment.name} ending in ${payment.cardNumber.slice(-4)}`
+    : account.cvv
+      ? `${account.name} uses its legacy saved CVV`
+      : task.retailer !== 'walmart'
+        ? `${account.name} needs${task.retailer === 'target' ? ' a Target' : ' a'} payment method`
+        : `${account.name} is missing CVV`
 
   return {
     session: check(
@@ -74,11 +89,7 @@ function checkAccount(task, accountManager, settings, accountId) {
           ? `${account.name} needs email/login verification`
           : `${account.name} marked ready`
     ),
-    cvv: check(
-      account.name,
-      Boolean(account.cvv),
-      account.cvv ? `${account.name} has CVV saved` : `${account.name} is missing CVV`
-    ),
+    cvv: check(account.name, hasCheckoutCvv, paymentMessage),
     proxy: checkProxy(account, task.retailer, settings.proxyTestResults || {})
   }
 }

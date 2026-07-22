@@ -12,6 +12,7 @@ Automate account creation on Target and Walmart. User provides credentials + shi
 ### DB Migration
 
 Add `status` column to `accounts` table:
+
 ```sql
 ALTER TABLE accounts ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
 ```
@@ -68,6 +69,7 @@ Both use `waitForCaptchaIfNeeded`. Address/shipping not filled at registration (
 ## IPC Handler — accounts:register
 
 Located in `ipc.js`. On call:
+
 1. Validate payload (retailer, email, password, firstName, lastName required)
 2. Open browser context via BrowserPool
 3. Run appropriate registration flow

@@ -18,5 +18,22 @@ export function extractProductKey(retailer, productUrl) {
       )
     }
   }
+  if (retailer === 'pokemon-center') {
+    try {
+      const url = new URL(productUrl)
+      const parts = url.pathname.split('/').filter(Boolean)
+      return parts.length ? parts.at(-1) : 'site-queue'
+    } catch {
+      return 'site-queue'
+    }
+  }
+  if (retailer === 'samsclub') {
+    try {
+      const parts = new URL(productUrl).pathname.split('/').filter(Boolean)
+      return parts.findLast((part) => /^\d{6,}$/.test(part)) || null
+    } catch {
+      return String(productUrl || '').match(/(?:^|\/)(\d{6,})(?:[/?#]|$)/)?.[1] || null
+    }
+  }
   return null
 }

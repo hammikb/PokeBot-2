@@ -29,9 +29,9 @@ export class SmartRetry {
     for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
       try {
         log.debug('Attempting operation', { attempt, maxRetries: config.maxRetries })
-        
+
         const result = await operation(attempt)
-        
+
         if (failures.length > 0) {
           log.info('Operation succeeded after retries', {
             attempt,
@@ -39,7 +39,7 @@ export class SmartRetry {
             duration: Date.now() - startTime
           })
         }
-        
+
         return { success: true, result, attempts: attempt, failures }
       } catch (error) {
         const failureInfo = {
@@ -49,9 +49,9 @@ export class SmartRetry {
           timestamp: Date.now(),
           stack: error.stack
         }
-        
+
         failures.push(failureInfo)
-        
+
         log.warn('Operation failed', failureInfo)
 
         // Last attempt - don't retry
@@ -61,7 +61,7 @@ export class SmartRetry {
             failures: failures.length,
             duration: Date.now() - startTime
           })
-          
+
           return {
             success: false,
             error: error.message,
@@ -72,15 +72,15 @@ export class SmartRetry {
         }
 
         // Determine retry strategy based on error type
-        const delay = await this.calculateDelay(failureInfo, attempt, config, failures)
-        
-        log.info('Retrying after delay', { 
-          attempt, 
+        const delay = await this.calculateDelay(failureInfo, attempt, config)
+
+        log.info('Retrying after delay', {
+          attempt,
           nextAttempt: attempt + 1,
           delay,
           errorType: failureInfo.type
         })
-        
+
         await this.sleep(delay)
       }
     }
@@ -143,7 +143,7 @@ export class SmartRetry {
   /**
    * Calculate delay based on error type and attempt
    */
-  async calculateDelay(failureInfo, attempt, config, failures) {
+  async calculateDelay(failureInfo, attempt, config) {
     const { type } = failureInfo
     let delay = config.baseDelay
 
@@ -207,9 +207,9 @@ export class SmartRetry {
   analyzeFailures(failures) {
     if (failures.length === 0) return null
 
-    const types = failures.map(f => f.type)
+    const types = failures.map((f) => f.type)
     const uniqueTypes = [...new Set(types)]
-    
+
     // Count occurrences
     const typeCounts = types.reduce((acc, type) => {
       acc[type] = (acc[type] || 0) + 1
@@ -217,13 +217,12 @@ export class SmartRetry {
     }, {})
 
     // Determine primary failure reason
-    const primaryType = Object.entries(typeCounts)
-      .sort(([, a], [, b]) => b - a)[0][0]
+    const primaryType = Object.entries(typeCounts).sort(([, a], [, b]) => b - a)[0][0]
 
     // Check for patterns
     const isConsistent = uniqueTypes.length === 1
     const isEscalating = this.isEscalatingPattern(failures)
-    
+
     return {
       totalFailures: failures.length,
       uniqueTypes: uniqueTypes.length,
@@ -242,14 +241,14 @@ export class SmartRetry {
     if (failures.length < 2) return false
 
     const severity = {
-      'TIMEOUT': 1,
-      'NETWORK': 1,
-      'SERVER_ERROR': 2,
-      'RATE_LIMIT': 3,
-      'FORBIDDEN': 4,
-      'BOT_DETECTION': 5,
-      'CAPTCHA': 5,
-      'BLOCKED': 6
+      TIMEOUT: 1,
+      NETWORK: 1,
+      SERVER_ERROR: 2,
+      RATE_LIMIT: 3,
+      FORBIDDEN: 4,
+      BOT_DETECTION: 5,
+      CAPTCHA: 5,
+      BLOCKED: 6
     }
 
     for (let i = 1; i < failures.length; i++) {
@@ -270,27 +269,27 @@ export class SmartRetry {
     switch (primaryType) {
       case 'RATE_LIMIT':
         return 'Reduce request frequency or use different proxy'
-      
+
       case 'BOT_DETECTION':
       case 'CAPTCHA':
         return 'Use profile warmup or switch to browser automation'
-      
+
       case 'BLOCKED':
         return 'Change proxy or wait before retrying'
-      
+
       case 'SESSION_EXPIRED':
         return 'Refresh session cookies'
-      
+
       case 'TIMEOUT':
       case 'NETWORK':
         return 'Check network connection or proxy health'
-      
+
       case 'SERVER_ERROR':
         return 'Wait for server to recover'
-      
+
       case 'OUT_OF_STOCK':
         return 'Monitor for restock'
-      
+
       default:
         if (isConsistent && failureCount > 2) {
           return 'Persistent issue - manual intervention may be needed'
@@ -303,7 +302,7 @@ export class SmartRetry {
    * Sleep for specified duration
    */
   sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms))
+    return new Promise((resolve) => setTimeout(resolve, ms))
   }
 
   /**

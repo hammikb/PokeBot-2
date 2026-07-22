@@ -12,27 +12,28 @@
 
 ## File Map
 
-| File | Action | Purpose |
-|------|--------|---------|
-| `src/main/db.js` | Modify | Add `status` column to accounts schema + migration |
-| `src/main/accounts/AccountManager.js` | Modify | Accept `status` in `create()`, expose in `getAll()`, add `setStatus()` |
-| `src/shared/constants.js` | Modify | Add `ACCOUNTS_REGISTER`, `ACCOUNTS_SET_STATUS` IPC channels |
-| `src/main/automation/flows/register-target.js` | Create | Target signup automation |
-| `src/main/automation/flows/register-walmart.js` | Create | Walmart signup automation |
-| `src/main/ipc.js` | Modify | Accept `browserPool` + `notificationEngine`, add registration handlers |
-| `src/main/index.js` | Modify | Pass `browserPool` + `notificationEngine` to `registerIpcHandlers` |
-| `src/renderer/src/store/appStore.js` | Modify | Add `registerAccount`, `setAccountStatus`, `accountRegistrationStatuses` |
-| `src/renderer/src/App.jsx` | Modify | Listen for `account:status` IPC push events |
-| `src/renderer/src/pages/Accounts.jsx` | Modify | Register toggle, status badges, bulk-create panel |
-| `tests/main/accounts/AccountManager.test.js` | Modify | Tests for `status` field + `setStatus()` |
-| `tests/main/automation/flows/register-target.test.js` | Create | Target registration flow tests |
-| `tests/main/automation/flows/register-walmart.test.js` | Create | Walmart registration flow tests |
+| File                                                   | Action | Purpose                                                                  |
+| ------------------------------------------------------ | ------ | ------------------------------------------------------------------------ |
+| `src/main/db.js`                                       | Modify | Add `status` column to accounts schema + migration                       |
+| `src/main/accounts/AccountManager.js`                  | Modify | Accept `status` in `create()`, expose in `getAll()`, add `setStatus()`   |
+| `src/shared/constants.js`                              | Modify | Add `ACCOUNTS_REGISTER`, `ACCOUNTS_SET_STATUS` IPC channels              |
+| `src/main/automation/flows/register-target.js`         | Create | Target signup automation                                                 |
+| `src/main/automation/flows/register-walmart.js`        | Create | Walmart signup automation                                                |
+| `src/main/ipc.js`                                      | Modify | Accept `browserPool` + `notificationEngine`, add registration handlers   |
+| `src/main/index.js`                                    | Modify | Pass `browserPool` + `notificationEngine` to `registerIpcHandlers`       |
+| `src/renderer/src/store/appStore.js`                   | Modify | Add `registerAccount`, `setAccountStatus`, `accountRegistrationStatuses` |
+| `src/renderer/src/App.jsx`                             | Modify | Listen for `account:status` IPC push events                              |
+| `src/renderer/src/pages/Accounts.jsx`                  | Modify | Register toggle, status badges, bulk-create panel                        |
+| `tests/main/accounts/AccountManager.test.js`           | Modify | Tests for `status` field + `setStatus()`                                 |
+| `tests/main/automation/flows/register-target.test.js`  | Create | Target registration flow tests                                           |
+| `tests/main/automation/flows/register-walmart.test.js` | Create | Walmart registration flow tests                                          |
 
 ---
 
 ### Task 1: Add `status` column to accounts DB schema
 
 **Files:**
+
 - Modify: `src/main/db.js`
 
 - [ ] **Step 1: Add `status` to `TABLE_COLUMNS.accounts`**
@@ -51,9 +52,9 @@ const TABLE_COLUMNS = {
     'proxy',
     'profile_path',
     'shipping_json',
-    'status',        // ← add this
+    'status', // ← add this
     'created_at'
-  ],
+  ]
   // ...rest unchanged
 }
 ```
@@ -101,7 +102,7 @@ function applyDefaults(table, row) {
   const now = Math.floor(Date.now() / 1000)
   if (table === 'accounts') {
     row.created_at ??= now
-    row.status ??= 'active'     // ← add this line
+    row.status ??= 'active' // ← add this line
   }
   if (table === 'tasks') {
     row.status ??= 'idle'
@@ -123,6 +124,7 @@ git commit -m "feat: add status column to accounts table"
 ### Task 2: AccountManager — status support
 
 **Files:**
+
 - Modify: `src/main/accounts/AccountManager.js`
 
 - [ ] **Step 1: Update `create()` to accept and store `status`**
@@ -191,6 +193,7 @@ git commit -m "feat: account status field — create with status, getAll returns
 ### Task 3: AccountManager tests — status
 
 **Files:**
+
 - Modify: `tests/main/accounts/AccountManager.test.js`
 
 - [ ] **Step 1: Add tests for status field**
@@ -255,6 +258,7 @@ git commit -m "test: account status field and setStatus()"
 ### Task 4: Add IPC constants
 
 **Files:**
+
 - Modify: `src/shared/constants.js`
 
 - [ ] **Step 1: Add new IPC channels**
@@ -282,6 +286,7 @@ git commit -m "feat: add ACCOUNTS_REGISTER and ACCOUNTS_SET_STATUS IPC constants
 ### Task 5: Target registration flow
 
 **Files:**
+
 - Create: `src/main/automation/flows/register-target.js`
 
 - [ ] **Step 1: Write the failing test first** (do this in Task 7 — come back after creating the file)
@@ -331,11 +336,12 @@ export async function runTargetRegistration(
     await waitForCaptchaIfNeeded(page, captchaCtx.notificationEngine, captchaCtx.dropEvent)
 
     // Check for "already exists" error
-    const errorEl = page.locator(
-      '[data-test="errorMessage"], [class*="error"], [class*="Error"]'
-    )
+    const errorEl = page.locator('[data-test="errorMessage"], [class*="error"], [class*="Error"]')
     if ((await errorEl.count()) > 0) {
-      const errorText = await errorEl.first().textContent().catch(() => '')
+      const errorText = await errorEl
+        .first()
+        .textContent()
+        .catch(() => '')
       if (/already|registered|exists/i.test(errorText)) {
         return { success: false, alreadyExists: true, error: errorText.trim() }
       }
@@ -368,6 +374,7 @@ git commit -m "feat: Target account registration flow"
 ### Task 6: Walmart registration flow
 
 **Files:**
+
 - Create: `src/main/automation/flows/register-walmart.js`
 
 - [ ] **Step 1: Create the flow file**
@@ -416,11 +423,12 @@ export async function runWalmartRegistration(
     await waitForCaptchaIfNeeded(page, captchaCtx.notificationEngine, captchaCtx.dropEvent)
 
     // Check for "already exists" error
-    const errorEl = page.locator(
-      '[class*="error-text"], [class*="ErrorText"], [role="alert"]'
-    )
+    const errorEl = page.locator('[class*="error-text"], [class*="ErrorText"], [role="alert"]')
     if ((await errorEl.count()) > 0) {
-      const errorText = await errorEl.first().textContent().catch(() => '')
+      const errorText = await errorEl
+        .first()
+        .textContent()
+        .catch(() => '')
       if (/already|registered|exists/i.test(errorText)) {
         return { success: false, alreadyExists: true, error: errorText.trim() }
       }
@@ -453,6 +461,7 @@ git commit -m "feat: Walmart account registration flow"
 ### Task 7: Registration flow tests
 
 **Files:**
+
 - Create: `tests/main/automation/flows/register-target.test.js`
 - Create: `tests/main/automation/flows/register-walmart.test.js`
 
@@ -493,7 +502,9 @@ function makeLocator(page, selector, errorText) {
   const isErrorEl = /error|Error/.test(selector)
   const isConfirm = /confirmPassword/.test(selector)
   return {
-    first() { return this },
+    first() {
+      return this
+    },
     async count() {
       if (isErrorEl) return errorText ? 1 : 0
       if (isConfirm) return 0
@@ -512,7 +523,11 @@ function makeLocator(page, selector, errorText) {
 }
 
 function makeContext(page) {
-  return { async newPage() { return page } }
+  return {
+    async newPage() {
+      return page
+    }
+  }
 }
 
 const baseArgs = {
@@ -533,10 +548,10 @@ describe('runTargetRegistration', () => {
   it('fills email, password, first and last name', async () => {
     const page = makePage()
     await runTargetRegistration(makeContext(page), baseArgs)
-    expect(page.fills.some(f => f.value === 'test@example.com')).toBe(true)
-    expect(page.fills.some(f => f.value === 'SecurePass1!')).toBe(true)
-    expect(page.fills.some(f => f.value === 'Ash')).toBe(true)
-    expect(page.fills.some(f => f.value === 'Ketchum')).toBe(true)
+    expect(page.fills.some((f) => f.value === 'test@example.com')).toBe(true)
+    expect(page.fills.some((f) => f.value === 'SecurePass1!')).toBe(true)
+    expect(page.fills.some((f) => f.value === 'Ash')).toBe(true)
+    expect(page.fills.some((f) => f.value === 'Ketchum')).toBe(true)
   })
 
   it('returns success with needsVerification on registration', async () => {
@@ -602,7 +617,9 @@ function makePage({ errorText = null, waitForUrlResolves = true } = {}) {
 function makeLocator(page, selector, errorText) {
   const isErrorEl = /error-text|ErrorText|role.*alert/.test(selector)
   return {
-    first() { return this },
+    first() {
+      return this
+    },
     async count() {
       if (isErrorEl) return errorText ? 1 : 0
       return 1
@@ -620,7 +637,11 @@ function makeLocator(page, selector, errorText) {
 }
 
 function makeContext(page) {
-  return { async newPage() { return page } }
+  return {
+    async newPage() {
+      return page
+    }
+  }
 }
 
 const baseArgs = {
@@ -642,11 +663,11 @@ describe('runWalmartRegistration', () => {
   it('fills all fields including phone', async () => {
     const page = makePage()
     await runWalmartRegistration(makeContext(page), baseArgs)
-    expect(page.fills.some(f => f.value === 'test@example.com')).toBe(true)
-    expect(page.fills.some(f => f.value === 'SecurePass1!')).toBe(true)
-    expect(page.fills.some(f => f.value === 'Ash')).toBe(true)
-    expect(page.fills.some(f => f.value === 'Ketchum')).toBe(true)
-    expect(page.fills.some(f => f.value === '5551234567')).toBe(true)
+    expect(page.fills.some((f) => f.value === 'test@example.com')).toBe(true)
+    expect(page.fills.some((f) => f.value === 'SecurePass1!')).toBe(true)
+    expect(page.fills.some((f) => f.value === 'Ash')).toBe(true)
+    expect(page.fills.some((f) => f.value === 'Ketchum')).toBe(true)
+    expect(page.fills.some((f) => f.value === '5551234567')).toBe(true)
   })
 
   it('returns success with needsVerification on registration', async () => {
@@ -696,6 +717,7 @@ git commit -m "test: Target and Walmart registration flow unit tests"
 ### Task 8: IPC handlers + index.js wiring
 
 **Files:**
+
 - Modify: `src/main/ipc.js`
 - Modify: `src/main/index.js`
 
@@ -738,7 +760,17 @@ Add after the `ACCOUNTS_DELETE` handler block (before the Tasks section):
 
 ```js
 ipcMain.handle(IPC.ACCOUNTS_REGISTER, async (_, data) => {
-  const { retailer, email, password, firstName, lastName, phone = '', proxy = '', shipping = {}, cvv = '' } = data || {}
+  const {
+    retailer,
+    email,
+    password,
+    firstName,
+    lastName,
+    phone = '',
+    proxy = '',
+    shipping = {},
+    cvv = ''
+  } = data || {}
   if (!retailer || !email || !password || !firstName || !lastName) {
     throw new Error('retailer, email, password, firstName, and lastName are required')
   }
@@ -800,7 +832,15 @@ ipcMain.handle(IPC.ACCOUNTS_SET_STATUS, (_, id, status) => {
 Find the `registerIpcHandlers` call in `index.js` and add the two new params:
 
 ```js
-registerIpcHandlers({ getDb, accountManager, taskManager, getSettings, mainWindow, browserPool, notificationEngine })
+registerIpcHandlers({
+  getDb,
+  accountManager,
+  taskManager,
+  getSettings,
+  mainWindow,
+  browserPool,
+  notificationEngine
+})
 ```
 
 - [ ] **Step 6: Commit**
@@ -815,6 +855,7 @@ git commit -m "feat: accounts:register and accounts:set-status IPC handlers"
 ### Task 9: appStore — new actions and state
 
 **Files:**
+
 - Modify: `src/renderer/src/store/appStore.js`
 
 - [ ] **Step 1: Add `accountRegistrationStatuses` to initial state and new actions**
@@ -877,6 +918,7 @@ git commit -m "feat: registerAccount, setAccountStatus, accountRegistrationStatu
 ### Task 10: App.jsx — listen for account:status push events
 
 **Files:**
+
 - Modify: `src/renderer/src/App.jsx`
 
 - [ ] **Step 1: Destructure new store actions and wire up IPC listener**
@@ -884,7 +926,14 @@ git commit -m "feat: registerAccount, setAccountStatus, accountRegistrationStatu
 Update the `useAppStore` destructure call and `useEffect` in `App.jsx`:
 
 ```js
-const { loadTasks, loadAccounts, loadSettings, pushFeedEvent, setTaskStatus, setAccountRegistrationStatus } = useAppStore()
+const {
+  loadTasks,
+  loadAccounts,
+  loadSettings,
+  pushFeedEvent,
+  setTaskStatus,
+  setAccountRegistrationStatus
+} = useAppStore()
 
 useEffect(() => {
   const ipc = window.electron?.ipcRenderer
@@ -896,7 +945,8 @@ useEffect(() => {
     ipc.on(IPC.TASK_STATUS, (_event, { taskId, status }) => setTaskStatus(taskId, status))
     ipc.on(IPC.ACCOUNT_STATUS, (_event, data) => {
       loadAccounts()
-      if (data?.email) setAccountRegistrationStatus(data.email, { state: 'success', message: data.message })
+      if (data?.email)
+        setAccountRegistrationStatus(data.email, { state: 'success', message: data.message })
     })
   }
   return () => {
@@ -919,6 +969,7 @@ git commit -m "feat: listen for account:status IPC push events in App.jsx"
 ### Task 11: Accounts.jsx — UI changes
 
 **Files:**
+
 - Modify: `src/renderer/src/pages/Accounts.jsx`
 
 - [ ] **Step 1: Import new store actions and add state**
@@ -926,7 +977,15 @@ git commit -m "feat: listen for account:status IPC push events in App.jsx"
 Update the store destructure at the top of `Accounts()`:
 
 ```js
-const { accounts, createAccount, deleteAccount, settings, registerAccount, setAccountStatus, accountRegistrationStatuses } = useAppStore()
+const {
+  accounts,
+  createAccount,
+  deleteAccount,
+  settings,
+  registerAccount,
+  setAccountStatus,
+  accountRegistrationStatuses
+} = useAppStore()
 ```
 
 Add a state variable for the "register on site" toggle:
@@ -961,7 +1020,9 @@ const submit = async (event) => {
       setForm(makeEmptyForm())
       setRegisterOnSite(false)
     } else {
-      setRegisterStatus(result.alreadyExists ? 'Already registered on site' : result.error || 'Registration failed')
+      setRegisterStatus(
+        result.alreadyExists ? 'Already registered on site' : result.error || 'Registration failed'
+      )
     }
   } else {
     await createAccount(accountData)
@@ -976,7 +1037,7 @@ const submit = async (event) => {
 After the existing `<button type="submit">Save Account</button>` in the form, add the checkbox above it:
 
 ```jsx
-<div className="flex items-center gap-2">
+;<div className="flex items-center gap-2">
   <input
     type="checkbox"
     id="registerOnSite"
@@ -989,13 +1050,17 @@ After the existing `<button type="submit">Save Account</button>` in the form, ad
   </label>
 </div>
 
-{registerStatus && (
-  <div className={`text-xs ${registerStatus.includes('fail') || registerStatus.includes('error') || registerStatus.includes('Already') ? 'text-red-400' : 'text-green-400'}`}>
-    {registerStatus}
-  </div>
-)}
+{
+  registerStatus && (
+    <div
+      className={`text-xs ${registerStatus.includes('fail') || registerStatus.includes('error') || registerStatus.includes('Already') ? 'text-red-400' : 'text-green-400'}`}
+    >
+      {registerStatus}
+    </div>
+  )
+}
 
-<button
+;<button
   type="submit"
   className="w-full bg-red-600 hover:bg-red-500 text-white rounded px-4 py-2 uppercase tracking-wider font-bold text-xs"
 >
@@ -1090,15 +1155,17 @@ In the account list item `<div>` inside `accounts.map()`, add a status badge aft
 And add a "Mark Verified" button next to the delete button for unverified accounts:
 
 ```jsx
-{account.status === 'unverified' && (
-  <button
-    onClick={() => setAccountStatus(account.id, 'verified')}
-    className="text-green-600 hover:text-green-400 shrink-0 text-xs"
-  >
-    mark verified
-  </button>
-)}
-<button
+{
+  account.status === 'unverified' && (
+    <button
+      onClick={() => setAccountStatus(account.id, 'verified')}
+      className="text-green-600 hover:text-green-400 shrink-0 text-xs"
+    >
+      mark verified
+    </button>
+  )
+}
+;<button
   onClick={() => deleteAccount(account.id)}
   className="text-red-600 hover:text-red-400 shrink-0"
 >

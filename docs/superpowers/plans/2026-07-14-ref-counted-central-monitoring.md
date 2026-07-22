@@ -35,6 +35,7 @@ deletes the caller's `subscriptions` row, so nothing ever ref-counts down today)
 **Files:** none (Supabase migration only, via MCP tool — no repo files change)
 
 **Interfaces:**
+
 - Consumes: existing `products` table (columns `id uuid`, `retailer text`, `product_url text`,
   `product_key text`, `name text`, `active bool default true`), RLS already enabled on it.
 - Produces: an `INSERT` policy that Task 3's client code (already written in a prior session, in
@@ -43,9 +44,11 @@ deletes the caller's `subscriptions` row, so nothing ever ref-counts down today)
 - [ ] **Step 1: Apply the migration**
 
 Use the Supabase MCP `apply_migration` tool with:
+
 - `project_id`: `jbnnouwhesexfllninwb`
 - `name`: `allow_authenticated_insert_products`
 - `query`:
+
 ```sql
 create policy "authenticated can register products"
 on public.products
@@ -57,11 +60,13 @@ with check (retailer in ('target', 'walmart'));
 - [ ] **Step 2: Verify the policy exists**
 
 Run this SQL via the Supabase MCP `execute_sql` tool (`project_id`: `jbnnouwhesexfllninwb`):
+
 ```sql
 select policyname, cmd, roles, with_check
 from pg_policies
 where tablename = 'products' and cmd = 'INSERT';
 ```
+
 Expected: one row, `policyname = 'authenticated can register products'`,
 `with_check` containing `retailer in ('target'::text, 'walmart'::text)` (Postgres normalizes the
 literal cast when it echoes the policy back — this is expected, not an error).
@@ -78,8 +83,9 @@ report so Task 2 and the final verification can reference it.
 **Files:** none (Supabase migration only, via MCP tool — no repo files change)
 
 **Interfaces:**
+
 - Consumes: `subscriptions` table (`id uuid`, `user_id uuid`, `product_id uuid`, `max_price
-  numeric`, `created_at`), `products.active`.
+numeric`, `created_at`), `products.active`.
 - Produces: a trigger that fires automatically on every `INSERT`/`DELETE` on `subscriptions` —
   no application code ever calls it directly. Task 3's `removeProduct` fix depends on this trigger
   existing to have any effect (deleting a `subscriptions` row does nothing to `products.active`
@@ -88,9 +94,11 @@ report so Task 2 and the final verification can reference it.
 - [ ] **Step 1: Apply the migration**
 
 Use the Supabase MCP `apply_migration` tool with:
+
 - `project_id`: `jbnnouwhesexfllninwb`
 - `name`: `subscriptions_ref_count_trigger`
 - `query`:
+
 ```sql
 create or replace function public.sync_product_active_from_subscriptions()
 returns trigger
@@ -130,6 +138,7 @@ standard hardening for `SECURITY DEFINER` functions, preventing search-path hija
 
 Run via the Supabase MCP `execute_sql` tool (`project_id`: `jbnnouwhesexfllninwb`) — this uses the
 `products` row seeding a throwaway test product, not a real monitored one:
+
 ```sql
 -- Seed a throwaway test product, forced inactive.
 insert into public.products (id, retailer, product_url, product_key, name, active)
@@ -144,6 +153,7 @@ on conflict do nothing;
 
 select active from public.products where id = '00000000-0000-0000-0000-000000000001';
 ```
+
 Expected: `active = true` (the trigger flipped it on insert).
 
 ```sql
@@ -152,6 +162,7 @@ where product_id = '00000000-0000-0000-0000-000000000001';
 
 select active from public.products where id = '00000000-0000-0000-0000-000000000001';
 ```
+
 Expected: `active = false` (the trigger flipped it back off — no subscribers remain).
 
 ```sql
@@ -168,10 +179,12 @@ No repo files changed by this task — nothing to commit.
 ### Task 3: `SupabaseMonitorSource.removeProduct` actually removes the subscription
 
 **Files:**
+
 - Modify: `src/main/monitor/SupabaseMonitorSource.js`
 - Test: `tests/main/monitor/SupabaseMonitorSource.test.js`
 
 **Interfaces:**
+
 - Consumes: `this._client` (the authenticated Supabase client already stored on the instance),
   `this._channels` (`Map<productUrl, { channel, productId }>`, already populated by `addProduct`).
 - Produces: no new public method — `removeProduct(productUrl)`'s existing signature and return
@@ -181,41 +194,42 @@ No repo files changed by this task — nothing to commit.
 - [ ] **Step 1: Write the failing test**
 
 Find this test in `tests/main/monitor/SupabaseMonitorSource.test.js`:
+
 ```js
-  it('removeProduct unsubscribes the channel', async () => {
-    const { client, calls } = makeFakeClient({ product: SEED })
-    const source = new SupabaseMonitorSource({ client })
-    await source.addProduct({
-      productUrl: 'https://www.target.com/p/A-94336414',
-      retailer: 'target',
-      productKey: '94336414',
-      maxPrice: null
-    })
-    await source.removeProduct('https://www.target.com/p/A-94336414')
-    expect(calls.removed).toBe(1)
+it('removeProduct unsubscribes the channel', async () => {
+  const { client, calls } = makeFakeClient({ product: SEED })
+  const source = new SupabaseMonitorSource({ client })
+  await source.addProduct({
+    productUrl: 'https://www.target.com/p/A-94336414',
+    retailer: 'target',
+    productKey: '94336414',
+    maxPrice: null
   })
+  await source.removeProduct('https://www.target.com/p/A-94336414')
+  expect(calls.removed).toBe(1)
+})
 ```
 
 Replace it with:
+
 ```js
-  it('removeProduct deletes the subscription row and unsubscribes the channel', async () => {
-    const { client, calls } = makeFakeClient({ product: SEED })
-    const source = new SupabaseMonitorSource({ client })
-    await source.addProduct({
-      productUrl: 'https://www.target.com/p/A-94336414',
-      retailer: 'target',
-      productKey: '94336414',
-      maxPrice: null
-    })
-    await source.removeProduct('https://www.target.com/p/A-94336414')
-    expect(calls.deletes).toEqual([
-      { table: 'subscriptions', column: 'product_id', value: 'prod-1' }
-    ])
-    expect(calls.removed).toBe(1)
+it('removeProduct deletes the subscription row and unsubscribes the channel', async () => {
+  const { client, calls } = makeFakeClient({ product: SEED })
+  const source = new SupabaseMonitorSource({ client })
+  await source.addProduct({
+    productUrl: 'https://www.target.com/p/A-94336414',
+    retailer: 'target',
+    productKey: '94336414',
+    maxPrice: null
   })
+  await source.removeProduct('https://www.target.com/p/A-94336414')
+  expect(calls.deletes).toEqual([{ table: 'subscriptions', column: 'product_id', value: 'prod-1' }])
+  expect(calls.removed).toBe(1)
+})
 ```
 
 Also find `makeFakeClient` at the top of the same file:
+
 ```js
 function makeFakeClient({
   product,
@@ -247,6 +261,7 @@ function makeFakeClient({
 ```
 
 Replace the `calls` initializer and the `else` branch (the `subscriptions`-table case) with:
+
 ```js
 function makeFakeClient({
   product,
@@ -297,6 +312,7 @@ Expected: FAIL — `expect(calls.deletes).toEqual(...)` fails because `calls.del
 - [ ] **Step 3: Implement the fix**
 
 In `src/main/monitor/SupabaseMonitorSource.js`, find:
+
 ```js
   async removeProduct(productUrl) {
     const entry = this._channels.get(productUrl)
@@ -308,6 +324,7 @@ In `src/main/monitor/SupabaseMonitorSource.js`, find:
 ```
 
 Replace with:
+
 ```js
   async removeProduct(productUrl) {
     const entry = this._channels.get(productUrl)

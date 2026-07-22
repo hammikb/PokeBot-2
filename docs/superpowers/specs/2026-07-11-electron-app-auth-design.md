@@ -68,24 +68,24 @@ establish a Supabase identity is a bug farm, so the old one is deleted as part o
 
 ## Components
 
-| File | Change |
-|---|---|
-| `src/main/supabase/authSession.js` *(new, replaces `session.js`)* | Owns the one client instance for app lifetime. Exposes `signIn(email, pw)`, `signUp(email, pw)`, `signOut()`, `restoreSession()`, `getClient()`. Emits state changes (via EventEmitter or callback) for main/index.js to relay over IPC. |
-| `src/main/supabase/SupabaseClient.js` | Add `signUp`, `restoreSession(refreshToken)`, `signOut` methods alongside the existing `signIn`. |
-| `src/main/ipc.js` | Add `AUTH_SIGN_IN`, `AUTH_SIGN_UP`, `AUTH_SIGN_OUT`, `AUTH_GET_STATUS` handlers. **Remove** `SUPABASE_SET_PASSWORD` / `SUPABASE_CLEAR_CREDENTIALS` handlers and the `supabaseEmail`/`supabasePasswordEnc` settings usage. |
-| `src/main/index.js` | Startup calls `authSession.restoreSession()` instead of `getSupabaseSession({ getSettings, encryptionKey })`. Relay `AUTH_STATE_CHANGED` to the renderer over IPC. |
-| `src/renderer/src/pages/Login.jsx` *(new)* | Email/password form, Sign In ⇄ Sign Up toggle, inline error message, loading state. |
-| `src/renderer/src/App.jsx` | On mount, request auth status; render `<Login/>` in place of the nav/router while unauthenticated; existing data-loading effect gated on `authenticated`. Listen for `AUTH_STATE_CHANGED` pushes. |
-| `src/renderer/src/store/appStore.js` | Add `authStatus` (`checking` \| `authenticated` \| `unauthenticated`), `authUser`, `authError`; actions `signIn`, `signUp`, `signOut`, `checkAuthStatus`. |
-| `src/renderer/src/pages/Settings.jsx` | Remove the "Bot Email" / password fields and the clear-credentials button (obsolete). Add a Sign Out button. |
-| `src/shared/constants.js` | Add the four new `AUTH_*` IPC channel names; remove the two obsolete `SUPABASE_SET_PASSWORD` / `SUPABASE_CLEAR_CREDENTIALS` entries. |
+| File                                                              | Change                                                                                                                                                                                                                                   |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/main/supabase/authSession.js` _(new, replaces `session.js`)_ | Owns the one client instance for app lifetime. Exposes `signIn(email, pw)`, `signUp(email, pw)`, `signOut()`, `restoreSession()`, `getClient()`. Emits state changes (via EventEmitter or callback) for main/index.js to relay over IPC. |
+| `src/main/supabase/SupabaseClient.js`                             | Add `signUp`, `restoreSession(refreshToken)`, `signOut` methods alongside the existing `signIn`.                                                                                                                                         |
+| `src/main/ipc.js`                                                 | Add `AUTH_SIGN_IN`, `AUTH_SIGN_UP`, `AUTH_SIGN_OUT`, `AUTH_GET_STATUS` handlers. **Remove** `SUPABASE_SET_PASSWORD` / `SUPABASE_CLEAR_CREDENTIALS` handlers and the `supabaseEmail`/`supabasePasswordEnc` settings usage.                |
+| `src/main/index.js`                                               | Startup calls `authSession.restoreSession()` instead of `getSupabaseSession({ getSettings, encryptionKey })`. Relay `AUTH_STATE_CHANGED` to the renderer over IPC.                                                                       |
+| `src/renderer/src/pages/Login.jsx` _(new)_                        | Email/password form, Sign In ⇄ Sign Up toggle, inline error message, loading state.                                                                                                                                                      |
+| `src/renderer/src/App.jsx`                                        | On mount, request auth status; render `<Login/>` in place of the nav/router while unauthenticated; existing data-loading effect gated on `authenticated`. Listen for `AUTH_STATE_CHANGED` pushes.                                        |
+| `src/renderer/src/store/appStore.js`                              | Add `authStatus` (`checking` \| `authenticated` \| `unauthenticated`), `authUser`, `authError`; actions `signIn`, `signUp`, `signOut`, `checkAuthStatus`.                                                                                |
+| `src/renderer/src/pages/Settings.jsx`                             | Remove the "Bot Email" / password fields and the clear-credentials button (obsolete). Add a Sign Out button.                                                                                                                             |
+| `src/shared/constants.js`                                         | Add the four new `AUTH_*` IPC channel names; remove the two obsolete `SUPABASE_SET_PASSWORD` / `SUPABASE_CLEAR_CREDENTIALS` entries.                                                                                                     |
 
 ## Data flow
 
 **Startup:** main creates the Supabase client → `authSession.restoreSession()` reads the stored
 encrypted refresh token (if any) → success: mark `authenticated`, continue app init exactly as
 today (TaskManager, browser pool, etc. all still construct regardless of auth — auth only gates
-the *renderer* UI, not backend wiring) → failure/none: mark `unauthenticated`.
+the _renderer_ UI, not backend wiring) → failure/none: mark `unauthenticated`.
 
 **Sign in / sign up:** renderer form submit → `AUTH_SIGN_IN` / `AUTH_SIGN_UP` IPC → main calls
 Supabase → on success, encrypt + store the new refresh token, emit `AUTH_STATE_CHANGED

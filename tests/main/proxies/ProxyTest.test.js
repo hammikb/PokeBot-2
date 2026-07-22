@@ -8,7 +8,6 @@ vi.mock('playwright-core', () => ({
   }
 }))
 
-
 describe('ProxyTest', () => {
   beforeEach(() => {
     vi.clearAllMocks()

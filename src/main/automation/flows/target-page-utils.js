@@ -114,7 +114,19 @@ export async function waitForSignInOrProfile(page) {
   } catch {
     return 'unknown'
   }
-  if (await signinField.first().isVisible().catch(() => false)) return 'signin'
-  if (await profileIndicator.first().isVisible().catch(() => false)) return 'profile'
+  if (
+    await signinField
+      .first()
+      .isVisible()
+      .catch(() => false)
+  )
+    return 'signin'
+  if (
+    await profileIndicator
+      .first()
+      .isVisible()
+      .catch(() => false)
+  )
+    return 'profile'
   return 'unknown'
 }

@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initDb, getDb } from './db.js'
@@ -6,10 +6,12 @@ import { deriveKeyLegacy } from './crypto.js'
 import { AccountManager } from './accounts/AccountManager.js'
 import { BrowserPool } from './automation/BrowserPool.js'
 import { QueueJoiner } from './automation/QueueJoiner.js'
+import { PokemonCenterQueueJoiner } from './automation/PokemonCenterQueueJoiner.js'
 import { NotificationEngine } from './notify/NotificationEngine.js'
 import { TaskManager } from './tasks/TaskManager.js'
 import { createPokemonFinder } from './monitor/PokemonFinder.js'
 import { ProfileWarmup } from './automation/profileWarmup.js'
+import { listTasksToResume } from './tasks/TaskState.js'
 import { progressStreamer } from './utils/progressStreamer.js'
 import { PaymentManager } from './payments/PaymentManager.js'
 import { ShippingManager } from './shipping/ShippingManager.js'
@@ -17,6 +19,7 @@ import { ThumbnailCache } from './thumbnails/ThumbnailCache.js'
 // import { ConfigManager } from './config/configManager.js'
 import { registerIpcHandlers } from './ipc.js'
 import { AuthSessionManager } from './supabase/AuthSessionManager.js'
+import { CheckoutTelemetry } from './telemetry/CheckoutTelemetry.js'
 import { logger } from './utils/logger.js'
 import { IPC } from '../shared/constants.js'
 
@@ -24,7 +27,10 @@ let mainWindow
 let taskManager
 let pokemonFinder
 let queueJoiner
+let pokemonCenterQueueJoiner
+let browserPool
 let encryptionKey = null
+let shutdownPromise = null
 const TEMP_DEV_VAULT_PASSWORD = 'pokebot-dev-vault'
 
 function getSettings() {
@@ -45,10 +51,17 @@ async function createMainWindow(encryptionKey) {
   const shippingManager = new ShippingManager(getDb)
   const thumbnailCache = new ThumbnailCache()
   const settings = getSettings()
-  const browserPool = new BrowserPool({ maxConcurrent: settings.maxConcurrent || 3 })
-  const notificationEngine = new NotificationEngine(getSettings)
+  browserPool = new BrowserPool({ maxConcurrent: settings.maxConcurrent || 3 })
+  const notificationEngine = new NotificationEngine()
   const profileWarmup = new ProfileWarmup(browserPool)
   queueJoiner = new QueueJoiner({ browserPool })
+  pokemonCenterQueueJoiner = new PokemonCenterQueueJoiner({
+    browserPool,
+    maxWaitMin: 180,
+    notificationEngine,
+    openExternal: (url) => shell.openExternal(url),
+    capsolverApiKey: null
+  })
   // const configManager = new ConfigManager()
   const configManager = null // Temporarily disabled
 
@@ -70,6 +83,25 @@ async function createMainWindow(encryptionKey) {
   ])
   authSessionManager.on('change', (state) => {
     mainWindow?.webContents?.send(IPC.AUTH_STATE_CHANGED, state)
+    if (state.authenticated && getSettings().pokemonCenterAutoJoin === true) {
+      taskManager?.setPokemonCenterAutoJoin(true).catch((err) => {
+        logger.warn('TaskManager', 'Could not reconnect Pokemon Center auto-join', {
+          error: err.message
+        })
+      })
+    }
+  })
+
+  const checkoutTelemetry = new CheckoutTelemetry({
+    getDb,
+    authSessionManager,
+    getSettings,
+    appVersion: app.getVersion()
+  })
+  checkoutTelemetry.flushPending().catch((err) => {
+    logger.warn('CheckoutTelemetry', 'Could not flush pending checkout telemetry', {
+      error: err.message
+    })
   })
 
   taskManager = new TaskManager({
@@ -79,14 +111,39 @@ async function createMainWindow(encryptionKey) {
     getDb,
     getSettings,
     authSessionManager,
-    queueJoiner
+    queueJoiner,
+    pokemonCenterQueueJoiner,
+    checkoutTelemetry,
+    paymentManager
   })
-  
+
+  if (settings.pokemonCenterAutoJoin === true) {
+    taskManager.setPokemonCenterAutoJoin(true).catch((err) => {
+      logger.warn('TaskManager', 'Could not resume Pokemon Center auto-join', {
+        error: err.message
+      })
+    })
+  }
+
+  // A retailer source can remain configured while its task is paused. Resume
+  // only sources whose task was explicitly left monitoring; Stop must survive
+  // an app restart without deleting the product from the watchlist.
+  try {
+    // Use simple selects so this also works with the app's JSON database fallback,
+    // whose intentionally small SQL parser does not implement JOINs.
+    const db = getDb()
+    const enabledTasks = listTasksToResume(db)
+    for (const task of enabledTasks) taskManager.startTask(task)
+    logger.info('TaskManager', 'Resumed enabled monitor tasks', { count: enabledTasks.length })
+  } catch (err) {
+    logger.warn('TaskManager', 'Could not resume enabled monitor tasks', { error: err.message })
+  }
+
   // Initialize Pokemon Finder (disabled for now)
   pokemonFinder = createPokemonFinder(getDb)
   pokemonFinder.on('newItems', (items) => {
     // Send notification for new Pokemon items
-    items.forEach(item => {
+    items.forEach((item) => {
       notificationEngine.fire({
         retailer: item.retailer,
         productName: `🆕 NEW: ${item.productName}`,
@@ -155,7 +212,8 @@ async function createMainWindow(encryptionKey) {
     mainWindow,
     browserPool,
     notificationEngine,
-    queueJoiner
+    queueJoiner,
+    pokemonCenterQueueJoiner
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -196,7 +254,25 @@ app.on('window-all-closed', () => {
   // Keep central subscriptions on quit — closing the app is not "stop watching";
   // the Pi should keep monitoring this user's products until they explicitly
   // stop or delete the task.
-  taskManager?.stopAll({ unsubscribe: false })
-  queueJoiner?.stopAll()
-  if (process.platform !== 'darwin') app.quit()
+  if (process.platform !== 'darwin') shutdownAndExit()
 })
+
+app.on('before-quit', (event) => {
+  if (shutdownPromise) return
+  event.preventDefault()
+  shutdownAndExit()
+})
+
+function shutdownAndExit() {
+  if (shutdownPromise) return shutdownPromise
+  shutdownPromise = (async () => {
+    await Promise.allSettled([
+      taskManager?.shutdown?.(),
+      queueJoiner?.stopAll?.(),
+      pokemonCenterQueueJoiner?.stopAll?.()
+    ])
+    await browserPool?.closeAll?.()
+    app.exit(0)
+  })()
+  return shutdownPromise
+}

@@ -31,6 +31,7 @@ export class AccountManager {
     password,
     cvv = '',
     proxy = '',
+    paymentMethodId = null,
     shipping = {},
     status = 'active'
   }) {
@@ -40,8 +41,8 @@ export class AccountManager {
     this._getDb()
       .prepare(
         `
-    INSERT INTO accounts (id, name, retailer, username, password_enc, cvv_enc, proxy, profile_path, shipping_json, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO accounts (id, name, retailer, username, password_enc, cvv_enc, proxy, profile_path, shipping_json, payment_method_id, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `
       )
       .run(
@@ -54,6 +55,7 @@ export class AccountManager {
         proxy,
         profilePath,
         JSON.stringify(shipping),
+        paymentMethodId || null,
         status
       )
     return id
@@ -62,7 +64,7 @@ export class AccountManager {
   getAll() {
     return this._getDb()
       .prepare(
-        'SELECT id, name, retailer, username, proxy, profile_path, shipping_json, status FROM accounts'
+        'SELECT id, name, retailer, username, proxy, profile_path, shipping_json, payment_method_id, status FROM accounts'
       )
       .all()
   }
@@ -82,7 +84,8 @@ export class AccountManager {
     const allowed = {
       name: 'name',
       proxy: 'proxy',
-      shipping_json: 'shipping_json'
+      shipping_json: 'shipping_json',
+      paymentMethodId: 'payment_method_id'
     }
     for (const [k, v] of Object.entries(fields)) {
       const column = allowed[k]

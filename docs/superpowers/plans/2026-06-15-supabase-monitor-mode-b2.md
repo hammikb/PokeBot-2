@@ -35,6 +35,7 @@ Run all tests with: `npm test`. Run one file with: `npx vitest run tests/main/<p
 ## Task 1: `extractProductKey` pure helper
 
 **Files:**
+
 - Create: `src/main/products/productKey.js`
 - Test: `tests/main/products/productKey.test.js`
 
@@ -46,13 +47,17 @@ import { extractProductKey } from '../../../src/main/products/productKey.js'
 
 describe('extractProductKey', () => {
   it('pulls the TCIN from a Target URL', () => {
-    expect(extractProductKey('target', 'https://www.target.com/p/guppy/A-94336414')).toBe('94336414')
+    expect(extractProductKey('target', 'https://www.target.com/p/guppy/A-94336414')).toBe(
+      '94336414'
+    )
   })
   it('pulls the TCIN when there is no slug', () => {
     expect(extractProductKey('target', 'https://www.target.com/p/A-94336414')).toBe('94336414')
   })
   it('pulls the trailing itemId from a Walmart URL and strips query', () => {
-    expect(extractProductKey('walmart', 'https://www.walmart.com/ip/seed/15718673510?x=1')).toBe('15718673510')
+    expect(extractProductKey('walmart', 'https://www.walmart.com/ip/seed/15718673510?x=1')).toBe(
+      '15718673510'
+    )
   })
   it('returns null for unsupported retailer or unparseable URL', () => {
     expect(extractProductKey('bestbuy', 'https://x')).toBeNull()
@@ -78,7 +83,12 @@ export function extractProductKey(retailer, productUrl) {
     try {
       return new URL(productUrl).pathname.split('/').filter(Boolean).pop() || null
     } catch {
-      return String(productUrl || '').split('/').pop()?.split('?')[0] || null
+      return (
+        String(productUrl || '')
+          .split('/')
+          .pop()
+          ?.split('?')[0] || null
+      )
     }
   }
   return null
@@ -104,6 +114,7 @@ git commit -m "feat: add extractProductKey helper for Supabase product matching"
 Emits `drop` (checkout signal) and `notice` (feed message). Dependency-injected supabase `client` so it is fully testable with a fake.
 
 **Files:**
+
 - Create: `src/main/monitor/SupabaseMonitorSource.js`
 - Test: `tests/main/monitor/SupabaseMonitorSource.test.js`
 
@@ -184,7 +195,13 @@ describe('SupabaseMonitorSource', () => {
       productKey: '94336414',
       maxPrice: null
     })
-    fireDrop({ product_id: 'prod-1', retailer: 'target', name: 'Pokemon ETB', price: 49.99, drop_type: 'in_stock' })
+    fireDrop({
+      product_id: 'prod-1',
+      retailer: 'target',
+      name: 'Pokemon ETB',
+      price: 49.99,
+      drop_type: 'in_stock'
+    })
 
     expect(drops).toEqual([
       {
@@ -209,7 +226,13 @@ describe('SupabaseMonitorSource', () => {
       productKey: '94336414',
       maxPrice: 40
     })
-    fireDrop({ product_id: 'prod-1', retailer: 'target', name: 'Pokemon ETB', price: 49.99, drop_type: 'in_stock' })
+    fireDrop({
+      product_id: 'prod-1',
+      retailer: 'target',
+      name: 'Pokemon ETB',
+      price: 49.99,
+      drop_type: 'in_stock'
+    })
 
     expect(drops).toEqual([])
   })
@@ -353,6 +376,7 @@ git commit -m "feat: add SupabaseMonitorSource (realtime drop fan-out consumer)"
 ## Task 3: `@supabase/supabase-js` dependency + `SupabaseClient` wrapper
 
 **Files:**
+
 - Modify: `package.json` (dependencies)
 - Create: `src/main/supabase/SupabaseClient.js`
 - Test: `tests/main/supabase/SupabaseClient.test.js`
@@ -462,6 +486,7 @@ git commit -m "feat: add SupabaseClient wrapper and @supabase/supabase-js depend
 ## Task 4: Catalog → Supabase publish logic
 
 **Files:**
+
 - Create: `src/main/supabase/catalogPublish.js`
 - Test: `tests/main/supabase/catalogPublish.test.js`
 
@@ -580,6 +605,7 @@ git commit -m "feat: add catalog-to-Supabase products publish logic"
 Wire `monitorMode` into `startTask`/`stopTask`, add `setMonitorMode` (restart-live), and a lazy supabase source built from settings. The supabase source factory is injectable for testing.
 
 **Files:**
+
 - Modify: `src/main/tasks/TaskManager.js`
 - Test: `tests/main/tasks/TaskManager.supabase.test.js`
 
@@ -591,7 +617,9 @@ import { EventEmitter } from 'events'
 
 vi.mock('../../../src/main/automation/flows/walmart.js', () => ({ runWalmartFlow: vi.fn() }))
 vi.mock('../../../src/main/automation/flows/target.js', () => ({ runTargetFlow: vi.fn() }))
-vi.mock('../../../src/main/automation/flows/pokemon-center.js', () => ({ runPokemonCenterFlow: vi.fn() }))
+vi.mock('../../../src/main/automation/flows/pokemon-center.js', () => ({
+  runPokemonCenterFlow: vi.fn()
+}))
 vi.mock('../../../src/main/automation/flows/costco.js', () => ({ runCostcoFlow: vi.fn() }))
 
 import { TaskManager } from '../../../src/main/tasks/TaskManager.js'
@@ -814,7 +842,7 @@ Replace the body of `startTask(taskRow)` with:
   }
 ```
 
-Note: `_tasks` is only set in the local branch *after* `PollerClass` is confirmed (and in the supabase branch inside `startTask`), so the no-poller early return leaves no stale entry — no delete needed.
+Note: `_tasks` is only set in the local branch _after_ `PollerClass` is confirmed (and in the supabase branch inside `startTask`), so the no-poller early return leaves no stale entry — no delete needed.
 
 - [ ] **Step 6: Edit `TaskManager.js` — `stopTask` dual path + `setMonitorMode`**
 
@@ -875,6 +903,7 @@ git commit -m "feat: TaskManager local/supabase monitor mode switch"
 ## Task 6: IPC channels + main wiring
 
 **Files:**
+
 - Modify: `src/shared/constants.js`
 - Modify: `src/main/ipc.js`
 - Modify: `src/main/index.js`
@@ -1009,35 +1038,35 @@ Add `encryptionKey` to the destructured `registerIpcHandlers({ ... })` parameter
 After the existing Settings handlers (`IPC.SETTINGS_SET`), add:
 
 ```javascript
-  // Monitor mode (local vs supabase)
-  ipcMain.handle(IPC.MONITOR_SET_MODE, async (_, mode) => {
-    const next = mode === 'supabase' ? 'supabase' : 'local'
-    getDb()
-      .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
-      .run('monitorMode', JSON.stringify(next))
-    await taskManager.setMonitorMode(next)
-    return next
-  })
+// Monitor mode (local vs supabase)
+ipcMain.handle(IPC.MONITOR_SET_MODE, async (_, mode) => {
+  const next = mode === 'supabase' ? 'supabase' : 'local'
+  getDb()
+    .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+    .run('monitorMode', JSON.stringify(next))
+  await taskManager.setMonitorMode(next)
+  return next
+})
 
-  // Store the bot's Supabase password encrypted at rest (never plaintext).
-  ipcMain.handle(IPC.SUPABASE_SET_PASSWORD, (_, password) => {
-    const enc = encrypt(String(password ?? ''), encryptionKey)
-    getDb()
-      .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
-      .run('supabasePasswordEnc', JSON.stringify(enc))
-    return true
-  })
+// Store the bot's Supabase password encrypted at rest (never plaintext).
+ipcMain.handle(IPC.SUPABASE_SET_PASSWORD, (_, password) => {
+  const enc = encrypt(String(password ?? ''), encryptionKey)
+  getDb()
+    .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+    .run('supabasePasswordEnc', JSON.stringify(enc))
+  return true
+})
 
-  // Publish a local catalog item to the Supabase products table.
-  ipcMain.handle(IPC.CATALOG_PUSH_SUPABASE, async (_, id) => {
-    const item = getDb().prepare('SELECT * FROM product_catalog WHERE id = ?').get(id)
-    if (!item) throw new Error('Catalog item not found')
-    const s = getSettings()
-    const password = s.supabasePasswordEnc ? decrypt(s.supabasePasswordEnc, encryptionKey) : ''
-    const sc = new SupabaseClient({ url: s.supabaseUrl, key: s.supabaseKey })
-    await sc.signIn(s.supabaseEmail, password)
-    return pushCatalogItemToSupabase({ client: sc.client, item })
-  })
+// Publish a local catalog item to the Supabase products table.
+ipcMain.handle(IPC.CATALOG_PUSH_SUPABASE, async (_, id) => {
+  const item = getDb().prepare('SELECT * FROM product_catalog WHERE id = ?').get(id)
+  if (!item) throw new Error('Catalog item not found')
+  const s = getSettings()
+  const password = s.supabasePasswordEnc ? decrypt(s.supabasePasswordEnc, encryptionKey) : ''
+  const sc = new SupabaseClient({ url: s.supabaseUrl, key: s.supabaseKey })
+  await sc.signIn(s.supabaseEmail, password)
+  return pushCatalogItemToSupabase({ client: sc.client, item })
+})
 ```
 
 - [ ] **Step 5: Wire `encryptionKey` + `getSettings` through `src/main/index.js`**
@@ -1045,14 +1074,14 @@ After the existing Settings handlers (`IPC.SETTINGS_SET`), add:
 In `createMainWindow`, update the TaskManager construction:
 
 ```javascript
-  taskManager = new TaskManager({
-    accountManager,
-    notificationEngine,
-    browserPool,
-    getDb,
-    getSettings,
-    encryptionKey
-  })
+taskManager = new TaskManager({
+  accountManager,
+  notificationEngine,
+  browserPool,
+  getDb,
+  getSettings,
+  encryptionKey
+})
 ```
 
 And in the `registerIpcHandlers({ ... })` call, add `encryptionKey,` to the argument object (alongside the existing `getSettings,`).
@@ -1076,6 +1105,7 @@ git commit -m "feat: wire monitor-mode, supabase password, and catalog-publish I
 No React test runner is configured, so store actions are covered by the existing IPC tests and manual verification. Add the actions with exact code.
 
 **Files:**
+
 - Modify: `src/renderer/src/store/appStore.js`
 
 - [ ] **Step 1: Add store actions**
@@ -1110,6 +1140,7 @@ git commit -m "feat: store actions for monitor mode and catalog publish"
 ## Task 8: Renderer — Settings toggle + Supabase fields
 
 **Files:**
+
 - Modify: `src/renderer/src/pages/Settings.jsx`
 
 - [ ] **Step 1: Replace `src/renderer/src/pages/Settings.jsx` with the version below**
@@ -1224,7 +1255,9 @@ export default function Settings() {
             }}
             className="w-full bg-[#111] border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:border-red-500 outline-none transition-colors"
           />
-          <div className="text-gray-600 text-sm mt-1">Stored encrypted. Leave blank to keep current.</div>
+          <div className="text-gray-600 text-sm mt-1">
+            Stored encrypted. Leave blank to keep current.
+          </div>
         </div>
       )}
 
@@ -1270,6 +1303,7 @@ git commit -m "feat: Settings monitoring-source toggle and Supabase credential f
 ## Task 9: Renderer — Catalog "publish to PokeAlert" button
 
 **Files:**
+
 - Modify: `src/renderer/src/pages/Catalog.jsx`
 
 - [ ] **Step 1: Add the store action to the destructure**
@@ -1277,44 +1311,44 @@ git commit -m "feat: Settings monitoring-source toggle and Supabase credential f
 Change the `useAppStore()` destructure at the top of `Catalog()`:
 
 ```jsx
-  const {
-    catalogItems,
-    catalogMessage,
-    addCatalogUrl,
-    deleteCatalogItem,
-    createTask,
-    pushCatalogToSupabase
-  } = useAppStore()
+const {
+  catalogItems,
+  catalogMessage,
+  addCatalogUrl,
+  deleteCatalogItem,
+  createTask,
+  pushCatalogToSupabase
+} = useAppStore()
 ```
 
 - [ ] **Step 2: Add a publish handler (after `createTaskFromItem`)**
 
 ```jsx
-  const publishToSupabase = async (item) => {
-    setBusyId(item.id)
-    setStatus('Publishing to PokeAlert...')
-    try {
-      const result = await pushCatalogToSupabase(item.id)
-      setStatus(`Published to PokeAlert (product ${result.productId}). The monitor will watch it.`)
-    } catch (err) {
-      setStatus(err.message || 'Could not publish to PokeAlert')
-    } finally {
-      setBusyId('')
-    }
+const publishToSupabase = async (item) => {
+  setBusyId(item.id)
+  setStatus('Publishing to PokeAlert...')
+  try {
+    const result = await pushCatalogToSupabase(item.id)
+    setStatus(`Published to PokeAlert (product ${result.productId}). The monitor will watch it.`)
+  } catch (err) {
+    setStatus(err.message || 'Could not publish to PokeAlert')
+  } finally {
+    setBusyId('')
   }
+}
 ```
 
 - [ ] **Step 3: Add the button in the per-item action column (after the "create task" button)**
 
 ```jsx
-              <button
-                type="button"
-                onClick={() => publishToSupabase(item)}
-                disabled={busyId === item.id}
-                className="text-purple-400 hover:text-purple-200 disabled:text-gray-700 uppercase tracking-wider"
-              >
-                publish to pokealert
-              </button>
+<button
+  type="button"
+  onClick={() => publishToSupabase(item)}
+  disabled={busyId === item.id}
+  className="text-purple-400 hover:text-purple-200 disabled:text-gray-700 uppercase tracking-wider"
+>
+  publish to pokealert
+</button>
 ```
 
 - [ ] **Step 4: Verify build**
@@ -1347,6 +1381,7 @@ select coalesce(string_agg(tablename, ','), '(none)') as realtime_tables
 from pg_publication_tables
 where pubname = 'supabase_realtime' and schemaname = 'public';
 ```
+
 Expected: `realtime_tables` = `(none)`.
 
 - [ ] **Step 2: No commit (no repo change). Note completion in the execution log.**

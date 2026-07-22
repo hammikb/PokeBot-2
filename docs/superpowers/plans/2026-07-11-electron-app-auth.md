@@ -25,10 +25,12 @@
 ### Task 1: Extend SupabaseClient with signUp / restoreSession / signOut
 
 **Files:**
+
 - Modify: `src/main/supabase/SupabaseClient.js`
 - Test: `tests/main/supabase/SupabaseClient.test.js`
 
 **Interfaces:**
+
 - Consumes: `@supabase/supabase-js` `createClient()` (already wired).
 - Produces: `SupabaseClient.signUp(email, password) → Promise<Session>`, `SupabaseClient.restoreSession(refreshToken) → Promise<Session>`, `SupabaseClient.signOut() → Promise<void>`. All three throw `Error` with a `Supabase <verb> failed: <message>` string on failure, matching the existing `signIn` convention.
 
@@ -37,71 +39,71 @@
 Add to `tests/main/supabase/SupabaseClient.test.js` (append inside the existing `describe('SupabaseClient', ...)` block, after the two existing `it`s):
 
 ```js
-  it('signs up and sets the realtime auth token when a session is returned', async () => {
-    const signUp = vi.fn(async () => ({
-      data: { session: { access_token: 'jwt-signup', refresh_token: 'rt-signup' } },
-      error: null
-    }))
-    createClient.mockReturnValueOnce({ auth: { signInWithPassword, signUp }, realtime: { setAuth } })
-    const sc = new SupabaseClient({ url: 'https://x.supabase.co', key: 'k' })
+it('signs up and sets the realtime auth token when a session is returned', async () => {
+  const signUp = vi.fn(async () => ({
+    data: { session: { access_token: 'jwt-signup', refresh_token: 'rt-signup' } },
+    error: null
+  }))
+  createClient.mockReturnValueOnce({ auth: { signInWithPassword, signUp }, realtime: { setAuth } })
+  const sc = new SupabaseClient({ url: 'https://x.supabase.co', key: 'k' })
 
-    const session = await sc.signUp('new@example.com', 'pw123')
+  const session = await sc.signUp('new@example.com', 'pw123')
 
-    expect(signUp).toHaveBeenCalledWith({ email: 'new@example.com', password: 'pw123' })
-    expect(setAuth).toHaveBeenCalledWith('jwt-signup')
-    expect(session).toEqual({ access_token: 'jwt-signup', refresh_token: 'rt-signup' })
+  expect(signUp).toHaveBeenCalledWith({ email: 'new@example.com', password: 'pw123' })
+  expect(setAuth).toHaveBeenCalledWith('jwt-signup')
+  expect(session).toEqual({ access_token: 'jwt-signup', refresh_token: 'rt-signup' })
+})
+
+it('signUp throws when Supabase returns no session (e.g. email confirmation still required)', async () => {
+  const signUp = vi.fn(async () => ({ data: { session: null }, error: null }))
+  createClient.mockReturnValueOnce({ auth: { signInWithPassword, signUp }, realtime: { setAuth } })
+  const sc = new SupabaseClient({ url: 'https://x.supabase.co', key: 'k' })
+
+  await expect(sc.signUp('new@example.com', 'pw123')).rejects.toThrow(
+    'Supabase sign-up succeeded but returned no session'
+  )
+})
+
+it('restores a session from a stored refresh token', async () => {
+  const refreshSession = vi.fn(async () => ({
+    data: { session: { access_token: 'jwt-restored', refresh_token: 'rt-restored' } },
+    error: null
+  }))
+  createClient.mockReturnValueOnce({
+    auth: { signInWithPassword, refreshSession },
+    realtime: { setAuth }
   })
+  const sc = new SupabaseClient({ url: 'https://x.supabase.co', key: 'k' })
 
-  it('signUp throws when Supabase returns no session (e.g. email confirmation still required)', async () => {
-    const signUp = vi.fn(async () => ({ data: { session: null }, error: null }))
-    createClient.mockReturnValueOnce({ auth: { signInWithPassword, signUp }, realtime: { setAuth } })
-    const sc = new SupabaseClient({ url: 'https://x.supabase.co', key: 'k' })
+  const session = await sc.restoreSession('rt-old')
 
-    await expect(sc.signUp('new@example.com', 'pw123')).rejects.toThrow(
-      'Supabase sign-up succeeded but returned no session'
-    )
+  expect(refreshSession).toHaveBeenCalledWith({ refresh_token: 'rt-old' })
+  expect(setAuth).toHaveBeenCalledWith('jwt-restored')
+  expect(session).toEqual({ access_token: 'jwt-restored', refresh_token: 'rt-restored' })
+})
+
+it('restoreSession throws a clear error when the token is rejected', async () => {
+  const refreshSession = vi.fn(async () => ({ data: {}, error: { message: 'invalid token' } }))
+  createClient.mockReturnValueOnce({
+    auth: { signInWithPassword, refreshSession },
+    realtime: { setAuth }
   })
+  const sc = new SupabaseClient({ url: 'https://x.supabase.co', key: 'k' })
 
-  it('restores a session from a stored refresh token', async () => {
-    const refreshSession = vi.fn(async () => ({
-      data: { session: { access_token: 'jwt-restored', refresh_token: 'rt-restored' } },
-      error: null
-    }))
-    createClient.mockReturnValueOnce({
-      auth: { signInWithPassword, refreshSession },
-      realtime: { setAuth }
-    })
-    const sc = new SupabaseClient({ url: 'https://x.supabase.co', key: 'k' })
+  await expect(sc.restoreSession('rt-old')).rejects.toThrow(
+    'Supabase session restore failed: invalid token'
+  )
+})
 
-    const session = await sc.restoreSession('rt-old')
+it('signs out', async () => {
+  const signOut = vi.fn(async () => ({ error: null }))
+  createClient.mockReturnValueOnce({ auth: { signInWithPassword, signOut }, realtime: { setAuth } })
+  const sc = new SupabaseClient({ url: 'https://x.supabase.co', key: 'k' })
 
-    expect(refreshSession).toHaveBeenCalledWith({ refresh_token: 'rt-old' })
-    expect(setAuth).toHaveBeenCalledWith('jwt-restored')
-    expect(session).toEqual({ access_token: 'jwt-restored', refresh_token: 'rt-restored' })
-  })
+  await sc.signOut()
 
-  it('restoreSession throws a clear error when the token is rejected', async () => {
-    const refreshSession = vi.fn(async () => ({ data: {}, error: { message: 'invalid token' } }))
-    createClient.mockReturnValueOnce({
-      auth: { signInWithPassword, refreshSession },
-      realtime: { setAuth }
-    })
-    const sc = new SupabaseClient({ url: 'https://x.supabase.co', key: 'k' })
-
-    await expect(sc.restoreSession('rt-old')).rejects.toThrow(
-      'Supabase session restore failed: invalid token'
-    )
-  })
-
-  it('signs out', async () => {
-    const signOut = vi.fn(async () => ({ error: null }))
-    createClient.mockReturnValueOnce({ auth: { signInWithPassword, signOut }, realtime: { setAuth } })
-    const sc = new SupabaseClient({ url: 'https://x.supabase.co', key: 'k' })
-
-    await sc.signOut()
-
-    expect(signOut).toHaveBeenCalled()
-  })
+  expect(signOut).toHaveBeenCalled()
+})
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -180,12 +182,14 @@ git commit -m "feat: add signUp/restoreSession/signOut to SupabaseClient"
 ### Task 2: AuthSessionManager — per-user session lifecycle
 
 **Files:**
+
 - Create: `src/main/supabase/AuthSessionManager.js`
 - Test: `tests/main/supabase/AuthSessionManager.test.js`
 - Create: `src/main/supabase/publicClient.js` (replaces `session.js` — keeps only the anon-key public client)
 - Delete: `src/main/supabase/session.js`
 
 **Interfaces:**
+
 - Consumes: `SupabaseClient` (Task 1's `signIn`/`signUp`/`signOut`/`restoreSession`, plus its existing `client` getter), `encrypt`/`decrypt` from `src/main/crypto.js`, a `getDb()` function returning a `better-sqlite3`-style db with `.prepare(sql).run(...)` / `.get(...)`.
 - Produces: `class AuthSessionManager extends EventEmitter`, constructed as `new AuthSessionManager({ getDb, encryptionKey, client? })` (`client` optional, defaults to a real `SupabaseClient`). Methods: `signIn(email, password)`, `signUp(email, password)`, `signOut()`, `restoreSession() → Promise<boolean>`, `getClient() → rawSupabaseJsClient`, `getStatus() → { authenticated: boolean, user: object|null }`. Emits `'change'` with `{ authenticated, user }` on every state transition.
 - Also produces: `getPublicClient()` from the new `publicClient.js` (identical behavior to the old `session.js` export — anon-key client for `target_catalog` reads, no sign-in).
@@ -204,7 +208,10 @@ function makeFakeClient() {
     signIn: vi.fn(async () => ({ refresh_token: 'rt-1', user: { id: 'u1', email: 'a@b.com' } })),
     signUp: vi.fn(async () => ({ refresh_token: 'rt-2', user: { id: 'u2', email: 'c@d.com' } })),
     signOut: vi.fn(async () => {}),
-    restoreSession: vi.fn(async () => ({ refresh_token: 'rt-3', user: { id: 'u1', email: 'a@b.com' } })),
+    restoreSession: vi.fn(async () => ({
+      refresh_token: 'rt-3',
+      user: { id: 'u1', email: 'a@b.com' }
+    })),
     client: { fakeRawClient: true }
   }
 }
@@ -244,7 +251,10 @@ describe('AuthSessionManager', () => {
     const stored = JSON.parse(db._store.authRefreshTokenEnc)
     expect(decrypt(stored, KEY)).toBe('rt-1')
     expect(changes).toEqual([{ authenticated: true, user: { id: 'u1', email: 'a@b.com' } }])
-    expect(manager.getStatus()).toEqual({ authenticated: true, user: { id: 'u1', email: 'a@b.com' } })
+    expect(manager.getStatus()).toEqual({
+      authenticated: true,
+      user: { id: 'u1', email: 'a@b.com' }
+    })
   })
 
   it('restoreSession with a stored token restores it and re-saves the new one', async () => {
@@ -255,7 +265,10 @@ describe('AuthSessionManager', () => {
 
     expect(ok).toBe(true)
     expect(client.restoreSession).toHaveBeenCalledWith('rt-1')
-    expect(manager.getStatus()).toEqual({ authenticated: true, user: { id: 'u1', email: 'a@b.com' } })
+    expect(manager.getStatus()).toEqual({
+      authenticated: true,
+      user: { id: 'u1', email: 'a@b.com' }
+    })
   })
 
   it('restoreSession with no stored token reports unauthenticated without calling the client', async () => {
@@ -311,7 +324,11 @@ const REFRESH_TOKEN_KEY = 'authRefreshTokenEnc'
 // so a signed-in user stays signed in across app restarts. Replaces the old shared
 // "bot account" mechanism (session.js's getSupabaseSession) with real per-user identity.
 export class AuthSessionManager extends EventEmitter {
-  constructor({ getDb, encryptionKey, client = new SupabaseClient({ url: SUPABASE_URL, key: SUPABASE_KEY }) }) {
+  constructor({
+    getDb,
+    encryptionKey,
+    client = new SupabaseClient({ url: SUPABASE_URL, key: SUPABASE_KEY })
+  }) {
     super()
     this._getDb = getDb
     this._key = encryptionKey
@@ -346,7 +363,9 @@ export class AuthSessionManager extends EventEmitter {
   }
 
   _readRefreshToken() {
-    const row = this._getDb().prepare('SELECT value FROM settings WHERE key = ?').get(REFRESH_TOKEN_KEY)
+    const row = this._getDb()
+      .prepare('SELECT value FROM settings WHERE key = ?')
+      .get(REFRESH_TOKEN_KEY)
     if (!row) return null
     try {
       return decrypt(JSON.parse(row.value), this._key)
@@ -423,7 +442,7 @@ Delete `src/main/supabase/session.js` (its `getPublicClient` moved above; its `g
 - [ ] **Step 6: Run the full test suite to confirm nothing else references the deleted file yet**
 
 Run: `npm test`
-Expected: FAIL only in `src/main/ipc.js`'s importer (still importing from the deleted `session.js`) — this is expected and fixed in Task 3. Confirm no *other* file fails.
+Expected: FAIL only in `src/main/ipc.js`'s importer (still importing from the deleted `session.js`) — this is expected and fixed in Task 3. Confirm no _other_ file fails.
 
 - [ ] **Step 7: Commit**
 
@@ -435,14 +454,16 @@ git commit -m "feat: add AuthSessionManager, split public client out of session.
 
 ---
 
-### Task 3: IPC layer — AUTH_* channels, remove old bot-credential channels
+### Task 3: IPC layer — AUTH\_\* channels, remove old bot-credential channels
 
 **Files:**
+
 - Modify: `src/shared/constants.js`
 - Modify: `src/main/ipc.js`
 - Test: `tests/main/ipc.supabase.test.js`
 
 **Interfaces:**
+
 - Consumes: `AuthSessionManager` (Task 2) instance passed into `registerIpcHandlers({ ..., authSessionManager })`.
 - Produces: IPC channels `IPC.AUTH_GET_STATUS`, `IPC.AUTH_SIGN_IN`, `IPC.AUTH_SIGN_UP`, `IPC.AUTH_SIGN_OUT` (renderer → main, via `ipcRenderer.invoke`), `IPC.AUTH_STATE_CHANGED` (main → renderer push, wired in Task 5). Removes `IPC.SUPABASE_SET_PASSWORD`, `IPC.SUPABASE_CLEAR_CREDENTIALS`.
 
@@ -601,7 +622,7 @@ describe('supabase catalog / monitor-mode IPC handlers', () => {
 })
 
 describe('auth IPC handlers', () => {
-  it('AUTH_GET_STATUS returns the manager\'s current status', async () => {
+  it("AUTH_GET_STATUS returns the manager's current status", async () => {
     const { handlers, authSessionManager } = setup()
     authSessionManager.getStatus.mockReturnValue({
       authenticated: true,
@@ -678,50 +699,50 @@ export function registerIpcHandlers({
 3. In the `SETTINGS_SET` handler, remove the now-dead bot-login reset line:
 
 ```js
-  ipcMain.handle(IPC.SETTINGS_SET, (_, key, value) => {
-    if (typeof key !== 'string' || !key) throw new Error('settings key must be a non-empty string')
-    getDb()
-      .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
-      .run(key, JSON.stringify(value))
-    return true
-  })
+ipcMain.handle(IPC.SETTINGS_SET, (_, key, value) => {
+  if (typeof key !== 'string' || !key) throw new Error('settings key must be a non-empty string')
+  getDb()
+    .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+    .run(key, JSON.stringify(value))
+  return true
+})
 ```
 
 4. Replace the `SUPABASE_SET_PASSWORD` handler block with the new auth handlers:
 
 ```js
-  // Per-user Supabase Auth — replaces the old shared "bot account" (email/password
-  // settings) with a real signed-in user. authSessionManager owns the one session for
-  // the app's lifetime and persists it (encrypted) across restarts.
-  ipcMain.handle(IPC.AUTH_GET_STATUS, () => authSessionManager.getStatus())
+// Per-user Supabase Auth — replaces the old shared "bot account" (email/password
+// settings) with a real signed-in user. authSessionManager owns the one session for
+// the app's lifetime and persists it (encrypted) across restarts.
+ipcMain.handle(IPC.AUTH_GET_STATUS, () => authSessionManager.getStatus())
 
-  ipcMain.handle(IPC.AUTH_SIGN_IN, async (_, { email, password }) => {
-    await authSessionManager.signIn(email, password)
-    return authSessionManager.getStatus()
-  })
+ipcMain.handle(IPC.AUTH_SIGN_IN, async (_, { email, password }) => {
+  await authSessionManager.signIn(email, password)
+  return authSessionManager.getStatus()
+})
 
-  ipcMain.handle(IPC.AUTH_SIGN_UP, async (_, { email, password }) => {
-    await authSessionManager.signUp(email, password)
-    return authSessionManager.getStatus()
-  })
+ipcMain.handle(IPC.AUTH_SIGN_UP, async (_, { email, password }) => {
+  await authSessionManager.signUp(email, password)
+  return authSessionManager.getStatus()
+})
 
-  ipcMain.handle(IPC.AUTH_SIGN_OUT, async () => {
-    await authSessionManager.signOut()
-    return authSessionManager.getStatus()
-  })
+ipcMain.handle(IPC.AUTH_SIGN_OUT, async () => {
+  await authSessionManager.signOut()
+  return authSessionManager.getStatus()
+})
 ```
 
 5. Delete the `SUPABASE_CLEAR_CREDENTIALS` handler block entirely:
 
 ```js
-  // DELETE this whole block:
-  ipcMain.handle(IPC.SUPABASE_CLEAR_CREDENTIALS, () => {
-    getDb()
-      .prepare('DELETE FROM settings WHERE key IN (?, ?)')
-      .run('supabaseEmail', 'supabasePasswordEnc')
-    resetSupabaseSession()
-    return true
-  })
+// DELETE this whole block:
+ipcMain.handle(IPC.SUPABASE_CLEAR_CREDENTIALS, () => {
+  getDb()
+    .prepare('DELETE FROM settings WHERE key IN (?, ?)')
+    .run('supabaseEmail', 'supabasePasswordEnc')
+  resetSupabaseSession()
+  return true
+})
 ```
 
 - [ ] **Step 5: Run tests to verify they pass**
@@ -741,9 +762,11 @@ git commit -m "feat: replace bot-credential IPC channels with per-user AUTH_* ch
 ### Task 4: TaskManager — use AuthSessionManager instead of the bot session
 
 **Files:**
+
 - Modify: `src/main/tasks/TaskManager.js:19` (import), `:40-58` (constructor), `:82-89` (`_buildSupabaseSource`)
 
 **Interfaces:**
+
 - Consumes: `AuthSessionManager.getClient()` (Task 2).
 - Produces: `TaskManager` constructor now takes `authSessionManager` instead of `encryptionKey`; `SupabaseMonitorSource` construction unchanged (`new SupabaseMonitorSource({ client })`).
 
@@ -847,9 +870,11 @@ git commit -m "feat: TaskManager uses AuthSessionManager instead of the bot Supa
 ### Task 5: Wire AuthSessionManager into index.js startup
 
 **Files:**
+
 - Modify: `src/main/index.js`
 
 **Interfaces:**
+
 - Consumes: `AuthSessionManager` (Task 2), `TaskManager` (Task 4's new `authSessionManager` param), `registerIpcHandlers` (Task 3's new `authSessionManager` param).
 - Produces: main process now restores any prior session before the window loads, and relays `AuthSessionManager`'s `'change'` events to the renderer over `IPC.AUTH_STATE_CHANGED`.
 
@@ -872,49 +897,49 @@ import { AuthSessionManager } from './supabase/AuthSessionManager.js'
 Replace:
 
 ```js
-  // Connect to Supabase (PokeAlert) at startup regardless of monitor mode —
-  // the shared session is reused by catalog browsing and task monitoring.
-  // No-op (returns null) until bot email/password are set in Settings.
-  getSupabaseSession({ getSettings, encryptionKey }).catch((err) => {
-    logger.warn('Supabase session not established at startup', { error: err.message })
-  })
+// Connect to Supabase (PokeAlert) at startup regardless of monitor mode —
+// the shared session is reused by catalog browsing and task monitoring.
+// No-op (returns null) until bot email/password are set in Settings.
+getSupabaseSession({ getSettings, encryptionKey }).catch((err) => {
+  logger.warn('Supabase session not established at startup', { error: err.message })
+})
 
-  taskManager = new TaskManager({
-    accountManager,
-    notificationEngine,
-    browserPool,
-    getDb,
-    getSettings,
-    encryptionKey,
-    queueJoiner
-  })
+taskManager = new TaskManager({
+  accountManager,
+  notificationEngine,
+  browserPool,
+  getDb,
+  getSettings,
+  encryptionKey,
+  queueJoiner
+})
 ```
 
 with:
 
 ```js
-  // Per-user Supabase Auth session, reused by catalog browsing and task monitoring.
-  // Silently restores a prior sign-in (encrypted refresh token in `settings`) before the
-  // window loads, so the renderer's first AUTH_GET_STATUS call already reflects the real
-  // state — no login-screen flash for an already-signed-in user. `mainWindow` is assigned
-  // further below; the 'change' listener only fires after that, via closure.
-  const authSessionManager = new AuthSessionManager({ getDb, encryptionKey })
-  await authSessionManager.restoreSession().catch((err) => {
-    logger.warn('Supabase session restore failed at startup', { error: err.message })
-  })
-  authSessionManager.on('change', (state) => {
-    mainWindow?.webContents?.send(IPC.AUTH_STATE_CHANGED, state)
-  })
+// Per-user Supabase Auth session, reused by catalog browsing and task monitoring.
+// Silently restores a prior sign-in (encrypted refresh token in `settings`) before the
+// window loads, so the renderer's first AUTH_GET_STATUS call already reflects the real
+// state — no login-screen flash for an already-signed-in user. `mainWindow` is assigned
+// further below; the 'change' listener only fires after that, via closure.
+const authSessionManager = new AuthSessionManager({ getDb, encryptionKey })
+await authSessionManager.restoreSession().catch((err) => {
+  logger.warn('Supabase session restore failed at startup', { error: err.message })
+})
+authSessionManager.on('change', (state) => {
+  mainWindow?.webContents?.send(IPC.AUTH_STATE_CHANGED, state)
+})
 
-  taskManager = new TaskManager({
-    accountManager,
-    notificationEngine,
-    browserPool,
-    getDb,
-    getSettings,
-    authSessionManager,
-    queueJoiner
-  })
+taskManager = new TaskManager({
+  accountManager,
+  notificationEngine,
+  browserPool,
+  getDb,
+  getSettings,
+  authSessionManager,
+  queueJoiner
+})
 ```
 
 - [ ] **Step 3: Pass authSessionManager into registerIpcHandlers**
@@ -922,45 +947,45 @@ with:
 Replace:
 
 ```js
-  registerIpcHandlers({
-    getDb,
-    accountManager,
-    paymentManager,
-    shippingManager,
-    thumbnailCache,
-    taskManager,
-    pokemonFinder,
-    profileWarmup,
-    configManager,
-    getSettings,
-    encryptionKey,
-    mainWindow,
-    browserPool,
-    notificationEngine,
-    queueJoiner
-  })
+registerIpcHandlers({
+  getDb,
+  accountManager,
+  paymentManager,
+  shippingManager,
+  thumbnailCache,
+  taskManager,
+  pokemonFinder,
+  profileWarmup,
+  configManager,
+  getSettings,
+  encryptionKey,
+  mainWindow,
+  browserPool,
+  notificationEngine,
+  queueJoiner
+})
 ```
 
 with:
 
 ```js
-  registerIpcHandlers({
-    getDb,
-    accountManager,
-    paymentManager,
-    shippingManager,
-    thumbnailCache,
-    taskManager,
-    pokemonFinder,
-    profileWarmup,
-    configManager,
-    getSettings,
-    authSessionManager,
-    mainWindow,
-    browserPool,
-    notificationEngine,
-    queueJoiner
-  })
+registerIpcHandlers({
+  getDb,
+  accountManager,
+  paymentManager,
+  shippingManager,
+  thumbnailCache,
+  taskManager,
+  pokemonFinder,
+  profileWarmup,
+  configManager,
+  getSettings,
+  authSessionManager,
+  mainWindow,
+  browserPool,
+  notificationEngine,
+  queueJoiner
+})
 ```
 
 - [ ] **Step 4: Manually verify the app still boots**
@@ -980,9 +1005,11 @@ git commit -m "feat: restore per-user Supabase session at startup, relay auth st
 ### Task 6: appStore.js — auth state and actions
 
 **Files:**
+
 - Modify: `src/renderer/src/store/appStore.js`
 
 **Interfaces:**
+
 - Consumes: `IPC.AUTH_GET_STATUS`, `IPC.AUTH_SIGN_IN`, `IPC.AUTH_SIGN_UP`, `IPC.AUTH_SIGN_OUT` (Task 3).
 - Produces: store fields `authStatus` (`'checking' | 'authenticated' | 'unauthenticated'`), `authUser`, `authError`; actions `checkAuthStatus()`, `signIn(email, password)`, `signUp(email, password)`, `signOut()`, `setAuthState({ authenticated, user })` — all consumed by `Login.jsx` (Task 7) and `App.jsx` (Task 8).
 
@@ -1073,9 +1100,11 @@ git commit -m "feat: add auth state and actions to appStore"
 ### Task 7: Login page
 
 **Files:**
+
 - Create: `src/renderer/src/pages/Login.jsx`
 
 **Interfaces:**
+
 - Consumes: `useAppStore()`'s `signIn`, `signUp`, `authError` (Task 6).
 - Produces: default-exported `Login` component, rendered by `App.jsx` (Task 8) in place of the nav/router while unauthenticated.
 
@@ -1197,9 +1226,11 @@ git commit -m "feat: add Login page (email/password sign in and sign up)"
 ### Task 8: App.jsx — gate the app behind auth
 
 **Files:**
+
 - Modify: `src/renderer/src/App.jsx`
 
 **Interfaces:**
+
 - Consumes: `authStatus`, `checkAuthStatus`, `setAuthState` (Task 6), `Login` (Task 7), `IPC.AUTH_STATE_CHANGED` (Task 3).
 - Produces: the app's top-level gating behavior — no other file depends on `App.jsx`'s internals.
 
@@ -1358,6 +1389,7 @@ export default function App() {
 Run: `npm run dev`
 
 Expected, in order:
+
 1. Briefly shows "Loading..." then the Login screen (since no session is stored yet).
 2. Sign Up with a brand-new email/password → lands directly in the Dashboard (nav bar visible, no error). If instead you see the error "Supabase sign-up succeeded but returned no session...", the "Confirm email" prerequisite (Global Constraints) is still ON in the Supabase dashboard — fix it there, not in code.
 3. Quit and restart the app (`npm run dev` again) → skips Login entirely, opens straight to the Dashboard (session was restored from the encrypted stored refresh token).
@@ -1375,9 +1407,11 @@ git commit -m "feat: gate the app behind auth status, show Login when unauthenti
 ### Task 9: Settings.jsx — remove bot-account UI, add Sign Out
 
 **Files:**
+
 - Modify: `src/renderer/src/pages/Settings.jsx`
 
 **Interfaces:**
+
 - Consumes: `signOut` (Task 6).
 
 - [ ] **Step 1: Replace the full contents of Settings.jsx**

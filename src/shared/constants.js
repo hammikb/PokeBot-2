@@ -24,8 +24,10 @@ export const IPC = {
   CATALOG_ADD_URL: 'catalog:add-url',
   CATALOG_DELETE: 'catalog:delete',
   CATALOG_FIND_WALMART_MATCH: 'catalog:find-walmart-match',
+  CATALOG_BULK_FIND_WALMART_MATCHES: 'catalog:bulk-find-walmart-matches',
   CATALOG_SAVE_WALMART_MATCH: 'catalog:save-walmart-match',
   CATALOG_LIST_WALMART_MATCHES: 'catalog:list-walmart-matches',
+  CATALOG_SKIP_WALMART_MATCH: 'catalog:skip-walmart-match',
   PROXIES_DOWNLOAD: 'proxies:download',
   PROXIES_TEST: 'proxies:test',
   ACCOUNTS_GET: 'accounts:get',
@@ -53,6 +55,7 @@ export const IPC = {
   ACCOUNTS_CHECK_SESSION: 'accounts:check-session',
   ACCOUNTS_AUTO_LOGIN: 'accounts:auto-login',
   ACCOUNTS_WARMUP: 'accounts:warmup',
+  ACCOUNTS_COOKIE_HEALTH: 'accounts:cookie-health',
   PROGRESS_STREAM_START: 'progress:stream:start',
   PROGRESS_STREAM_STEP: 'progress:stream:step',
   PROGRESS_STREAM_UPDATE: 'progress:stream:update',
@@ -74,7 +77,9 @@ export const IPC = {
 
 export const RETAILER_BUY_LIMITS = {
   [RETAILERS.TARGET]: 2,
-  [RETAILERS.WALMART]: 5
+  [RETAILERS.WALMART]: 5,
+  [RETAILERS.POKEMON_CENTER]: 1,
+  [RETAILERS.SAMS_CLUB]: 2
 }
 
 export const DROP_TYPES = {

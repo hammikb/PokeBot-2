@@ -1,6 +1,5 @@
 import { launch } from 'cloakbrowser'
 
-
 const BLOCK_PATTERNS = [
   /captcha/i,
   /robot or human/i,

@@ -15,8 +15,29 @@ export class PaymentManager {
    * Get all payment methods (decrypted)
    */
   getAll() {
-    const rows = this.getDb().prepare('SELECT * FROM payment_methods ORDER BY created_at DESC').all()
+    const rows = this.getDb()
+      .prepare('SELECT * FROM payment_methods ORDER BY created_at DESC')
+      .all()
     return rows.map((row) => this.decryptPaymentMethod(row))
+  }
+
+  /**
+   * Return display-safe payment metadata to the renderer. Full card numbers
+   * and CVVs stay in the main process and are only decrypted for checkout.
+   */
+  getAllSafe() {
+    return this.getAll().map((payment) => ({
+      id: payment.id,
+      name: payment.name,
+      cardLast4: payment.cardNumber.slice(-4),
+      expiryMonth: payment.expiryMonth,
+      expiryYear: payment.expiryYear,
+      billingAddress1: payment.billingAddress1,
+      billingCity: payment.billingCity,
+      billingState: payment.billingState,
+      billingZip: payment.billingZip,
+      createdAt: payment.createdAt
+    }))
   }
 
   /**
@@ -128,9 +149,7 @@ export class PaymentManager {
     }
 
     for (const [column, value] of Object.entries(updates)) {
-      this.getDb()
-        .prepare(`UPDATE payment_methods SET ${column} = ? WHERE id = ?`)
-        .run(value, id)
+      this.getDb().prepare(`UPDATE payment_methods SET ${column} = ? WHERE id = ?`).run(value, id)
     }
   }
 
@@ -138,6 +157,9 @@ export class PaymentManager {
    * Delete a payment method
    */
   delete(id) {
+    this.getDb()
+      .prepare('UPDATE accounts SET payment_method_id = ? WHERE payment_method_id = ?')
+      .run(null, id)
     this.getDb().prepare('DELETE FROM payment_methods WHERE id = ?').run(id)
   }
 

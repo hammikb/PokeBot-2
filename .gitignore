@@ -1,10 +1,25 @@
 node_modules
-dist
-out
+dist/
+dist-*/
+out/
+output/
+coverage/
+.codex-diagnostics/
+.playwright-cli/
+.playwright-mcp/
+.agents/
+.claude/
+.impeccable/
 .DS_Store
 .eslintcache
 *.log*
 .env
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+trace*.json
+share/
 
 # Python
 __pycache__/

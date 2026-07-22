@@ -3,6 +3,7 @@
 ## Why You're Getting "Robot or Human" Page
 
 Walmart uses sophisticated bot detection that checks for:
+
 1. **Automation signals** - Browser properties that indicate automation
 2. **Behavior patterns** - Too fast, too consistent, no mouse movement
 3. **Session history** - New profiles with no browsing history
@@ -11,6 +12,7 @@ Walmart uses sophisticated bot detection that checks for:
 ## Current Bot Detection Measures
 
 The bot already has some anti-detection features:
+
 ```javascript
 args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
 ignoreDefaultArgs: ['--enable-automation']
@@ -23,12 +25,14 @@ But Walmart needs MORE to avoid detection.
 ### 1. ✅ Use Your Real Browser Profile (BEST)
 
 **Why it works**: Your real profile has:
+
 - Browsing history
 - Cookies from previous Walmart visits
 - Normal user behavior patterns
 - Trusted session data
 
 **How to do it**:
+
 1. Find your Chrome profile path:
    - Windows: `C:\Users\YourName\AppData\Local\Google\Chrome\User Data\Default`
    - Mac: `~/Library/Application Support/Google/Chrome/Default`
@@ -38,6 +42,7 @@ But Walmart needs MORE to avoid detection.
 ### 2. ✅ Sign In Manually First (RECOMMENDED)
 
 **Before running automation**:
+
 1. Open the bot's browser profile manually
 2. Go to walmart.com
 3. Sign in normally
@@ -64,11 +69,13 @@ await button.click()
 ### 4. ✅ Use Residential Proxies
 
 **Why**: Walmart flags datacenter IPs
+
 - Datacenter proxy = instant bot detection
 - Residential proxy = looks like home internet
 - No proxy = uses your real IP (safest for personal use)
 
 **Recommended providers**:
+
 - Bright Data (expensive but best)
 - Smartproxy
 - Oxylabs
@@ -76,6 +83,7 @@ await button.click()
 ### 5. ⚠️ Solve CAPTCHA Manually (Current Method)
 
 The bot already detects CAPTCHAs and waits for you to solve them:
+
 - You have 5 minutes to solve
 - Bot sends notification when CAPTCHA appears
 - Continue automation after solving
@@ -146,6 +154,7 @@ args: [
 ## Why Walmart Detects Bots
 
 Walmart's bot detection checks:
+
 - `navigator.webdriver` (we disable this)
 - `window.chrome` object
 - Canvas fingerprinting
@@ -164,6 +173,7 @@ npm install playwright-extra puppeteer-extra-plugin-stealth
 ```
 
 This automatically:
+
 - Removes webdriver property
 - Fixes navigator properties
 - Randomizes canvas fingerprint
@@ -172,6 +182,7 @@ This automatically:
 ## Current Limitations
 
 The bot uses Playwright's standard mode. For production use against Walmart's advanced detection:
+
 1. Use real browser profiles
 2. Add human-like delays
 3. Use residential proxies
@@ -195,6 +206,7 @@ The bot uses Playwright's standard mode. For production use against Walmart's ad
 ## Need Help?
 
 If you're still getting blocked:
+
 1. Share your setup (profile type, proxy, etc.)
 2. Check if you're signed into Walmart in the profile
 3. Try running a manual browse session first

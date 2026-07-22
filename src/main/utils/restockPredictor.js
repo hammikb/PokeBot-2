@@ -50,10 +50,12 @@ export class RestockPredictor {
       const hour = now.getHours()
 
       this._getDb()
-        .prepare(`
+        .prepare(
+          `
           INSERT INTO restock_history (id, product_url, timestamp, day_of_week, hour, stock_level, price)
           VALUES (?, ?, ?, ?, ?, ?, ?)
-        `)
+        `
+        )
         .run(
           `restock_${timestamp}_${Math.random().toString(36).substr(2, 9)}`,
           productUrl,
@@ -76,7 +78,7 @@ export class RestockPredictor {
   async analyzePatterns(productUrl) {
     try {
       const history = this._getHistory(productUrl)
-      
+
       if (history.length < 3) {
         return {
           confidence: 'low',
@@ -119,12 +121,14 @@ export class RestockPredictor {
   _getHistory(productUrl, limit = 100) {
     try {
       return this._getDb()
-        .prepare(`
+        .prepare(
+          `
           SELECT * FROM restock_history
           WHERE product_url = ?
           ORDER BY timestamp DESC
           LIMIT ?
-        `)
+        `
+        )
         .all(productUrl, limit)
     } catch {
       return []
@@ -136,8 +140,8 @@ export class RestockPredictor {
    */
   _findDailyPattern(history) {
     const byHour = {}
-    
-    history.forEach(r => {
+
+    history.forEach((r) => {
       byHour[r.hour] = (byHour[r.hour] || 0) + 1
     })
 
@@ -160,8 +164,8 @@ export class RestockPredictor {
    */
   _findWeeklyPattern(history) {
     const byDay = {}
-    
-    history.forEach(r => {
+
+    history.forEach((r) => {
       byDay[r.day_of_week] = (byDay[r.day_of_week] || 0) + 1
     })
 
@@ -196,10 +200,11 @@ export class RestockPredictor {
 
     const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length
     const stdDev = Math.sqrt(
-      intervals.reduce((sum, interval) => sum + Math.pow(interval - avgInterval, 2), 0) / intervals.length
+      intervals.reduce((sum, interval) => sum + Math.pow(interval - avgInterval, 2), 0) /
+        intervals.length
     )
 
-    const consistency = 1 - (stdDev / avgInterval)
+    const consistency = 1 - stdDev / avgInterval
     const hours = Math.round(avgInterval / (1000 * 60 * 60))
 
     return {
@@ -234,7 +239,7 @@ export class RestockPredictor {
     if (patterns.daily && patterns.daily.confidence > 0.5) {
       const next = new Date()
       next.setHours(patterns.daily.hour, 0, 0, 0)
-      
+
       // If that time has passed today, predict tomorrow
       if (next.getTime() < now) {
         next.setDate(next.getDate() + 1)
@@ -253,10 +258,10 @@ export class RestockPredictor {
       const next = new Date()
       const currentDay = next.getDay()
       const targetDay = patterns.weekly.dayOfWeek
-      
+
       let daysUntil = targetDay - currentDay
       if (daysUntil <= 0) daysUntil += 7
-      
+
       next.setDate(next.getDate() + daysUntil)
       next.setHours(patterns.daily?.hour || 12, 0, 0, 0)
 
@@ -279,7 +284,7 @@ export class RestockPredictor {
     if (history.length < 10) return 'moderate'
 
     const scores = []
-    
+
     if (patterns.daily) scores.push(patterns.daily.confidence)
     if (patterns.weekly) scores.push(patterns.weekly.confidence)
     if (patterns.interval) scores.push(patterns.interval.consistency)
@@ -299,7 +304,7 @@ export class RestockPredictor {
   getSmartInterval(productUrl, defaultInterval = 4000) {
     try {
       const analysis = this.analyzePatterns(productUrl)
-      
+
       if (!analysis.nextPredicted) return defaultInterval
 
       const now = Date.now()
@@ -307,11 +312,14 @@ export class RestockPredictor {
       const timeUntil = predicted - now
 
       // If restock is predicted soon, increase frequency
-      if (timeUntil < 5 * 60 * 1000) { // Less than 5 minutes
+      if (timeUntil < 5 * 60 * 1000) {
+        // Less than 5 minutes
         return 1000 // Check every second
-      } else if (timeUntil < 30 * 60 * 1000) { // Less than 30 minutes
+      } else if (timeUntil < 30 * 60 * 1000) {
+        // Less than 30 minutes
         return 2000 // Check every 2 seconds
-      } else if (timeUntil < 2 * 60 * 60 * 1000) { // Less than 2 hours
+      } else if (timeUntil < 2 * 60 * 60 * 1000) {
+        // Less than 2 hours
         return 4000 // Normal frequency
       } else {
         return 10000 // Slow down if far away

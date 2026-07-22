@@ -172,7 +172,10 @@ describe('SupabaseMonitorSource', () => {
     const { client, calls } = makeFakeClient({
       product: null,
       refetchResult: { id: 'prod-raced' },
-      insertResult: { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint' } }
+      insertResult: {
+        data: null,
+        error: { code: '23505', message: 'duplicate key value violates unique constraint' }
+      }
     })
     const source = new SupabaseMonitorSource({ client })
 

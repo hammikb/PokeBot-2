@@ -54,7 +54,7 @@ export class ProxyHealthMonitor extends EventEmitter {
     if (!this.isMonitoring) return
 
     this.isMonitoring = false
-    
+
     if (this.monitoringInterval) {
       clearInterval(this.monitoringInterval)
       this.monitoringInterval = null
@@ -102,7 +102,7 @@ export class ProxyHealthMonitor extends EventEmitter {
    */
   async checkAllProxies() {
     const proxies = Array.from(this.proxyStats.keys())
-    
+
     if (proxies.length === 0) {
       log.debug('No proxies to check')
       return
@@ -110,9 +110,7 @@ export class ProxyHealthMonitor extends EventEmitter {
 
     log.info('Checking proxy health', { count: proxies.length })
 
-    const results = await Promise.allSettled(
-      proxies.map(proxy => this.checkProxy(proxy))
-    )
+    await Promise.allSettled(proxies.map((proxy) => this.checkProxy(proxy)))
 
     const summary = {
       total: proxies.length,
@@ -138,7 +136,7 @@ export class ProxyHealthMonitor extends EventEmitter {
     if (!stats) return
 
     const startTime = Date.now()
-    
+
     try {
       const result = await testProxy(proxy)
       const responseTime = Date.now() - startTime
@@ -151,7 +149,7 @@ export class ProxyHealthMonitor extends EventEmitter {
         stats.consecutiveSuccesses++
         stats.consecutiveFailures = 0
         stats.lastSuccess = Date.now()
-        
+
         // Track response time
         stats.responseTimes.push(responseTime)
         if (stats.responseTimes.length > 10) {
@@ -204,7 +202,7 @@ export class ProxyHealthMonitor extends EventEmitter {
     // Update status based on failures
     if (stats.consecutiveFailures >= this.failureThreshold) {
       this.updateProxyStatus(proxy, 'unhealthy')
-      
+
       // Auto-disable after threshold
       this.disableProxy(proxy, `${stats.consecutiveFailures} consecutive failures`)
     } else if (stats.consecutiveFailures >= Math.floor(this.failureThreshold / 2)) {
@@ -279,9 +277,9 @@ export class ProxyHealthMonitor extends EventEmitter {
     stats.consecutiveSuccesses = 0
 
     log.info('Proxy re-enabled', { proxy: this.maskProxy(proxy) })
-    
+
     this.emit('proxy:enabled', { proxy })
-    
+
     // Check immediately
     this.checkProxy(proxy)
   }
@@ -313,9 +311,7 @@ export class ProxyHealthMonitor extends EventEmitter {
    * Get all proxy statistics
    */
   getAllStats() {
-    return Array.from(this.proxyStats.keys()).map(proxy => 
-      this.getProxyStats(proxy)
-    )
+    return Array.from(this.proxyStats.keys()).map((proxy) => this.getProxyStats(proxy))
   }
 
   /**

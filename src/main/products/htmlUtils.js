@@ -1,5 +1,11 @@
 const ENTITIES = {
-  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", '#39': "'", nbsp: ' '
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  '#39': "'",
+  nbsp: ' '
 }
 
 export function decodeHtmlEntities(value) {

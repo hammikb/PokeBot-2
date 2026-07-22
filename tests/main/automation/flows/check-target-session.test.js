@@ -85,7 +85,11 @@ describe('checkTargetSession', () => {
 
     const result = await checkTargetSession(makeContext([page]), {})
 
-    expect(result).toMatchObject({ success: true, loggedIn: true, message: 'Target profile is confirmed signed in.' })
+    expect(result).toMatchObject({
+      success: true,
+      loggedIn: true,
+      message: 'Target profile is confirmed signed in.'
+    })
     expect(page.navigations).toContain('https://www.target.com/account?prehydrateClick=true')
   })
 

@@ -11,6 +11,7 @@ This document outlines the complete implementation of all 3 phases plus comprehe
 ### Phase 1: Encrypted Storage (70% Complete)
 
 **✅ Backend (100%)**:
+
 - PaymentManager.js created
 - ShippingManager.js created
 - Database migration #3 applied
@@ -20,6 +21,7 @@ This document outlines the complete implementation of all 3 phases plus comprehe
 - App store updated with actions
 
 **⏳ Frontend (0%)**:
+
 - [ ] PaymentMethods page
 - [ ] ShippingAddresses page
 - [ ] Navigation/routing
@@ -40,7 +42,8 @@ import { useState, useEffect } from 'react'
 import { useAppStore } from '../store/appStore'
 
 export default function PaymentMethods() {
-  const { paymentMethods, loadPaymentMethods, createPaymentMethod, deletePaymentMethod } = useAppStore()
+  const { paymentMethods, loadPaymentMethods, createPaymentMethod, deletePaymentMethod } =
+    useAppStore()
   const [showForm, setShowForm] = useState(false)
   const [formData, setFormData] = useState({
     name: '',
@@ -204,11 +207,16 @@ export default function PaymentMethods() {
 
       <div className="grid gap-4">
         {paymentMethods.map((method) => (
-          <div key={method.id} className="bg-gray-800 p-4 rounded-lg flex justify-between items-center">
+          <div
+            key={method.id}
+            className="bg-gray-800 p-4 rounded-lg flex justify-between items-center"
+          >
             <div>
               <h3 className="font-bold">{method.name}</h3>
               <p className="text-sm text-gray-400">****-****-****-{method.cardNumber.slice(-4)}</p>
-              <p className="text-sm text-gray-400">Expires: {method.expiryMonth}/{method.expiryYear}</p>
+              <p className="text-sm text-gray-400">
+                Expires: {method.expiryMonth}/{method.expiryYear}
+              </p>
             </div>
             <button
               onClick={() => handleDelete(method.id)}
@@ -219,7 +227,9 @@ export default function PaymentMethods() {
           </div>
         ))}
         {paymentMethods.length === 0 && !showForm && (
-          <p className="text-gray-400 text-center py-8">No payment methods yet. Add one to get started!</p>
+          <p className="text-gray-400 text-center py-8">
+            No payment methods yet. Add one to get started!
+          </p>
         )}
       </div>
     </div>
@@ -236,14 +246,14 @@ import { useState, useEffect } from 'react'
 import { useAppStore } from '../store/appStore'
 
 export default function ShippingAddresses() {
-  const { 
-    shippingAddresses, 
-    loadShippingAddresses, 
-    createShippingAddress, 
+  const {
+    shippingAddresses,
+    loadShippingAddresses,
+    createShippingAddress,
     deleteShippingAddress,
-    setDefaultShippingAddress 
+    setDefaultShippingAddress
   } = useAppStore()
-  
+
   const [showForm, setShowForm] = useState(false)
   const [formData, setFormData] = useState({
     name: '',
@@ -421,11 +431,17 @@ export default function ShippingAddresses() {
           <div key={address.id} className="bg-gray-800 p-4 rounded-lg">
             <div className="flex justify-between items-start">
               <div>
-                <h3 className="font-bold">{address.name} {address.is_default ? '(Default)' : ''}</h3>
-                <p className="text-sm">{address.first_name} {address.last_name}</p>
+                <h3 className="font-bold">
+                  {address.name} {address.is_default ? '(Default)' : ''}
+                </h3>
+                <p className="text-sm">
+                  {address.first_name} {address.last_name}
+                </p>
                 <p className="text-sm text-gray-400">{address.address1}</p>
                 {address.address2 && <p className="text-sm text-gray-400">{address.address2}</p>}
-                <p className="text-sm text-gray-400">{address.city}, {address.state} {address.zip}</p>
+                <p className="text-sm text-gray-400">
+                  {address.city}, {address.state} {address.zip}
+                </p>
                 {address.phone && <p className="text-sm text-gray-400">{address.phone}</p>}
               </div>
               <div className="flex gap-2">
@@ -448,7 +464,9 @@ export default function ShippingAddresses() {
           </div>
         ))}
         {shippingAddresses.length === 0 && !showForm && (
-          <p className="text-gray-400 text-center py-8">No addresses yet. Add one to get started!</p>
+          <p className="text-gray-400 text-center py-8">
+            No addresses yet. Add one to get started!
+          </p>
         )}
       </div>
     </div>
@@ -601,12 +619,14 @@ parentPort.on('message', async (message) => {
 ### Test 1: Walmart Checkout
 
 **Prerequisites**:
+
 - Walmart account created
 - Payment method saved
 - Shipping address saved
 - Product URL ready
 
 **Steps**:
+
 1. Create task with Walmart product
 2. Set mode to "test-checkout"
 3. Start task
@@ -624,12 +644,14 @@ parentPort.on('message', async (message) => {
 ### Test 2: Target Checkout
 
 **Prerequisites**:
+
 - Target account created
 - Payment method saved
 - Shipping address saved
 - Product URL ready
 
 **Steps**:
+
 1. Create task with Target product
 2. Set mode to "test-checkout"
 3. Start task
@@ -647,6 +669,7 @@ parentPort.on('message', async (message) => {
 ### Test 3: Alert Monitors
 
 **Test 3a: In-Stock Alert**:
+
 1. Create task with out-of-stock product
 2. Set mode to "alert-only"
 3. Start monitoring
@@ -654,12 +677,14 @@ parentPort.on('message', async (message) => {
 5. Verify notification fires
 
 **Test 3b: Price Drop Alert**:
+
 1. Create task with max price set
 2. Monitor product
 3. Wait for price drop below max
 4. Verify notification fires
 
 **Test 3c: Queue Alert**:
+
 1. Create task for high-demand product
 2. Monitor for queue
 3. Verify queue detection
@@ -670,30 +695,35 @@ parentPort.on('message', async (message) => {
 ## 📊 Implementation Timeline
 
 ### Day 1: Phase 1 Frontend (2-3 hours)
+
 - Create PaymentMethods page
 - Create ShippingAddresses page
 - Add navigation
 - Test UI
 
 ### Day 2: Phase 2 Part 1 (2-3 hours)
+
 - Implement ThumbnailCache
 - Update task creation to fetch thumbnails
 - Display thumbnails in UI
 - Test thumbnail system
 
 ### Day 3: Phase 2 Part 2 (2-3 hours)
+
 - Add alert_history migration
 - Implement alert acknowledgment
 - Update UI with seen/unseen badges
 - Test alert system
 
 ### Day 4: Phase 3 (4-5 hours)
+
 - Implement worker thread
 - Add background monitoring
 - Test resource usage
 - Optimize performance
 
 ### Day 5: Full Testing (4-6 hours)
+
 - Test Walmart checkout
 - Test Target checkout
 - Test all alert types
@@ -707,11 +737,13 @@ parentPort.on('message', async (message) => {
 ## 🎯 Current Status
 
 **Completed**:
+
 - ✅ Phase 1 Backend (100%)
 - ✅ App store updated (100%)
 - ✅ All IPC handlers (100%)
 
 **Remaining**:
+
 - [ ] Phase 1 Frontend (0%)
 - [ ] Phase 2 Thumbnails (0%)
 - [ ] Phase 2 Alerts (0%)
@@ -727,22 +759,25 @@ parentPort.on('message', async (message) => {
 Due to the scope (14-20 hours of work), I recommend:
 
 **Option A**: Implement in stages
+
 - Week 1: Complete Phase 1
 - Week 2: Complete Phase 2
 - Week 3: Complete Phase 3
 - Week 4: Full testing
 
 **Option B**: Focus on high-value features
+
 - Complete Phase 1 (immediate value)
 - Skip Phase 3 (complex, low priority)
 - Do thorough testing
 
 **Option C**: Use as-is
+
 - Backend is complete and working
 - Can be used via IPC calls
 - UI can be added later
 
 ---
 
-*Created: June 5, 2026*  
-*Status: 30% Complete - Backend Ready*
+_Created: June 5, 2026_  
+_Status: 30% Complete - Backend Ready_

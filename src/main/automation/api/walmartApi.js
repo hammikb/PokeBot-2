@@ -33,13 +33,13 @@ export class WalmartApiClient {
   async addToCart(itemId, quantity = 1, offerId = null, productUrl = null) {
     try {
       log.info('Adding to cart via API (Bird Bot method)', { itemId, quantity })
-      
+
       // Use Bird Bot's exact format
       const body = {
         offerId: offerId || itemId.toString(),
         quantity
       }
-      
+
       // Walmart's cart API endpoint
       const response = await axios.post(
         'https://www.walmart.com/api/v3/cart/guest/:CID/items',
@@ -61,7 +61,7 @@ export class WalmartApiClient {
       return { success: false, error: 'Item not checkoutable' }
     } catch (err) {
       log.error('Failed to add to cart', { itemId, error: err.message })
-      
+
       // Try alternative endpoint
       return await this._addToCartAlternative(itemId, quantity, offerId)
     }
@@ -73,7 +73,7 @@ export class WalmartApiClient {
   async _addToCartAlternative(itemId, quantity, offerId) {
     try {
       log.info('Trying alternative add-to-cart endpoint', { itemId })
-      
+
       const response = await axios.post(
         'https://www.walmart.com/orchestra/home/graphql/addToCart',
         {
@@ -102,7 +102,7 @@ export class WalmartApiClient {
           headers: {
             ...this._getHeaders(),
             'Content-Type': 'application/json',
-            'WM_QOSEVENTS': '1'
+            WM_QOSEVENTS: '1'
           }
         }
       )
@@ -147,7 +147,7 @@ export class WalmartApiClient {
   async updateQuantity(itemId, quantity) {
     try {
       log.info('Updating cart quantity', { itemId, quantity })
-      
+
       const response = await axios.put(
         `https://www.walmart.com/api/v3/cart/guest/:CID/items/${itemId}`,
         {
@@ -181,10 +181,9 @@ export class WalmartApiClient {
 
       const items = cartResult.cart?.items || []
       for (const item of items) {
-        await axios.delete(
-          `https://www.walmart.com/api/v3/cart/guest/:CID/items/${item.itemId}`,
-          { headers: this._getHeaders() }
-        )
+        await axios.delete(`https://www.walmart.com/api/v3/cart/guest/:CID/items/${item.itemId}`, {
+          headers: this._getHeaders()
+        })
       }
 
       log.info('Cart cleared successfully')
@@ -205,7 +204,7 @@ export class WalmartApiClient {
     if (match) {
       return match[1]
     }
-    
+
     // Fallback: try to extract any number at the end of the URL
     const endMatch = url.match(/\/(\d+)\/?$/)
     return endMatch ? endMatch[1] : null
@@ -226,7 +225,7 @@ export class WalmartApiClient {
       Cookie: cookieString,
       Referer: productUrl || 'https://www.walmart.com/',
       Origin: 'https://www.walmart.com',
-      'wm_vertical_id': '0'
+      wm_vertical_id: '0'
     }
   }
 
@@ -238,7 +237,7 @@ export class WalmartApiClient {
 /**
  * Hybrid approach: Use API for cart, browser for checkout
  * This is MUCH faster than pure browser automation
- * 
+ *
  * Speed comparison:
  * - Pure browser: 5-10 seconds to add to cart
  * - API + browser: 300-500ms to add to cart
@@ -248,7 +247,7 @@ export async function hybridWalmartCheckout(page, { itemId, quantity = 1 }) {
   try {
     log.info('Using hybrid approach: API + Browser for maximum speed')
     const api = await WalmartApiClient.fromPage(page)
-    
+
     // Step 1: Use API to add to cart (SUPER FAST - ~300-500ms)
     const addResult = await api.addToCart(itemId, quantity)
     if (!addResult.success) {

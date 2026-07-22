@@ -15,6 +15,20 @@ describe('extractProductKey', () => {
       '15718673510'
     )
   })
+  it('uses a stable Pokemon Center key for the site-wide queue', () => {
+    expect(extractProductKey('pokemon-center', 'https://www.pokemoncenter.com/')).toBe('site-queue')
+  })
+  it("pulls the item ID from Sam's Club product URLs", () => {
+    expect(
+      extractProductKey(
+        'samsclub',
+        'https://www.samsclub.com/ip/sv8-5-prismatic-evolutions-super-premium-collection/19170800669'
+      )
+    ).toBe('19170800669')
+    expect(extractProductKey('samsclub', 'https://www.samsclub.com/ip/19170800669')).toBe(
+      '19170800669'
+    )
+  })
   it('returns null for unsupported retailer or unparseable URL', () => {
     expect(extractProductKey('bestbuy', 'https://x')).toBeNull()
     expect(extractProductKey('target', 'not a url')).toBeNull()

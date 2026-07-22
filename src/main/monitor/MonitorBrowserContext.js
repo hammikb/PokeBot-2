@@ -32,11 +32,13 @@ const log = createModuleLogger('MonitorBrowserContext')
 // we intercept to get stock/price data. Ghostery filter lists incorrectly
 // classify some of these as trackers.
 const ADBLOCKER_ALLOWLIST = [
-  'redsky.target.com',    // Target stock/price API (intercepted for monitoring)
-  'api.target.com',       // Target cart/checkout API
-  'walmart.com',          // Walmart APIs (cart, checkout, stock)
-  'api.walmart.com',      // Walmart REST API
-  'grocery.walmart.com'   // Walmart grocery API
+  'redsky.target.com', // Target stock/price API (intercepted for monitoring)
+  'api.target.com', // Target cart/checkout API
+  'walmart.com', // Walmart APIs (cart, checkout, stock)
+  'api.walmart.com', // Walmart REST API
+  'grocery.walmart.com', // Walmart grocery API
+  'samsclub.com', // Sam's Club product/cart APIs
+  'api.samsclub.com' // Sam's Club REST APIs
 ]
 
 let _blockerPromise = null
@@ -181,8 +183,13 @@ export class MonitorBrowserContext {
 
   async _launchContext() {
     log.info('Launching shared monitor browser context', { retailer: this._retailer })
+    // The first Sam's monitor profile was repeatedly navigated through its live
+    // waiting room and can remain challenge-marked. Use a fresh versioned monitor
+    // identity for the gate-holding implementation without touching account profiles.
+    const accountId =
+      this._retailer === 'samsclub' ? 'monitor-samsclub-gate-v2' : `monitor-${this._retailer}`
     this._context = await this._browserPool.launchContext({
-      accountId: `monitor-${this._retailer}`,
+      accountId,
       proxy: this._proxy
     })
     this._context.on?.('close', () => {

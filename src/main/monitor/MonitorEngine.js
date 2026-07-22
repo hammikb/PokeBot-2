@@ -9,8 +9,10 @@ export class MonitorEngine extends EventEmitter {
   constructor() {
     super()
     this._timers = new Map() // id → intervalId
+    this._startupTimers = new Map() // id → timeoutId
     this._pollers = new Map() // id → poller (for cleanup)
     this._firstChecks = new Set()
+    this._inFlight = new Set()
     this._taskCount = 0 // used to stagger startup launches
   }
 
@@ -27,6 +29,8 @@ export class MonitorEngine extends EventEmitter {
     this._taskCount++
 
     const run = async () => {
+      if (this._inFlight.has(id)) return
+      this._inFlight.add(id)
       try {
         const event = await poller.poll()
         const isFirstCheck = this._firstChecks.has(id)
@@ -43,14 +47,19 @@ export class MonitorEngine extends EventEmitter {
         }
       } catch {
         // Poll failures should not stop future monitor ticks.
+      } finally {
+        this._inFlight.delete(id)
       }
     }
 
     // Delay the first run, then start the regular interval after it completes.
-    setTimeout(() => {
+    const startupTimer = setTimeout(() => {
+      this._startupTimers.delete(id)
+      if (!this._pollers.has(id)) return
       run()
       this._timers.set(id, setInterval(run, intervalMs))
     }, startupDelay)
+    this._startupTimers.set(id, startupTimer)
 
     // Store a placeholder so removeTask works even before the timeout fires.
     if (!this._timers.has(id)) {
@@ -58,8 +67,11 @@ export class MonitorEngine extends EventEmitter {
     }
   }
 
-
   removeTask(id) {
+    const startupTimer = this._startupTimers.get(id)
+    if (startupTimer != null) clearTimeout(startupTimer)
+    this._startupTimers.delete(id)
+
     const timer = this._timers.get(id)
     if (timer != null) {
       clearInterval(timer)
@@ -67,6 +79,7 @@ export class MonitorEngine extends EventEmitter {
     this._timers.delete(id)
 
     this._firstChecks.delete(id)
+    this._inFlight.delete(id)
 
     // Call destroy() on the poller if it has one (e.g. TargetPoller closes
     // its persistent browser context).

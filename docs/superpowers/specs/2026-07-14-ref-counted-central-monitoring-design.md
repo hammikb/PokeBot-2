@@ -44,7 +44,7 @@ Today, Schema A only half-implements ref-counted monitoring:
 
 - Creating/starting a Supabase-mode task in the Electron app registers the product centrally (if
   not already known) and marks the current user as watching it.
-- Stopping/deleting that task removes only *this* user's subscription.
+- Stopping/deleting that task removes only _this_ user's subscription.
 - A product stays centrally monitored (`products.active = true`) while **any** user is subscribed
   to it, and is deactivated the moment the **last** subscriber leaves — regardless of which
   client's action was the one that dropped the count to zero.
@@ -55,7 +55,7 @@ Today, Schema A only half-implements ref-counted monitoring:
   as an assumption to verify, not something this spec changes.
 
 **Why the ref-count must live in the database, not the client:** RLS on `subscriptions` scopes
-`SELECT`/`ALL` to `user_id = auth.uid()` — a client can only ever see its *own* subscription rows.
+`SELECT`/`ALL` to `user_id = auth.uid()` — a client can only ever see its _own_ subscription rows.
 It has no way to know whether it is the last subscriber for a product; only a database-side
 trigger (running with the privilege to see every row) can compute the true global count.
 
@@ -72,11 +72,13 @@ Three pieces, in dependency order:
 2. **Migration — ref-counting trigger on `subscriptions`.** A trigger function fires
    `AFTER INSERT OR DELETE ON subscriptions FOR EACH ROW`, and for the affected `product_id`
    (`NEW.product_id` on insert, `OLD.product_id` on delete) runs a single atomic statement:
+
    ```sql
    UPDATE products
    SET active = EXISTS (SELECT 1 FROM subscriptions WHERE product_id = affected_id)
    WHERE id = affected_id;
    ```
+
    One statement (not a separate read-then-write) so there's no race between two clients
    subscribing/unsubscribing concurrently — Postgres's row lock on the `products` row during the
    `UPDATE` serializes concurrent trigger firings for the same product. The trigger function runs

@@ -1,10 +1,13 @@
 # Multi-Account Setup Guide for Walmart
 
 ## Goal
+
 Run multiple Walmart accounts simultaneously to increase your chances of securing limited items.
 
 ## The Challenge
+
 Each account needs its own:
+
 - ✅ Browser profile (separate cookies/sessions)
 - ✅ Walmart account credentials
 - ✅ Payment method saved in Walmart
@@ -16,11 +19,13 @@ Each account needs its own:
 ### 1. Create Multiple Walmart Accounts
 
 **You'll need**:
+
 - Different email addresses (Gmail, Yahoo, etc.)
 - Different payment methods OR same card with different billing addresses
 - Different shipping addresses (friends/family)
 
 **Create accounts**:
+
 1. Go to walmart.com
 2. Sign up with each email
 3. Add payment method
@@ -34,6 +39,7 @@ Each account needs its own:
 1. **In PokeBot, go to Accounts tab**
 2. **Click "Add Account"**
 3. **Fill in details**:
+
    ```
    Name: Walmart-Account1
    Retailer: Walmart
@@ -72,6 +78,7 @@ Each account needs its own:
 **In the Tasks tab**:
 
 1. **Create Task 1**:
+
    ```
    Product URL: [Walmart Pokemon product]
    Account: Walmart-Account1
@@ -80,6 +87,7 @@ Each account needs its own:
    ```
 
 2. **Create Task 2**:
+
    ```
    Product URL: [Same product]
    Account: Walmart-Account2
@@ -92,6 +100,7 @@ Each account needs its own:
 ### 5. Run Multiple Tasks Simultaneously
 
 **When the drop happens**:
+
 1. Click "Start" on all tasks
 2. Bot will run them in parallel (up to 3 at once by default)
 3. First account to checkout wins!
@@ -99,18 +108,21 @@ Each account needs its own:
 ## Profile Path Strategy
 
 ### Option A: Use Default Paths (Easiest)
+
 - Bot creates separate profile for each account automatically
 - Path: `AppData/Roaming/pokebot2/profiles/[account-id]`
 - **Pro**: Easy, no setup
 - **Con**: New profiles = higher bot detection
 
 ### Option B: Use Real Chrome Profiles (Best)
+
 - Create separate Chrome profiles for each account
 - Use those as profile paths
 - **Pro**: Looks most legitimate
 - **Con**: More setup required
 
 **How to create Chrome profiles**:
+
 1. Open Chrome
 2. Click profile icon → "Add"
 3. Create new profile (e.g., "Walmart1")
@@ -122,16 +134,19 @@ Each account needs its own:
 ## IP Address Considerations
 
 ### Same IP for All Accounts (Your Home IP)
+
 - **Pro**: Free, easy
 - **Con**: Walmart may flag multiple checkouts from same IP
 - **Recommendation**: Limit to 2-3 accounts max
 
 ### Different IPs (Residential Proxies)
+
 - **Pro**: Each account looks independent
 - **Con**: Costs $50-100/month
 - **Recommendation**: For serious botting only
 
 **How to add proxies**:
+
 1. Buy residential proxies (Bright Data, Smartproxy)
 2. In account settings, add proxy:
    ```
@@ -142,6 +157,7 @@ Each account needs its own:
 ## Best Practices
 
 ### ✅ DO:
+
 - Warm up each profile manually before automation
 - Use different payment methods if possible
 - Stagger task start times by 1-2 seconds
@@ -149,6 +165,7 @@ Each account needs its own:
 - Test each account with a cheap item first
 
 ### ❌ DON'T:
+
 - Use same email for multiple accounts
 - Run 10+ accounts on same IP
 - Skip the manual warmup step
@@ -158,16 +175,19 @@ Each account needs its own:
 ## Example: 3-Account Setup
 
 **Account 1**:
+
 - Email: john.doe1@gmail.com
 - Profile: Real Chrome Profile 1
 - Proxy: None (home IP)
 
 **Account 2**:
-- Email: john.doe2@gmail.com  
+
+- Email: john.doe2@gmail.com
 - Profile: Real Chrome Profile 2
 - Proxy: None (home IP)
 
 **Account 3**:
+
 - Email: jane.smith@gmail.com
 - Profile: Real Chrome Profile 3
 - Proxy: Residential proxy (optional)
@@ -177,27 +197,32 @@ Each account needs its own:
 ## Success Rate Expectations
 
 ### With Proper Setup:
+
 - **1 account**: 30-40% success rate
 - **2-3 accounts (same IP)**: 60-70% success rate
 - **3-5 accounts (different IPs)**: 80-90% success rate
 
 ### Without Warmup:
+
 - **Any number of accounts**: 5-10% success rate (bot detection)
 
 ## Troubleshooting
 
 **"Robot or Human" on all accounts**:
+
 - Profiles not warmed up properly
 - Using new/empty profiles
 - IP flagged by Walmart
 - **Solution**: Manual warmup + use real Chrome profiles
 
 **One account works, others don't**:
+
 - Other accounts not signed in
 - Other accounts not warmed up
 - **Solution**: Warm up each account separately
 
 **All accounts checkout same item**:
+
 - This is expected! First one to complete wins
 - Others will fail (item sold out)
 - **Solution**: This is normal behavior
@@ -205,6 +230,7 @@ Each account needs its own:
 ## Advanced: Profile Rotation
 
 For maximum success:
+
 1. Create 5-10 accounts
 2. Warm up all profiles over several days
 3. Rotate which accounts you use
@@ -214,12 +240,14 @@ For maximum success:
 ## Cost Breakdown
 
 **Free Setup** (2-3 accounts):
+
 - Multiple Walmart accounts: Free
 - Bot profiles: Free
 - Home IP: Free
 - **Total**: $0/month
 
 **Pro Setup** (5+ accounts):
+
 - Multiple Walmart accounts: Free
 - Residential proxies: $50-100/month
 - **Total**: $50-100/month
