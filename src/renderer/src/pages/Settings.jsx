@@ -5,7 +5,7 @@ const FIELDS = [
 ]
 
 export default function Settings() {
-  const { settings, saveSetting, signOut } = useAppStore()
+  const { settings, startupHealth, saveSetting, signOut } = useAppStore()
 
   return (
     <div className="p-4 space-y-5 max-w-lg overflow-y-auto h-full">
@@ -16,6 +16,24 @@ export default function Settings() {
         tasks use the central PokeAlert Supabase monitor. Drops are detected by the Pi and pushed to
         your local app for checkout.
       </div>
+
+      {startupHealth && (
+        <div className="border border-gray-800 rounded-lg p-3 bg-[#0d0d0f]">
+          <div className="text-gray-300 uppercase tracking-wider text-sm">
+            Startup health: {startupHealth.status}
+          </div>
+          <div className="mt-2 space-y-1">
+            {startupHealth.checks.map((check) => (
+              <div
+                key={check.id}
+                className={`text-xs ${check.ok ? 'text-emerald-500' : 'text-amber-400'}`}
+              >
+                {check.ok ? 'OK' : check.severity.toUpperCase()} · {check.id}: {check.message}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div>
         <label className="text-gray-500 uppercase tracking-wider text-sm block mb-1.5">
@@ -125,6 +143,40 @@ export default function Settings() {
         </div>
         <div className="text-xs mt-2 text-gray-500">
           Current: {settings.targetCheckoutLiteMode === true ? 'Lite mode on' : 'Full page loading'}
+        </div>
+      </div>
+
+      <div className="border border-gray-800 rounded-lg p-3 bg-[#0d0d0f]">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <div className="text-gray-300 uppercase tracking-wider text-sm">Checkout Analytics</div>
+            <div className="text-gray-600 text-sm mt-1">
+              Sends retailer, product ID/name, checkout stages, timing, result, app version, and
+              anonymous device/account hashes to your PokeAlert Supabase project. Card numbers,
+              passwords, cookies, addresses, proxies, and IP addresses are never included.
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={settings.checkoutTelemetryEnabled !== false}
+            onClick={() =>
+              saveSetting('checkoutTelemetryEnabled', settings.checkoutTelemetryEnabled === false)
+            }
+            className={`relative w-12 h-7 rounded-full shrink-0 transition-colors ${
+              settings.checkoutTelemetryEnabled !== false ? 'bg-red-600' : 'bg-gray-700'
+            }`}
+          >
+            <span
+              className={`pointer-events-none absolute left-0 top-1 w-5 h-5 bg-white rounded-full transition-transform ${
+                settings.checkoutTelemetryEnabled !== false ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+            <span className="sr-only">Toggle checkout analytics</span>
+          </button>
+        </div>
+        <div className="text-xs mt-2 text-gray-500">
+          Current: {settings.checkoutTelemetryEnabled !== false ? 'Sharing enabled' : 'Local only'}
         </div>
       </div>
 

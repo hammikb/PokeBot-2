@@ -1,4 +1,5 @@
-import { ipcMain } from 'electron'
+import { ipcMain as electronIpcMain } from 'electron'
+import { z } from 'zod'
 import { randomUUID } from 'crypto'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -36,6 +37,118 @@ const TASK_UPDATE_COLUMNS = {
   intervalMs: 'interval_ms'
 }
 
+const emptyArgs = z.tuple([])
+const stringArg = z.tuple([z.string().min(1).max(4096)])
+const optionalStringArg = z.tuple([z.string().max(4096).optional()])
+const objectArg = z.tuple([z.record(z.string(), z.unknown())])
+const idObjectArgs = z.tuple([z.string().min(1).max(128), z.record(z.string(), z.unknown())])
+const authArgs = z.tuple([
+  z.object({
+    email: z.email().max(254),
+    password: z.string().min(1).max(1024),
+    rememberMe: z.boolean().optional()
+  })
+])
+const accountArgs = z.tuple([
+  z
+    .object({
+      name: z.string().min(1).max(100),
+      retailer: z.enum(['target', 'walmart', 'pokemon-center', 'samsclub']),
+      username: z.string().min(1).max(254),
+      password: z.string().min(1).max(1024),
+      proxy: z.string().max(2048).optional()
+    })
+    .passthrough()
+])
+const paymentArgs = z.tuple([
+  z
+    .object({
+      name: z.string().min(1).max(100),
+      cardNumber: z.string().regex(/^[\d -]{12,25}$/),
+      expiryMonth: z.union([z.string(), z.number()]),
+      expiryYear: z.union([z.string(), z.number()]),
+      cvv: z.string().regex(/^\d{3,4}$/)
+    })
+    .passthrough()
+])
+const taskArgs = z.tuple([
+  z
+    .object({
+      retailer: z.enum(['target', 'walmart', 'pokemon-center', 'samsclub']),
+      productUrl: z.url().max(4096),
+      accountIds: z.array(z.string().min(1).max(128)).optional()
+    })
+    .passthrough()
+])
+const IPC_ARG_SCHEMAS = {
+  [IPC.SETTINGS_GET]: emptyArgs,
+  [IPC.SETTINGS_SET]: z.tuple([z.string().min(1).max(100), z.unknown()]),
+  [IPC.AUTH_GET_STATUS]: emptyArgs,
+  [IPC.AUTH_SIGN_IN]: authArgs,
+  [IPC.AUTH_SIGN_UP]: authArgs,
+  [IPC.AUTH_SIGN_OUT]: emptyArgs,
+  [IPC.SUPABASE_CATALOG_LIST]: emptyArgs,
+  [IPC.CATALOG_FIND_WALMART_MATCH]: objectArg,
+  [IPC.CATALOG_BULK_FIND_WALMART_MATCHES]: z.tuple([z.array(z.record(z.string(), z.unknown()))]),
+  [IPC.CATALOG_SAVE_WALMART_MATCH]: objectArg,
+  [IPC.CATALOG_LIST_WALMART_MATCHES]: emptyArgs,
+  [IPC.CATALOG_SKIP_WALMART_MATCH]: objectArg,
+  [IPC.ACCOUNTS_GET]: emptyArgs,
+  [IPC.ACCOUNTS_CREATE]: accountArgs,
+  [IPC.ACCOUNTS_UPDATE]: idObjectArgs,
+  [IPC.ACCOUNTS_ASSIGN_PROXIES]: emptyArgs,
+  [IPC.ACCOUNTS_DELETE]: stringArg,
+  [IPC.ACCOUNTS_REGISTER]: objectArg,
+  [IPC.ACCOUNTS_SET_STATUS]: z.tuple([z.string().min(1).max(128), z.string().min(1).max(32)]),
+  [IPC.ACCOUNTS_OPEN_SESSION]: stringArg,
+  [IPC.ACCOUNTS_CHECK_SESSION]: stringArg,
+  [IPC.ACCOUNTS_AUTO_LOGIN]: stringArg,
+  [IPC.ACCOUNTS_WARMUP]: z.tuple([
+    z.string().min(1).max(128),
+    z.record(z.string(), z.unknown()).optional()
+  ]),
+  [IPC.ACCOUNTS_COOKIE_HEALTH]: stringArg,
+  [IPC.TASKS_GET]: emptyArgs,
+  [IPC.TASKS_READINESS]: emptyArgs,
+  [IPC.TASKS_CREATE]: taskArgs,
+  [IPC.TASKS_UPDATE]: idObjectArgs,
+  [IPC.TASKS_START]: stringArg,
+  [IPC.TASKS_TEST]: stringArg,
+  [IPC.TASKS_STOP]: stringArg,
+  [IPC.TASKS_DELETE]: stringArg,
+  [IPC.MONITORS_LIST]: emptyArgs,
+  [IPC.MONITORS_SAVE]: objectArg,
+  [IPC.MONITORS_DELETE]: stringArg,
+  [IPC.CATALOG_GET]: emptyArgs,
+  [IPC.CATALOG_ADD_URL]: z.tuple([z.url().max(4096)]),
+  [IPC.CATALOG_DELETE]: stringArg,
+  [IPC.PROXIES_DOWNLOAD]: z.tuple([z.url().max(4096)]),
+  [IPC.PROXIES_TEST]: optionalStringArg,
+  [IPC.PAYMENTS_GET]: emptyArgs,
+  [IPC.PAYMENTS_CREATE]: paymentArgs,
+  [IPC.PAYMENTS_UPDATE]: idObjectArgs,
+  [IPC.PAYMENTS_DELETE]: stringArg,
+  [IPC.SHIPPING_GET]: emptyArgs,
+  [IPC.SHIPPING_CREATE]: objectArg,
+  [IPC.SHIPPING_UPDATE]: idObjectArgs,
+  [IPC.SHIPPING_DELETE]: stringArg,
+  [IPC.SHIPPING_SET_DEFAULT]: stringArg,
+  [IPC.QUEUE_JOIN]: objectArg,
+  [IPC.QUEUE_STOP]: stringArg,
+  [IPC.SYSTEM_HEALTH_GET]: emptyArgs,
+  'thumbnails:download': stringArg,
+  'thumbnails:get': stringArg,
+  'thumbnails:clear': emptyArgs,
+  'alerts:getHistory': emptyArgs,
+  'alerts:markSeen': stringArg,
+  'alerts:getUnseen': emptyArgs,
+  'alerts:clearHistory': emptyArgs,
+  'pokemon:getAll': emptyArgs,
+  'pokemon:getNew': emptyArgs,
+  'pokemon:markSeen': stringArg,
+  'pokemon:scanNow': emptyArgs
+}
+
 export function registerIpcHandlers({
   getDb,
   accountManager,
@@ -51,8 +164,23 @@ export function registerIpcHandlers({
   notificationEngine,
   queueJoiner,
   pokemonCenterQueueJoiner,
-  authSessionManager
+  authSessionManager,
+  getStartupDiagnostics = () => null
 }) {
+  const registeredChannels = new Set()
+  const ipcMain = {
+    handle(channel, listener) {
+      if (registeredChannels.has(channel)) throw new Error(`Duplicate IPC handler: ${channel}`)
+      registeredChannels.add(channel)
+      const schema = IPC_ARG_SCHEMAS[channel]
+      if (!schema) throw new Error(`Missing IPC input schema: ${channel}`)
+      return electronIpcMain.handle(channel, async (event, ...rawArgs) => {
+        assertTrustedSender(event, mainWindow)
+        const args = schema.parse(rawArgs)
+        return listener(event, ...args)
+      })
+    }
+  }
   async function syncWalmartListing(productKey, candidate, verificationStatus = 'unverified') {
     try {
       const client = authSessionManager?.getClient?.()
@@ -84,6 +212,7 @@ export function registerIpcHandlers({
   }
 
   // Settings
+  ipcMain.handle(IPC.SYSTEM_HEALTH_GET, () => getStartupDiagnostics())
   ipcMain.handle(IPC.SETTINGS_GET, () => getSettings())
   ipcMain.handle(IPC.SETTINGS_SET, async (_, key, value) => {
     if (typeof key !== 'string' || !key) throw new Error('settings key must be a non-empty string')
@@ -870,6 +999,13 @@ function accountHasActiveTask(accountId, taskManager, db) {
         return false
       }
     })
+}
+
+function assertTrustedSender(event, mainWindow) {
+  if (process.env.NODE_ENV === 'test') return
+  if (!event?.sender || event.sender !== mainWindow?.webContents) {
+    throw new Error('IPC request rejected from an untrusted renderer')
+  }
 }
 
 async function emitCatalogLookupFallback({ mainWindow, notificationEngine, productUrl, error }) {

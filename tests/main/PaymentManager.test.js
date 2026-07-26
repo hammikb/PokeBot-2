@@ -12,7 +12,7 @@ let manager
 beforeEach(() => {
   dbPath = join(tmpdir(), `pokebot-payment-test-${Date.now()}-${Math.random()}.db`)
   initDb(dbPath)
-  manager = new PaymentManager(getDb, deriveKey('testpass'))
+  manager = new PaymentManager(getDb, deriveKey('testpass', 'test-only-salt'))
 })
 
 afterEach(() => {

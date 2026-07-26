@@ -2,6 +2,10 @@ import { describe, it, expect } from 'vitest'
 import { deriveKey, encrypt, decrypt } from '../../src/main/crypto.js'
 
 describe('crypto', () => {
+  it('requires callers to provide a unique salt', () => {
+    expect(() => deriveKey('password')).toThrow('unique encryption salt')
+  })
+
   it('derives 32-byte key from password', () => {
     const key = deriveKey('mypassword', 'somesalt')
     expect(key).toBeInstanceOf(Buffer)

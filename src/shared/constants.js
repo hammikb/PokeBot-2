@@ -72,8 +72,54 @@ export const IPC = {
   SHIPPING_CREATE: 'shipping:create',
   SHIPPING_UPDATE: 'shipping:update',
   SHIPPING_DELETE: 'shipping:delete',
-  SHIPPING_SET_DEFAULT: 'shipping:set-default'
+  SHIPPING_SET_DEFAULT: 'shipping:set-default',
+  SYSTEM_HEALTH_GET: 'system:health:get'
 }
+
+export const IPC_INVOKE_CHANNELS = [
+  ...Object.values(IPC).filter(
+    (channel) =>
+      ![
+        IPC.AUTH_STATE_CHANGED,
+        IPC.FEED_EVENT,
+        IPC.TASK_STATUS,
+        IPC.QUEUE_PROGRESS,
+        IPC.ACCOUNT_STATUS,
+        IPC.PROGRESS_STREAM_START,
+        IPC.PROGRESS_STREAM_STEP,
+        IPC.PROGRESS_STREAM_UPDATE,
+        IPC.PROGRESS_STREAM_SUCCESS,
+        IPC.PROGRESS_STREAM_ERROR
+      ].includes(channel)
+  ),
+  'thumbnails:download',
+  'thumbnails:get',
+  'thumbnails:clear',
+  'alerts:getHistory',
+  'alerts:markSeen',
+  'alerts:getUnseen',
+  'alerts:clearHistory',
+  'pokemon:getAll',
+  'pokemon:getNew',
+  'pokemon:markSeen',
+  'pokemon:scanNow'
+]
+
+export const IPC_EVENT_CHANNELS = [
+  IPC.AUTH_STATE_CHANGED,
+  IPC.FEED_EVENT,
+  IPC.TASK_STATUS,
+  IPC.QUEUE_PROGRESS,
+  IPC.ACCOUNT_STATUS,
+  IPC.PROGRESS_STREAM_START,
+  IPC.PROGRESS_STREAM_STEP,
+  IPC.PROGRESS_STREAM_UPDATE,
+  IPC.PROGRESS_STREAM_SUCCESS,
+  IPC.PROGRESS_STREAM_ERROR,
+  'pokemon:newItems',
+  'update:available',
+  'update:downloaded'
+]
 
 export const RETAILER_BUY_LIMITS = {
   [RETAILERS.TARGET]: 2,

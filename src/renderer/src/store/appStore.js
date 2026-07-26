@@ -37,6 +37,7 @@ export const useAppStore = create((set, get) => ({
   authStatus: 'checking', // 'checking' | 'authenticated' | 'unauthenticated'
   authUser: null,
   authError: '',
+  startupHealth: null,
 
   loadTasks: async () => {
     const tasks = await invoke(IPC.TASKS_GET)
@@ -85,9 +86,13 @@ export const useAppStore = create((set, get) => ({
     }
   },
   loadSettings: async () => {
-    const settings = await invoke(IPC.SETTINGS_GET)
+    const [settings, startupHealth] = await Promise.all([
+      invoke(IPC.SETTINGS_GET),
+      invoke(IPC.SYSTEM_HEALTH_GET)
+    ])
     set({
       settings,
+      startupHealth,
       proxyTestResults: settings.proxyTestResults || {}
     })
   },

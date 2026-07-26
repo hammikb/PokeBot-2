@@ -224,14 +224,17 @@ export class PokemonCenterQueueJoiner extends EventEmitter {
         .catch(() => '')
       if (text) texts.push(text)
     }
-    const body = texts.join('\n')
-    const markerCount = QUEUE_MARKERS.filter((marker) => marker.test(body)).length
-    const urlLooksQueued = /queue|waitingroom|queue-it/i.test(page.url())
-    const etaMatch = body.match(/estimated wait time\s*:?\s*(?:(\d{1,2}):)?(\d{1,2}):(\d{2})/i)
-    let etaSec = null
-    if (etaMatch) {
-      etaSec = Number(etaMatch[1] || 0) * 3600 + Number(etaMatch[2]) * 60 + Number(etaMatch[3])
-    }
-    return { inQueue: markerCount >= 2 || (urlLooksQueued && markerCount >= 1), etaSec }
+    return classifyPokemonCenterQueueText(texts.join('\n'), page.url())
   }
+}
+
+export function classifyPokemonCenterQueueText(body, url = '') {
+  const markerCount = QUEUE_MARKERS.filter((marker) => marker.test(body)).length
+  const urlLooksQueued = /queue|waitingroom|queue-it/i.test(url)
+  const etaMatch = body.match(/estimated wait time\s*:?\s*(?:(\d{1,2}):)?(\d{1,2}):(\d{2})/i)
+  let etaSec = null
+  if (etaMatch) {
+    etaSec = Number(etaMatch[1] || 0) * 3600 + Number(etaMatch[2]) * 60 + Number(etaMatch[3])
+  }
+  return { inQueue: markerCount >= 2 || (urlLooksQueued && markerCount >= 1), etaSec }
 }

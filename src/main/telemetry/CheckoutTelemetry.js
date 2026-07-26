@@ -180,6 +180,7 @@ export class CheckoutTelemetry {
   }
 
   async flushPending({ limit = 25 } = {}) {
+    if (!this._isUploadEnabled()) return { uploaded: 0, optedOut: true }
     if (!this._auth?.getStatus?.().authenticated) return { uploaded: 0 }
     const rows = this._getDb()
       .prepare(
@@ -199,6 +200,7 @@ export class CheckoutTelemetry {
   }
 
   async uploadAttempt(attemptId) {
+    if (!this._isUploadEnabled()) return false
     if (!this._auth?.getStatus?.().authenticated) return false
     const client = this._auth.getClient()
     const userId = this._auth.getStatus().user?.id
@@ -331,6 +333,10 @@ export class CheckoutTelemetry {
       JSON.stringify(value)
     )
     return value
+  }
+
+  _isUploadEnabled() {
+    return this._getSettings().checkoutTelemetryEnabled !== false
   }
 }
 

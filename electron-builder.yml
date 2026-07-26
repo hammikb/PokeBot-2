@@ -52,5 +52,5 @@ dmg:
   artifactName: ${name}-${version}.${ext}
 publish:
   provider: github
-  owner: GITHUB_USERNAME_PLACEHOLDER
-  repo: pokebot2
+  owner: hammikb
+  repo: PokeBot-2

@@ -137,4 +137,23 @@ describe('CheckoutTelemetry', () => {
     )
     expect(value).toBe('[email] [url] [path] [number]')
   })
+
+  it('keeps telemetry local when checkout analytics is disabled', async () => {
+    const dbPath = join(tmpdir(), `pokebot-telemetry-optout-${Date.now()}.json`)
+    tempPaths.push(dbPath)
+    const db = new JsonDb(dbPath)
+    const telemetry = new CheckoutTelemetry({
+      getDb: () => db,
+      getSettings: () => ({ checkoutTelemetryEnabled: false }),
+      authSessionManager: {
+        getStatus: () => ({ authenticated: true, user: { id: 'user-1' } }),
+        getClient: () => {
+          throw new Error('remote client must not be accessed after opt-out')
+        }
+      }
+    })
+
+    await expect(telemetry.flushPending()).resolves.toEqual({ uploaded: 0, optedOut: true })
+    await expect(telemetry.uploadAttempt('attempt-1')).resolves.toBe(false)
+  })
 })

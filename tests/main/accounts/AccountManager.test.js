@@ -14,7 +14,7 @@ let dbPath, manager, key
 beforeEach(() => {
   dbPath = join(tmpdir(), `pokebot-acc-test-${Date.now()}.db`)
   initDb(dbPath)
-  key = deriveKey('testpass')
+  key = deriveKey('testpass', 'test-only-salt')
   manager = new AccountManager(getDb, key, tmpdir())
 })
 afterEach(() => {

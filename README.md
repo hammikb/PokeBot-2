@@ -37,6 +37,12 @@ npm run build:mac
 npm run build:linux
 ```
 
+`build:win` is available for local unsigned test packages. Publishing a Windows
+release must use `npm run release:win`; it refuses to run unless `CSC_LINK`,
+`CSC_KEY_PASSWORD`, and `GH_TOKEN` are configured. Downloaded updates are never
+installed automatically while the app exits, so a checkout or queue session is
+not interrupted.
+
 ## Optional Python lookup support
 
 ```bash
@@ -55,6 +61,15 @@ The repository intentionally does not include:
 - logs, traces, screenshots, coverage, or compiled builds
 
 Those remain on each user's machine. Clone the repository and configure them locally.
+
+Account passwords, payment details, CVVs, and the saved Supabase refresh token
+use a random per-install AES key protected by Electron `safeStorage` (Windows
+DPAPI on the primary platform). The old vault password setting is only retained
+as a one-time migration input for installations created by earlier versions.
+
+Checkout analytics can be disabled in Settings. The disclosure beside that
+switch lists the uploaded fields; payment data, passwords, cookies, addresses,
+proxy addresses, and IP addresses are not uploaded.
 
 ## Useful directories
 

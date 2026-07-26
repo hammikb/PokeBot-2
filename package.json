@@ -20,6 +20,7 @@
     "scrapling:lookup": "python scripts/scrapling_lookup.py",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
+    "release:win": "node scripts/validate-release-env.mjs && npm run build:win -- --publish always",
     "build:mac": "npm run build && electron-builder --mac",
     "build:linux": "npm run build && electron-builder --linux"
   },
@@ -36,7 +37,8 @@
     "electron-updater": "^6.8.3",
     "mmdb-lib": "^3.0.2",
     "playwright-core": "^1.60.0",
-    "react-router-dom": "^7.16.0"
+    "react-router-dom": "^7.16.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config": "^2.1.0",

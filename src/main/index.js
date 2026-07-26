@@ -1,8 +1,8 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, dialog, safeStorage, shell } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initDb, getDb } from './db.js'
-import { deriveKeyLegacy } from './crypto.js'
+import { initializeVaultKey } from './security/VaultKeyManager.js'
 import { AccountManager } from './accounts/AccountManager.js'
 import { BrowserPool } from './automation/BrowserPool.js'
 import { QueueJoiner } from './automation/QueueJoiner.js'
@@ -21,6 +21,7 @@ import { AuthSessionManager } from './supabase/AuthSessionManager.js'
 import { CheckoutTelemetry } from './telemetry/CheckoutTelemetry.js'
 import { logger } from './utils/logger.js'
 import { IPC } from '../shared/constants.js'
+import { runStartupDiagnostics } from './health/StartupDiagnostics.js'
 
 let mainWindow
 let taskManager
@@ -30,7 +31,7 @@ let pokemonCenterQueueJoiner
 let browserPool
 let encryptionKey = null
 let shutdownPromise = null
-const VAULT_PASSWORD = import.meta.env.MAIN_VITE_VAULT_PASSWORD || 'pokebot-dev-vault'
+let startupDiagnostics = null
 const CAPSOLVER_API_KEY = import.meta.env.MAIN_VITE_CAPSOLVER_API_KEY || null
 
 function getSettings() {
@@ -43,9 +44,6 @@ function getSettings() {
 }
 
 async function createMainWindow(encryptionKey) {
-  const dbPath = join(app.getPath('userData'), 'pokebot.db')
-  initDb(dbPath)
-
   const accountManager = new AccountManager(getDb, encryptionKey)
   const paymentManager = new PaymentManager(getDb, encryptionKey)
   const shippingManager = new ShippingManager(getDb)
@@ -187,7 +185,7 @@ async function createMainWindow(encryptionKey) {
       preload: join(__dirname, '../preload/index.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: true
     }
   })
 
@@ -212,7 +210,8 @@ async function createMainWindow(encryptionKey) {
     browserPool,
     notificationEngine,
     queueJoiner,
-    pokemonCenterQueueJoiner
+    pokemonCenterQueueJoiner,
+    getStartupDiagnostics: () => startupDiagnostics
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -221,33 +220,56 @@ async function createMainWindow(encryptionKey) {
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
     const { autoUpdater } = await import('electron-updater')
+    autoUpdater.autoInstallOnAppQuit = false
     autoUpdater.checkForUpdatesAndNotify()
     autoUpdater.on('update-available', () => mainWindow?.webContents?.send('update:available'))
     autoUpdater.on('update-downloaded', () => mainWindow?.webContents?.send('update:downloaded'))
   }
 }
 
-app.whenReady().then(async () => {
-  electronApp.setAppUserModelId('com.pokebot2.app')
+app
+  .whenReady()
+  .then(async () => {
+    electronApp.setAppUserModelId('com.pokebot2.app')
 
-  // Configure logger
-  const logDir = join(app.getPath('userData'), 'logs')
-  logger.setLogDir(logDir)
-  logger.setLevel(is.dev ? 'DEBUG' : 'INFO')
+    // Configure logger
+    const logDir = join(app.getPath('userData'), 'logs')
+    logger.setLogDir(logDir)
+    logger.setLevel(is.dev ? 'DEBUG' : 'INFO')
 
-  app.on('browser-window-created', (_, window) => {
-    optimizer.watchWindowShortcuts(window)
-  })
+    app.on('browser-window-created', (_, window) => {
+      optimizer.watchWindowShortcuts(window)
+    })
 
-  encryptionKey = deriveKeyLegacy(VAULT_PASSWORD)
-  await createMainWindow(encryptionKey)
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createMainWindow(encryptionKey)
+    const userDataPath = app.getPath('userData')
+    initDb(join(userDataPath, 'pokebot.db'))
+    encryptionKey = initializeVaultKey({
+      db: getDb(),
+      safeStorage,
+      userDataPath,
+      legacyPassword: import.meta.env.MAIN_VITE_VAULT_PASSWORD
+    })
+    startupDiagnostics = runStartupDiagnostics({
+      db: getDb(),
+      safeStorage,
+      settings: getSettings()
+    })
+    if (startupDiagnostics.status === 'fatal') {
+      throw new Error('Startup diagnostics found a fatal configuration error.')
     }
+    await createMainWindow(encryptionKey)
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createMainWindow(encryptionKey)
+      }
+    })
   })
-})
+  .catch((error) => {
+    logger.error('Startup', 'PokeBot could not start safely', { error: error.message })
+    dialog.showErrorBox('PokeBot could not start safely', error.message)
+    app.exit(1)
+  })
 
 app.on('window-all-closed', () => {
   // Keep central subscriptions on quit — closing the app is not "stop watching";
