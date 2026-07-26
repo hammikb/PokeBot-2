@@ -10,11 +10,13 @@ import { extractProductKey } from '../products/productKey.js'
 import { SupabaseMonitorSource } from '../monitor/SupabaseMonitorSource.js'
 import { DROP_TYPES } from '../../shared/constants.js'
 import { createModuleLogger } from '../utils/logger.js'
+import { RetailerCircuitBreaker } from './RetailerCircuitBreaker.js'
 
 const log = createModuleLogger('TaskManager')
 const POKEMON_CENTER_AUTO_JOIN_ID = 'pokemon-center-auto-join'
 const POKEMON_CENTER_QUEUE_URL = 'https://www.pokemoncenter.com/'
 const POKEMON_CENTER_QUEUE_ALERT_COOLDOWN_MS = 6 * 60 * 60 * 1000
+const QUEUE_CHECKOUT_TIMEOUT_MS = 10 * 60 * 1000
 
 const FLOWS = {
   walmart: runWalmartFlow,
@@ -36,7 +38,8 @@ export class TaskManager extends EventEmitter {
     queueJoiner = null,
     pokemonCenterQueueJoiner = null,
     checkoutTelemetry = null,
-    paymentManager = null
+    paymentManager = null,
+    retailerCircuit = new RetailerCircuitBreaker()
   }) {
     super()
     this._accountManager = accountManager
@@ -46,6 +49,7 @@ export class TaskManager extends EventEmitter {
     this._pokemonCenterQueueJoiner = pokemonCenterQueueJoiner
     this._checkoutTelemetry = checkoutTelemetry
     this._paymentManager = paymentManager
+    this._retailerCircuit = retailerCircuit
     this._getDb = getDb
     this._getSettings = getSettings
     this._authSessionManager = authSessionManager
@@ -91,6 +95,17 @@ export class TaskManager extends EventEmitter {
               dropType: 'supabase_notice'
             })
           )
+          source.on('health', ({ productId, status, error }) => {
+            if (status === 'SUBSCRIBED') {
+              log.info('Supabase monitor channel ready', { productId })
+            } else if (['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'].includes(status)) {
+              log.warn('Supabase monitor channel interrupted', {
+                productId,
+                status,
+                error: error?.message
+              })
+            }
+          })
           this._supabaseSource = source
           return source
         })
@@ -360,7 +375,8 @@ export class TaskManager extends EventEmitter {
       accountId: account.id
     })
     this._checkoutTelemetry?.record(attemptId, 'queue_waiting', 'Walmart queue admitted')
-    const result = await runWalmartFlow(context, {
+    let timeout
+    const checkout = runWalmartFlow(context, {
       productUrl: dropEvent.productUrl,
       cvv: account.cvv,
       account,
@@ -368,11 +384,29 @@ export class TaskManager extends EventEmitter {
       dropEvent,
       mode: task.mode,
       buyLimit: task.buy_limit,
+      maxPrice: task.max_price,
+      requireRetailerSeller: this._getSettings().walmartRequireRetailerSeller !== false,
       onStep: (message) => {
         this._emitCheckoutStep(dropEvent, account, message)
         this._checkoutTelemetry?.record(attemptId, message)
       }
     })
+    const deadline = new Promise((resolve) => {
+      timeout = setTimeout(
+        () =>
+          resolve({
+            success: false,
+            error: 'Walmart queue checkout exceeded the 10-minute safety deadline'
+          }),
+        QUEUE_CHECKOUT_TIMEOUT_MS
+      )
+    })
+    const result = await Promise.race([checkout, deadline])
+    clearTimeout(timeout)
+    if (/safety deadline/.test(result.error || '')) {
+      await this._queueJoiner?.stop(id)
+      await this._pool.close(account.id).catch(() => {})
+    }
     this._checkoutTelemetry?.completeAttempt(attemptId, result)
     this._logHistory(dropEvent, result, account.id)
     this._emitStatus(id, result.success ? 'idle' : 'error')
@@ -387,6 +421,26 @@ export class TaskManager extends EventEmitter {
   async _runFlowsForTask(task, dropEvent) {
     const flow = FLOWS[dropEvent.retailer]
     if (!flow) return { success: false, results: [] }
+    const circuit = this._retailerCircuit.allow(dropEvent.retailer)
+    if (!circuit.allowed) {
+      log.warn('Retailer checkout circuit is temporarily open', {
+        retailer: dropEvent.retailer,
+        remainingMs: circuit.remainingMs,
+        reason: circuit.reason
+      })
+      const retryMinutes = Math.max(1, Math.ceil(circuit.remainingMs / 60_000))
+      await this._notify.fire({
+        ...dropEvent,
+        productName: `CHECKOUT PAUSED (${dropEvent.retailer}): repeated ${circuit.reason || 'systemic'} failures; automatic probe in about ${retryMinutes} minute${retryMinutes === 1 ? '' : 's'}`,
+        dropType: 'price_drop'
+      })
+      return {
+        success: false,
+        circuitOpen: true,
+        retryAfterMs: circuit.remainingMs,
+        results: []
+      }
+    }
 
     const runKey = task.id || `${dropEvent.retailer}:${dropEvent.productUrl}`
     if (this._activeCheckoutRuns.has(runKey)) {
@@ -415,7 +469,18 @@ export class TaskManager extends EventEmitter {
           ? entry.value
           : { success: false, error: entry.reason?.message }
       )
-      return { success: results.some((result) => result.success), results }
+      const success = results.some((result) => result.success)
+      if (success) {
+        this._retailerCircuit.recordSuccess(dropEvent.retailer)
+      } else {
+        for (const result of results) {
+          this._retailerCircuit.recordFailure(
+            dropEvent.retailer,
+            result.error || result.message || ''
+          )
+        }
+      }
+      return { success, results }
     } finally {
       this._activeCheckoutRuns.delete(runKey)
     }
@@ -494,7 +559,9 @@ export class TaskManager extends EventEmitter {
           )
           const context = await this._pool.launch(accountId, {
             profilePath: account.profile_path,
-            proxy: account.proxy
+            proxy: account.proxy,
+            retailer: task.retailer,
+            priority: 100
           })
           this._checkoutTelemetry?.record(
             attemptId,
@@ -519,6 +586,11 @@ export class TaskManager extends EventEmitter {
               dropEvent,
               mode: task.mode,
               buyLimit: task.buy_limit,
+              maxPrice: task.max_price,
+              requireRetailerSeller:
+                task.retailer === 'walmart'
+                  ? checkoutSettings.walmartRequireRetailerSeller !== false
+                  : false,
               useTargetCartApi: checkoutSettings.targetCartApiEnabled === true,
               targetCheckoutLiteMode: checkoutSettings.targetCheckoutLiteMode === true,
               onStep: (message) => {
@@ -626,7 +698,12 @@ export class TaskManager extends EventEmitter {
 
       const startedAt = Date.now()
       this._pool
-        .pin(accountId, { profilePath: account.profile_path, proxy: account.proxy })
+        .pin(accountId, {
+          profilePath: account.profile_path,
+          proxy: account.proxy,
+          retailer: task.retailer,
+          priority: 10
+        })
         .then(() => {
           log.info('Checkout browser pre-warmed', {
             accountId,
@@ -725,7 +802,6 @@ export function isRetryableCheckoutError(message = '', code = '') {
     'target fulfillment is still loading',
     'target availability did not settle',
     'target cart quantity could not be verified',
-    'target security challenge did not clear',
     "sam's club add to cart is not active yet",
     "sam's club cart does not contain requested item",
     "sam's club cart quantity could not be verified",
@@ -735,7 +811,6 @@ export function isRetryableCheckoutError(message = '', code = '') {
     "sam's club traffic gate did not clear",
     "sam's club cart was emptied before checkout",
     "sam's club checkout request failed temporarily",
-    "sam's club checkout did not reach order review",
-    'http 403'
+    "sam's club checkout did not reach order review"
   ].some((keyword) => value.includes(keyword))
 }

@@ -84,7 +84,9 @@ export class QueueJoiner extends EventEmitter {
       })
       context = await this.browserPool.launch(account.id, {
         profilePath: account.profile_path,
-        proxy: account.proxy
+        proxy: account.proxy,
+        retailer: 'walmart',
+        priority: 80
       })
     } else {
       this.emit('progress', {

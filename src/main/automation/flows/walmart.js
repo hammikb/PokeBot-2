@@ -19,10 +19,22 @@ import {
   ORDER_NUMBER_SELECTOR
 } from './walmart-page-utils.js'
 import { humanDelay } from './checkout-utils.js'
+import { readRetailerCartItem, validateCheckoutSafety } from '../CheckoutSafety.js'
 
 export async function runWalmartFlow(
   context,
-  { productUrl, cvv, account, notificationEngine, dropEvent, mode, onStep = () => {} }
+  {
+    productUrl,
+    cvv,
+    account,
+    notificationEngine,
+    dropEvent,
+    mode,
+    buyLimit = 1,
+    maxPrice = null,
+    requireRetailerSeller = true,
+    onStep = () => {}
+  }
 ) {
   const page = await context.newPage()
   // Create native input bridge — uses nut-js OS-level mouse/keyboard instead of
@@ -88,6 +100,22 @@ export async function runWalmartFlow(
 
     const checkoutReady = page.locator(CHECKOUT_READY_SELECTOR).first()
     await checkoutReady.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {})
+
+    const itemId = extractWalmartItemId(productUrl)
+    if (!itemId) throw new Error(`Cannot extract Walmart item ID from URL: ${productUrl}`)
+    onStep('Verifying Walmart checkout item, quantity, seller, and price')
+    const cartItem = await readRetailerCartItem(page, itemId)
+    validateCheckoutSafety({
+      retailer: 'Walmart',
+      expectedItemId: itemId,
+      actualItemId: cartItem?.itemId,
+      requestedQuantity: buyLimit,
+      actualQuantity: cartItem?.quantity,
+      maxUnitPrice: maxPrice,
+      actualUnitPrice: cartItem?.unitPrice,
+      seller: cartItem?.seller,
+      requireRetailerSeller
+    })
 
     await humanDelay(200, 500)
 
@@ -163,6 +191,10 @@ export async function runWalmartFlow(
       }
     }
   }
+}
+
+export function extractWalmartItemId(productUrl) {
+  return String(productUrl || '').match(/\/(\d{5,})(?:[/?#]|$)/)?.[1] || null
 }
 
 async function ensureWalmartSignedIn(

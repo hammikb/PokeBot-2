@@ -11,6 +11,8 @@ export class SupabaseMonitorSource extends EventEmitter {
     this._client = client
     this._channels = new Map() // productUrl → { channel, productId }
     this._byProduct = new Map() // productId → { productUrl, maxPrice }
+    this._reconnectTimers = new Map()
+    this._health = new Map()
   }
 
   async addProduct({ productUrl, retailer, productKey, productName, maxPrice }) {
@@ -79,12 +81,15 @@ export class SupabaseMonitorSource extends EventEmitter {
         { onConflict: 'user_id,product_id', ignoreDuplicates: true }
       )
 
-    this._byProduct.set(productId, { productUrl, maxPrice: maxPrice ?? null })
+    this._byProduct.set(productId, {
+      productUrl,
+      retailer,
+      productKey,
+      productName,
+      maxPrice: maxPrice ?? null
+    })
 
-    const channel = this._client
-      .channel(`drops:product:${productId}`, { config: { private: true } })
-      .on('broadcast', { event: 'drop' }, ({ payload }) => this._handleDrop(productId, payload))
-    await channel.subscribe()
+    const channel = this._subscribeProductChannel(productId)
     this._channels.set(productUrl, { channel, productId })
 
     return { subscribed: true, productId }
@@ -94,6 +99,11 @@ export class SupabaseMonitorSource extends EventEmitter {
     const meta = this._byProduct.get(productId)
     if (!meta) return
     const price = payload?.price ?? null
+    this._health.set(productId, {
+      status: 'SUBSCRIBED',
+      lastEventAt: Date.now(),
+      lastStatusAt: Date.now()
+    })
     if (meta.maxPrice != null && price != null && Number(price) > Number(meta.maxPrice)) return
     this.emit('drop', {
       retailer: payload.retailer,
@@ -111,6 +121,10 @@ export class SupabaseMonitorSource extends EventEmitter {
     const entry = this._channels.get(productUrl)
     if (!entry) return
     await this._client.removeChannel(entry.channel)
+    const reconnectTimer = this._reconnectTimers.get(entry.productId)
+    if (reconnectTimer) clearTimeout(reconnectTimer)
+    this._reconnectTimers.delete(entry.productId)
+    this._health.delete(entry.productId)
     this._channels.delete(productUrl)
     this._byProduct.delete(entry.productId)
   }
@@ -144,5 +158,58 @@ export class SupabaseMonitorSource extends EventEmitter {
     for (const productUrl of [...this._channels.keys()]) {
       await this.releaseChannel(productUrl)
     }
+  }
+
+  getHealth() {
+    return Object.fromEntries(
+      [...this._byProduct.entries()].map(([productId, meta]) => [
+        meta.productUrl,
+        { productId, ...(this._health.get(productId) || { status: 'CONNECTING' }) }
+      ])
+    )
+  }
+
+  _subscribeProductChannel(productId) {
+    const meta = this._byProduct.get(productId)
+    const channel = this._client
+      .channel(`drops:product:${productId}`, { config: { private: true } })
+      .on('broadcast', { event: 'drop' }, ({ payload }) => this._handleDrop(productId, payload))
+
+    channel.subscribe((status, error) => {
+      const previous = this._health.get(productId) || {}
+      this._health.set(productId, {
+        ...previous,
+        status,
+        lastStatusAt: Date.now(),
+        error: error?.message || null
+      })
+      this.emit('health', { productId, productUrl: meta?.productUrl, status, error })
+      if (['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'].includes(status)) {
+        this._scheduleReconnect(productId)
+      } else if (status === 'SUBSCRIBED') {
+        const timer = this._reconnectTimers.get(productId)
+        if (timer) clearTimeout(timer)
+        this._reconnectTimers.delete(productId)
+      }
+    })
+    return channel
+  }
+
+  _scheduleReconnect(productId) {
+    if (this._reconnectTimers.has(productId)) return
+    const timer = setTimeout(async () => {
+      this._reconnectTimers.delete(productId)
+      const meta = this._byProduct.get(productId)
+      const current = meta ? this._channels.get(meta.productUrl) : null
+      if (!meta || !current) return
+      await this._client.removeChannel(current.channel).catch(() => {})
+      const channel = this._subscribeProductChannel(productId)
+      this._channels.set(meta.productUrl, { channel, productId })
+      this.emit('notice', {
+        productUrl: meta.productUrl,
+        message: 'Realtime monitor reconnected after a channel interruption.'
+      })
+    }, 1500)
+    this._reconnectTimers.set(productId, timer)
   }
 }

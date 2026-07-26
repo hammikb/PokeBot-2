@@ -48,6 +48,14 @@ function makePage({ counts = {}, throws = {}, orderId = 'order-123' } = {}) {
     async textContent() {
       return orderId
     },
+    async evaluate() {
+      return {
+        itemId: '123456',
+        quantity: 1,
+        unitPrice: 29.97,
+        seller: 'Sold and shipped by Walmart.com'
+      }
+    },
     async close() {
       this.closed = true
     }

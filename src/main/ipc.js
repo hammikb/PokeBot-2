@@ -438,7 +438,9 @@ export function registerIpcHandlers({
     const tempProfilePath = join(tmpdir(), tempId)
     const context = await browserPool.launch(tempId, {
       profilePath: tempProfilePath,
-      proxy: stickyProxy
+      proxy: stickyProxy,
+      retailer,
+      priority: 20
     })
 
     let result
@@ -486,7 +488,9 @@ export function registerIpcHandlers({
     if (!account) throw new Error('Account not found')
     const context = await browserPool.launch(account.id, {
       profilePath: account.profile_path,
-      proxy: account.proxy
+      proxy: account.proxy,
+      retailer: account.retailer,
+      priority: 20
     })
     const page = await context.newPage()
     if (account.retailer === 'target') {
@@ -519,7 +523,9 @@ export function registerIpcHandlers({
     }
     const context = await browserPool.launch(account.id, {
       profilePath: account.profile_path,
-      proxy: account.proxy
+      proxy: account.proxy,
+      retailer: 'target',
+      priority: 20
     })
     const result = await checkTargetSession(context, {
       accountName: account.name,
@@ -552,7 +558,9 @@ export function registerIpcHandlers({
     }
     const context = await browserPool.launch(account.id, {
       profilePath: account.profile_path,
-      proxy: account.proxy
+      proxy: account.proxy,
+      retailer: 'target',
+      priority: 20
     })
     const result = await runTargetAutoLogin(context, {
       account,
@@ -601,7 +609,9 @@ export function registerIpcHandlers({
     if (!account) throw new Error('Account not found')
     const context = await browserPool.launch(account.id, {
       profilePath: account.profile_path,
-      proxy: account.proxy
+      proxy: account.proxy,
+      retailer: account.retailer,
+      priority: 10
     })
     return cookieManager.inspectCookies(context, account.retailer)
   })

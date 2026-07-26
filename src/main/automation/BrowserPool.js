@@ -6,10 +6,13 @@ const log = createModuleLogger('BrowserPool')
 const DEFAULT_TIMEOUT = 60 * 60 * 1000 // 60 minutes
 const HEALTH_CHECK_INTERVAL = 5 * 60 * 1000 // 5 minutes
 
-// Shape cookie configuration
-const SHAPE_REFRESH_INTERVAL = 30 * 1000 // 30 seconds - MORE FREQUENT
 const SHAPE_COOKIE_NAMES = ['_shapes', 'shape', '_sfid', '_sctr', '_sdid']
-const SHAPE_MAX_RETRIES = 10 // More retries before warning
+const RETAILER_HOME = {
+  target: 'https://www.target.com/',
+  walmart: 'https://www.walmart.com/',
+  samsclub: 'https://www.samsclub.com/',
+  'pokemon-center': 'https://www.pokemoncenter.com/'
+}
 
 // Shared browser launch arguments used by all contexts
 const DEFAULT_BROWSER_ARGS = [
@@ -43,23 +46,23 @@ export class BrowserPool {
   constructor({
     maxConcurrent = 3,
     contextTimeout = DEFAULT_TIMEOUT,
-    setupWarmupMs = 5000,
-    setupMouseDelayMs = 500
+    setupWarmupMs = 1500,
+    capacityWaitMs = 20_000
   } = {}) {
     this._maxConcurrent = maxConcurrent
     this._contextTimeout = contextTimeout
     this._setupWarmupMs = setupWarmupMs
-    this._setupMouseDelayMs = setupMouseDelayMs
+    this._capacityWaitMs = capacityWaitMs
     this._active = new Map()
     this._pending = new Map()
     this._pendingProxy = new Map()
     this._pinned = new Set()
     this._lastActivity = new Map()
     this._proxyByAccount = new Map()
+    this._retailerByAccount = new Map()
     this._healthCheckTimer = null
-    this._refreshTimers = new Map()
-    this._shapeRetryCount = new Map()
-    this._shapeEstablished = new Map()
+    this._capacityWaiters = []
+    this._capacityReservations = new Set()
     this._startHealthCheck()
   }
 
@@ -86,137 +89,10 @@ export class BrowserPool {
     this._lastActivity.set(accountId, Date.now())
   }
 
-  async _refreshShapeSession(accountId, context) {
-    try {
-      const pages = context.pages()
-      // The setup page is closed after launch, so pages[0] may be dead.
-      const page = pages.find((p) => !p.isClosed()) || (await context.newPage())
-
-      // CRITICAL: Always ensure we're on Target.com
-      const currentUrl = page.url()
-      if (!currentUrl.includes('target.com')) {
-        log.debug('Navigating to Target for Shape refresh', { accountId })
-        await page.goto('https://www.target.com', {
-          waitUntil: 'domcontentloaded',
-          timeout: 15000
-        })
-        // Wait for page to settle
-        await new Promise((resolve) => setTimeout(resolve, 2000))
-      }
-
-      // CRITICAL: Simulate human-like behavior to trigger Shape
-      // Shape activates on mouse movement and scrolling
-      for (let i = 0; i < 3; i++) {
-        await page.mouse.move(
-          Math.floor(Math.random() * 1200) + 100,
-          Math.floor(Math.random() * 800) + 100
-        )
-        await new Promise((resolve) => setTimeout(resolve, 300 + Math.random() * 500))
-      }
-
-      // Scroll a bit
-      await page.evaluate(() => {
-        window.scrollBy(0, Math.floor(Math.random() * 200) + 50)
-      })
-
-      // Wait for Shape scripts to execute
-      await new Promise((resolve) => setTimeout(resolve, 1500))
-
-      // Check for Shape cookies
-      const cookies = await context.cookies('https://www.target.com')
-      const shapeCookies = cookies.filter((c) =>
-        SHAPE_COOKIE_NAMES.some((name) => c.name.toLowerCase().includes(name))
-      )
-
-      const hasShape = shapeCookies.length > 0
-      this._shapeEstablished.set(accountId, hasShape)
-
-      if (hasShape) {
-        this._shapeRetryCount.set(accountId, 0)
-        log.info('✅ Shape session established!', {
-          accountId,
-          cookies: shapeCookies.map((c) => c.name),
-          domains: shapeCookies.map((c) => c.domain)
-        })
-      } else {
-        const retries = (this._shapeRetryCount.get(accountId) || 0) + 1
-        this._shapeRetryCount.set(accountId, retries)
-
-        if (retries <= SHAPE_MAX_RETRIES) {
-          log.debug('Waiting for Shape cookies to be set', {
-            accountId,
-            attempt: retries,
-            maxRetries: SHAPE_MAX_RETRIES
-          })
-        } else if (retries === SHAPE_MAX_RETRIES + 1) {
-          log.warn('⚠️ Shape cookies not established - check proxy/network', {
-            accountId,
-            attempts: retries,
-            url: currentUrl,
-            hasProxy: this._proxyByAccount.has(accountId)
-          })
-        }
-      }
-
-      this._updateActivity(accountId)
-    } catch (err) {
-      log.error('Failed to refresh Shape session', {
-        accountId,
-        error: err.message
-      })
-    }
-  }
-
-  _startShapeRefreshLoop(accountId, context) {
-    if (this._refreshTimers.has(accountId)) {
-      clearInterval(this._refreshTimers.get(accountId))
-      this._refreshTimers.delete(accountId)
-    }
-
-    this._shapeRetryCount.set(accountId, 0)
-    this._shapeEstablished.set(accountId, false)
-
-    log.info('Starting Shape refresh loop', {
-      accountId,
-      interval: SHAPE_REFRESH_INTERVAL
-    })
-
-    // Do an immediate refresh with more aggressive behavior
-    setTimeout(() => {
-      this._refreshShapeSession(accountId, context).catch((err) => {
-        log.error('Initial Shape refresh failed', { accountId, error: err.message })
-      })
-    }, 3000)
-
-    const timer = setInterval(() => {
-      if (this._active.has(accountId)) {
-        const ctx = this._active.get(accountId)
-        if (isContextOpen(ctx)) {
-          this._refreshShapeSession(accountId, ctx).catch((err) => {
-            log.error('Periodic Shape refresh failed', { accountId, error: err.message })
-          })
-        } else {
-          this._stopShapeRefreshLoop(accountId)
-        }
-      } else {
-        this._stopShapeRefreshLoop(accountId)
-      }
-    }, SHAPE_REFRESH_INTERVAL)
-
-    this._refreshTimers.set(accountId, timer)
-  }
-
-  _stopShapeRefreshLoop(accountId) {
-    if (this._refreshTimers.has(accountId)) {
-      clearInterval(this._refreshTimers.get(accountId))
-      this._refreshTimers.delete(accountId)
-      this._shapeRetryCount.delete(accountId)
-      this._shapeEstablished.delete(accountId)
-      log.info('Stopped Shape refresh loop', { accountId })
-    }
-  }
-
-  async launch(accountId, { profilePath, proxy }) {
+  async launch(
+    accountId,
+    { profilePath, proxy, retailer = null, priority = 0, waitTimeoutMs = this._capacityWaitMs }
+  ) {
     const requestedProxy = buildProxyUrl(proxy)
     if (this._active.has(accountId)) {
       const context = this._active.get(accountId)
@@ -227,13 +103,12 @@ export class BrowserPool {
           )
         }
         this._updateActivity(accountId)
-        this._startShapeRefreshLoop(accountId, context)
         return context
       }
       this._active.delete(accountId)
       this._lastActivity.delete(accountId)
       this._proxyByAccount.delete(accountId)
-      this._stopShapeRefreshLoop(accountId)
+      this._retailerByAccount.delete(accountId)
     }
 
     if (this._pending.has(accountId)) {
@@ -243,18 +118,25 @@ export class BrowserPool {
       return this._pending.get(accountId)
     }
 
-    const pending = this._launchNew(accountId, { profilePath, proxy })
+    const pending = (async () => {
+      const reservation = await this._waitForCapacity(accountId, priority, waitTimeoutMs)
+      try {
+        return await this._launchNew(accountId, { profilePath, proxy, retailer })
+      } finally {
+        this._capacityReservations.delete(reservation)
+        this._drainCapacityWaiters()
+      }
+    })()
     this._pending.set(accountId, pending)
     this._pendingProxy.set(accountId, requestedProxy)
     try {
-      const context = await pending
-      this._startShapeRefreshLoop(accountId, context)
-      return context
+      return await pending
     } finally {
       if (this._pending.get(accountId) === pending) {
         this._pending.delete(accountId)
         this._pendingProxy.delete(accountId)
       }
+      this._drainCapacityWaiters()
     }
   }
 
@@ -271,7 +153,6 @@ export class BrowserPool {
   async unpin(accountId, { close = false } = {}) {
     this._pinned.delete(accountId)
     if (close) {
-      this._stopShapeRefreshLoop(accountId)
       await this.close(accountId)
     }
   }
@@ -280,12 +161,7 @@ export class BrowserPool {
     return this._pinned.has(accountId)
   }
 
-  async _launchNew(accountId, { profilePath, proxy }) {
-    if (this._active.size + this._pending.size >= this._maxConcurrent) {
-      log.error('Browser pool at capacity', { maxConcurrent: this._maxConcurrent })
-      throw new Error(`Browser pool at max capacity (${this._maxConcurrent})`)
-    }
-
+  async _launchNew(accountId, { profilePath, proxy, retailer }) {
     try {
       mkdirSync(profilePath, { recursive: true })
     } catch (err) {
@@ -312,7 +188,7 @@ export class BrowserPool {
       contextOptions.proxy = proxyUrl
       log.info('Using proxy for browser', { accountId, proxy: proxyUrl })
     } else {
-      log.warn('No proxy configured - Target may block this connection', { accountId })
+      log.warn('No proxy configured for browser session', { accountId, retailer })
     }
 
     try {
@@ -322,34 +198,32 @@ export class BrowserPool {
       })
       const context = await launchPersistentContext(contextOptions)
 
-      const setupPage = await context.newPage()
-      try {
-        log.info('Navigating to Target.com', { accountId })
-        await setupPage.goto('https://www.target.com', {
-          waitUntil: 'domcontentloaded',
-          timeout: 45000
-        })
-        log.info('Initial Target navigation completed', { accountId })
-
-        // CRITICAL: Wait for page to fully initialize
-        await new Promise((resolve) => setTimeout(resolve, this._setupWarmupMs))
-
-        // CRITICAL: Do some initial mouse movement to trigger Shape
-        await setupPage.mouse.move(500, 400)
-        await new Promise((resolve) => setTimeout(resolve, this._setupMouseDelayMs))
-        await setupPage.mouse.move(700, 300)
-      } catch (navErr) {
-        log.warn('Initial Target navigation failed, will retry via refresh loop', {
-          accountId,
-          error: navErr.message
-        })
-      } finally {
-        // Close the setup page to prevent memory leak - checkout flows create their own pages
-        await setupPage.close().catch(() => {})
+      const warmupUrl = RETAILER_HOME[retailer]
+      if (warmupUrl) {
+        const setupPage = await context.newPage()
+        try {
+          log.info('Preparing retailer origin', { accountId, retailer })
+          await setupPage.goto(warmupUrl, {
+            waitUntil: 'domcontentloaded',
+            timeout: 30_000
+          })
+          if (this._setupWarmupMs) {
+            await new Promise((resolve) => setTimeout(resolve, this._setupWarmupMs))
+          }
+        } catch (navErr) {
+          log.warn('Retailer origin preparation failed; checkout will retry normally', {
+            accountId,
+            retailer,
+            error: navErr.message
+          })
+        } finally {
+          await setupPage.close().catch(() => {})
+        }
       }
 
       this._active.set(accountId, context)
       this._proxyByAccount.set(accountId, proxyUrl)
+      this._retailerByAccount.set(accountId, retailer)
       this._updateActivity(accountId)
 
       context.on?.('close', () => {
@@ -357,7 +231,8 @@ export class BrowserPool {
           this._active.delete(accountId)
           this._lastActivity.delete(accountId)
           this._proxyByAccount.delete(accountId)
-          this._stopShapeRefreshLoop(accountId)
+          this._retailerByAccount.delete(accountId)
+          this._drainCapacityWaiters()
           log.info('Browser context closed', { accountId })
         }
       })
@@ -393,22 +268,10 @@ export class BrowserPool {
     log.info('Launching ephemeral monitor context', { accountId, proxy: Boolean(proxyUrl) })
     const context = await launchPersistentContext(contextOptions)
 
-    try {
-      const page = await context.newPage()
-      await page.goto('https://www.target.com', {
-        waitUntil: 'domcontentloaded',
-        timeout: 30000
-      })
-    } catch {
-      // Monitors can fail silently
-    }
-
     return context
   }
 
   async close(accountId) {
-    this._stopShapeRefreshLoop(accountId)
-
     const ctx = this._active.get(accountId)
     if (ctx) {
       try {
@@ -418,6 +281,9 @@ export class BrowserPool {
       }
       this._active.delete(accountId)
       this._proxyByAccount.delete(accountId)
+      this._retailerByAccount.delete(accountId)
+      this._lastActivity.delete(accountId)
+      this._drainCapacityWaiters()
     }
   }
 
@@ -428,8 +294,9 @@ export class BrowserPool {
     }
     this._pinned.clear()
 
-    for (const accountId of this._refreshTimers.keys()) {
-      this._stopShapeRefreshLoop(accountId)
+    for (const waiter of this._capacityWaiters.splice(0)) {
+      clearTimeout(waiter.timer)
+      waiter.reject(new Error('Browser pool is shutting down'))
     }
 
     for (const id of [...this._active.keys()]) await this.close(id)
@@ -458,12 +325,50 @@ export class BrowserPool {
     }
   }
 
-  isShapeEstablished(accountId) {
-    return this._shapeEstablished.get(accountId) || false
+  async _waitForCapacity(accountId, priority, timeoutMs) {
+    if (this._active.size + this._capacityReservations.size < this._maxConcurrent) {
+      const token = Symbol(accountId)
+      this._capacityReservations.add(token)
+      return token
+    }
+
+    return new Promise((resolve, reject) => {
+      const waiter = {
+        accountId,
+        priority: Number(priority) || 0,
+        sequence: Date.now() + Math.random(),
+        resolve,
+        reject,
+        timer: null
+      }
+      waiter.timer = setTimeout(
+        () => {
+          this._capacityWaiters = this._capacityWaiters.filter((entry) => entry !== waiter)
+          reject(new Error(`Browser capacity wait timed out after ${timeoutMs}ms`))
+        },
+        Math.max(1000, Number(timeoutMs) || this._capacityWaitMs)
+      )
+      this._capacityWaiters.push(waiter)
+      this._capacityWaiters.sort((a, b) => b.priority - a.priority || a.sequence - b.sequence)
+      log.info('Browser launch waiting for capacity', {
+        accountId,
+        priority: waiter.priority,
+        waiting: this._capacityWaiters.length
+      })
+    })
   }
 
-  getShapeRetryCount(accountId) {
-    return this._shapeRetryCount.get(accountId) || 0
+  _drainCapacityWaiters() {
+    while (
+      this._capacityWaiters.length > 0 &&
+      this._active.size + this._capacityReservations.size < this._maxConcurrent
+    ) {
+      const waiter = this._capacityWaiters.shift()
+      clearTimeout(waiter.timer)
+      const token = Symbol(waiter.accountId)
+      this._capacityReservations.add(token)
+      waiter.resolve(token)
+    }
   }
 }
 

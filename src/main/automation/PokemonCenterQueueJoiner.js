@@ -114,7 +114,9 @@ export class PokemonCenterQueueJoiner extends EventEmitter {
     if (account?.profile_path) {
       job.context = await this.browserPool.pin(account.id, {
         profilePath: account.profile_path,
-        proxy: account.proxy
+        proxy: account.proxy,
+        retailer: 'pokemon-center',
+        priority: 70
       })
     } else {
       job.context = await this.browserPool.launchContext({

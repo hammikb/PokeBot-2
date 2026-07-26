@@ -49,7 +49,9 @@ export class ProfileWarmup {
     const settleMs = Math.max(0, Math.min(Number(options.settleMs) || 1500, 5000))
     const context = await this.browserPool.launch(account.id, {
       profilePath: account.profile_path,
-      proxy: account.proxy
+      proxy: account.proxy,
+      retailer: account.retailer,
+      priority: 5
     })
     const page = await context.newPage()
     const startedAt = Date.now()

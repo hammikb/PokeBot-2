@@ -46,6 +46,14 @@ function makePage({ throws = {} } = {}) {
     async textContent() {
       return 'order-123'
     },
+    async evaluate() {
+      return {
+        itemId: '123456',
+        quantity: 1,
+        unitPrice: 29.97,
+        seller: 'Sold and shipped by Walmart.com'
+      }
+    },
     async close() {
       this.closed = true
     }
@@ -93,7 +101,7 @@ describe('checkout test mode', () => {
     const onStep = vi.fn()
 
     const result = await runWalmartFlow(makeContext(page), {
-      productUrl: 'https://www.walmart.com/ip/example/123',
+      productUrl: 'https://www.walmart.com/ip/example/123456',
       cvv: '456',
       mode: 'test-checkout',
       onStep

@@ -5,6 +5,8 @@ import { startCheckoutDiagnostics } from '../CheckoutDiagnostics.js'
 import { TargetPageCoordinator } from '../TargetPageCoordinator.js'
 import { humanDelay } from './checkout-utils.js'
 import { createModuleLogger } from '../../utils/logger.js'
+import { parseDisplayedPrice } from '../CheckoutSafety.js'
+import { validateTargetCartForCheckout } from './target/TargetCheckoutSafety.js'
 
 const log = createModuleLogger('TargetFlow')
 const TARGET_CART_API_COOLDOWN_MS = 10 * 60 * 1000
@@ -33,6 +35,7 @@ export async function runTargetFlow(
     dropEvent,
     mode,
     buyLimit = 1,
+    maxPrice = null,
     useTargetCartApi = false,
     targetCheckoutLiteMode = false,
     onStep = () => {},
@@ -44,20 +47,6 @@ export async function runTargetFlow(
   const page = await context.newPage()
   const coordinator = await TargetPageCoordinator.attach(page)
   onStep('Target live page coordinator active')
-
-  // [TARGET] Check Shape session health at start
-  if (browserPool && accountId) {
-    const hasShape = await browserPool.hasValidShapeSession(accountId)
-    if (!hasShape) {
-      log.warn('No Shape cookies found at start of Target flow', { accountId })
-      onStep('⚠️ Shape session not initialized - waiting for cookies...')
-      // Wait a moment for the refresh loop to establish cookies
-      await new Promise((resolve) => setTimeout(resolve, 3000))
-    } else {
-      log.info('Shape session verified at start', { accountId })
-      onStep('✅ Shape session verified')
-    }
-  }
 
   if (targetCheckoutLiteMode) {
     await enableTargetCheckoutLiteMode(page)
@@ -330,21 +319,10 @@ export async function runTargetFlow(
         dropEvent,
         coordinator
       })
-      if (!cartState?.present) {
-        throw new Error('Target did not confirm the requested item in the cart')
-      }
-      if (!Number.isInteger(cartState.quantity) || cartState.quantity < 1) {
-        throw new Error('Target cart quantity could not be verified for the requested item')
-      }
-      cartQuantityActual = cartState.quantity
-      const requestedQuantity = Math.max(1, Number(buyLimit) || 1)
-      if (cartQuantityActual > requestedQuantity) {
-        throw new Error(
-          `Target cart quantity ${cartQuantityActual} exceeds requested maximum ${requestedQuantity}`
-        )
-      }
+      const safety = validateTargetCartForCheckout({ tcin, cartState, buyLimit, maxPrice })
+      cartQuantityActual = safety.quantity
       onStep(
-        cartQuantityActual < requestedQuantity
+        safety.quantityLimited
           ? `Target limited the cart to ${cartQuantityActual}; continuing with the permitted quantity`
           : `Requested item confirmed in cart with quantity ${cartQuantityActual}`
       )
@@ -361,8 +339,8 @@ export async function runTargetFlow(
       timeout: 30000
     })
 
-    // NOTE: Do NOT check/refresh Shape session here — ensureShapeSession navigates
-    // to target.com which destroys the cart state. Shape is checked before ATC only.
+    // Preserve the checkout page. Challenge handling below observes and waits for
+    // Target's verification flow without navigating away from the cart.
     await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
     onMilestone('checkout_opened', 'Target checkout loaded')
 
@@ -395,6 +373,12 @@ export async function runTargetFlow(
       })
     }
     onMilestone('checkout_ready', 'Target order review controls ready')
+
+    if (tcin) {
+      onStep('Final Target item, quantity, and price check')
+      const finalCartState = await readTargetCartItemState(page, tcin)
+      validateTargetCartForCheckout({ tcin, cartState: finalCartState, buyLimit, maxPrice })
+    }
 
     if (isTestMode) {
       onStep('TEST MODE: on order review page - stopping before Place your order')
@@ -477,33 +461,19 @@ export async function runTargetFlow(
   }
 }
 
-// [TARGET] New helper function to ensure Shape session is healthy
+// Observe Target's session after the requested page has loaded. Never navigate
+// away to "refresh" cookies: doing so destroys cart/queue state and makes the
+// checkout slower. Explicit challenges are handled by the normal challenge path.
 async function ensureShapeSession(page, browserPool, accountId, onStep) {
   const hasShape = await browserPool.hasValidShapeSession(accountId)
   if (!hasShape) {
-    onStep('⚠️ Shape session missing - refreshing...')
-    log.warn('Shape session missing, attempting refresh', { accountId })
-
-    // Trigger a manual refresh by navigating to Target
-    try {
-      await page.goto('https://www.target.com', { waitUntil: 'networkidle', timeout: 15000 })
-      // Wait a moment for cookies to be set
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-
-      // Check again
-      const hasShapeNow = await browserPool.hasValidShapeSession(accountId)
-      if (hasShapeNow) {
-        onStep('✅ Shape session restored')
-        log.info('Shape session restored after manual refresh', { accountId })
-      } else {
-        onStep('⚠️ Shape session still missing - continuing with caution')
-        log.warn('Shape session still missing after manual refresh', { accountId })
-      }
-    } catch (err) {
-      log.warn('Failed to refresh Shape session manually', { accountId, error: err.message })
-    }
+    onStep('Target session cookies are still initializing; continuing on the current page')
+    log.debug('Target session cookie not observed after navigation', {
+      accountId,
+      url: page.url()
+    })
   } else {
-    onStep('✅ Shape session healthy')
+    onStep('Target session ready')
   }
 }
 
@@ -561,17 +531,16 @@ export async function submitTargetOrder(
   let reloadFallbacks = 0
 
   for (let attempt = 0; attempt <= maxSubmitRetries; attempt += 1) {
-    // [TARGET] Check Shape session health before each retry
+    // Observe session health without navigating away from checkout.
     if (browserPool && accountId && attempt > 0 && attempt % 3 === 0) {
       const hasShape = await browserPool.hasValidShapeSession(accountId)
       if (!hasShape) {
-        onStep('⚠️ Shape session degraded - refreshing before retry')
-        log.warn('Shape session degraded during submit retries', { accountId, attempt })
-        // Try to refresh the session
-        await page
-          .goto('https://www.target.com', { waitUntil: 'networkidle', timeout: 10000 })
-          .catch(() => {})
-        await new Promise((resolve) => setTimeout(resolve, 2000))
+        onStep('Target session cookie not visible; preserving the active checkout page')
+        log.warn('Target session cookie not observed during submit retry', {
+          accountId,
+          attempt,
+          url: page.url()
+        })
       }
     }
 
@@ -1056,7 +1025,7 @@ export async function readTargetCartItemState(page, tcin) {
         )
       ]
       const productElement = matches.find(visible) || matches[0]
-      if (!productElement) return { present: false, quantity: null, source: 'dom' }
+      if (!productElement) return { present: false, quantity: null, unitPrice: null, source: 'dom' }
 
       const rowSelectors = [
         '[data-test*="cartItem"]',
@@ -1066,7 +1035,18 @@ export async function readTargetCartItemState(page, tcin) {
         'li'
       ]
       const row = productElement.closest(rowSelectors.join(',')) || productElement.parentElement
-      if (!row) return { present: true, quantity: null, source: 'product-link' }
+      if (!row) {
+        return { present: true, quantity: null, unitPrice: null, source: 'product-link' }
+      }
+      const rowText = row.innerText || row.textContent || ''
+      const priceElement = row.querySelector(
+        '[itemprop="price"], [data-test*="price" i], [aria-label*="current price" i]'
+      )
+      const priceText = priceElement?.textContent || rowText
+      const priceMatches = [...priceText.matchAll(/\$\s*([\d,]+(?:\.\d{1,2})?)/g)]
+        .map((match) => Number(match[1].replace(/,/g, '')))
+        .filter((price) => Number.isFinite(price) && price >= 0)
+      const unitPrice = priceMatches.length ? Math.min(...priceMatches) : null
 
       const controls = row.querySelectorAll(
         'select[data-test*="Quantity"], select[aria-label*="quantity" i], input[aria-label*="quantity" i], input[name*="quantity" i], [role="combobox"][aria-label*="quantity" i], button[aria-label*="quantity" i]'
@@ -1079,13 +1059,16 @@ export async function readTargetCartItemState(page, tcin) {
           control.getAttribute('aria-label') ||
           control.textContent
         const quantity = parseQuantity(raw)
-        if (quantity !== null) return { present: true, quantity, source: 'item-control' }
+        if (quantity !== null) {
+          return { present: true, quantity, unitPrice, source: 'item-control' }
+        }
       }
 
       const quantity = parseQuantity(row.innerText || row.textContent || '')
       return {
         present: true,
         quantity,
+        unitPrice,
         source: quantity === null ? 'product-row' : 'item-row-text'
       }
     }, tcinText)
@@ -1102,9 +1085,11 @@ export async function readTargetCartItemState(page, tcin) {
   const serializedMatch = nearby.match(
     /["'](?:quantity|item_quantity|cart_quantity)["']\s*:\s*["']?(\d{1,2})/i
   )
+  const unitPrice = parseDisplayedPrice(nearby)
   return {
     present: true,
     quantity: serializedMatch ? Number(serializedMatch[1]) : null,
+    unitPrice,
     source: serializedMatch ? 'serialized-item-state' : 'serialized-tcin'
   }
 }

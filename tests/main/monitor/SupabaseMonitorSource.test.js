@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SupabaseMonitorSource } from '../../../src/main/monitor/SupabaseMonitorSource.js'
 
 // Fake supabase client. Captures upserts/inserts, channel creation, and lets the test
@@ -54,7 +54,11 @@ function makeFakeClient({
           if (type === 'broadcast') dropHandler = cb
           return ch
         },
-        subscribe: async () => ch
+        subscribe: (callback) => {
+          ch.statusCallback = callback
+          callback?.('SUBSCRIBED')
+          return ch
+        }
       }
       calls.channels.push(ch)
       return ch
@@ -63,12 +67,20 @@ function makeFakeClient({
       calls.removed += 1
     }
   }
-  return { client, calls, fireDrop: (payload) => dropHandler({ payload }) }
+  return {
+    client,
+    calls,
+    fireDrop: (payload) => dropHandler({ payload }),
+    emitStatus: (status, error) => calls.channels.at(-1)?.statusCallback?.(status, error)
+  }
 }
 
 const SEED = { id: 'prod-1' }
 
 describe('SupabaseMonitorSource', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
   it('resolves the product, subscribes the private topic, and ensures a subscription', async () => {
     const { client, calls } = makeFakeClient({ product: SEED })
     const source = new SupabaseMonitorSource({ client })
@@ -267,5 +279,29 @@ describe('SupabaseMonitorSource', () => {
 
     expect(calls.removed).toBe(1)
     expect(calls.deletes).toEqual([])
+  })
+
+  it('reports channel health and recreates an interrupted subscription', async () => {
+    vi.useFakeTimers()
+    const { client, calls, emitStatus } = makeFakeClient({ product: SEED })
+    const source = new SupabaseMonitorSource({ client })
+    await source.addProduct({
+      productUrl: 'https://www.target.com/p/A-94336414',
+      retailer: 'target',
+      productKey: '94336414',
+      maxPrice: null
+    })
+
+    expect(source.getHealth()['https://www.target.com/p/A-94336414']).toMatchObject({
+      productId: 'prod-1',
+      status: 'SUBSCRIBED'
+    })
+    emitStatus('CHANNEL_ERROR', new Error('socket lost'))
+    await vi.advanceTimersByTimeAsync(1500)
+
+    expect(calls.removed).toBe(1)
+    expect(calls.channels).toHaveLength(2)
+    expect(source.getHealth()['https://www.target.com/p/A-94336414'].status).toBe('SUBSCRIBED')
+    await source.stop()
   })
 })

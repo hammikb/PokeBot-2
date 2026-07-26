@@ -2,6 +2,7 @@ import { waitForCaptchaIfNeeded } from '../captcha.js'
 import { startTrace } from '../TraceRecorder.js'
 import { fillCheckoutPayment } from './checkout-fields.js'
 import { startCheckoutDiagnostics } from '../CheckoutDiagnostics.js'
+import { parseDisplayedPrice, validateCheckoutSafety } from '../CheckoutSafety.js'
 
 const PLACE_ORDER_SELECTOR =
   'button:visible:has-text("Place order"), button:visible:has-text("Place Order"), button[data-testid*="place-order" i]:visible'
@@ -20,6 +21,7 @@ export async function runSamsClubFlow(
     dropEvent,
     mode,
     buyLimit = 1,
+    maxPrice = null,
     onStep = () => {},
     onMilestone = () => {}
   }
@@ -87,6 +89,16 @@ export async function runSamsClubFlow(
       throw new Error(`Sam's Club cart does not contain requested item ${itemId}`)
     }
     const cartQuantity = await setCartQuantity(page, cartItem, buyLimit, onStep)
+    const cartItemText = await cartItem.innerText().catch(() => '')
+    validateCheckoutSafety({
+      retailer: "Sam's Club",
+      expectedItemId: itemId,
+      actualItemId: itemId,
+      requestedQuantity: buyLimit,
+      actualQuantity: cartQuantity,
+      maxUnitPrice: maxPrice,
+      actualUnitPrice: parseDisplayedPrice(cartItemText)
+    })
     onMilestone('cart_ready', `Item ${itemId} verified in cart at quantity ${cartQuantity}`)
 
     await openSamsCheckout(page, itemId, onStep, onMilestone)

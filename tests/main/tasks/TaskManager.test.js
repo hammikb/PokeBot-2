@@ -35,6 +35,8 @@ describe('Target checkout retry classification', () => {
     expect(isRetryableCheckoutError('Item is out of stock (Target availability settled)')).toBe(
       false
     )
+    expect(isRetryableCheckoutError('Target security challenge did not clear')).toBe(false)
+    expect(isRetryableCheckoutError('HTTP 403')).toBe(false)
   })
 
   it("retries temporary Sam's Club traffic and checkout failures", () => {
@@ -143,10 +145,15 @@ describe('TaskManager test checkout', () => {
     })
 
     expect(result.success).toBe(true)
-    expect(browserPool.launch).toHaveBeenCalledWith('account-1', {
-      profilePath: 'profile-1',
-      proxy: ''
-    })
+    expect(browserPool.launch).toHaveBeenCalledWith(
+      'account-1',
+      expect.objectContaining({
+        profilePath: 'profile-1',
+        proxy: '',
+        retailer: 'target',
+        priority: 100
+      })
+    )
     expect(runTargetFlow).toHaveBeenCalledWith(
       browserContext,
       expect.objectContaining({
@@ -227,10 +234,15 @@ describe('TaskManager test checkout', () => {
     })
 
     expect(result.success).toBe(true)
-    expect(browserPool.launch).toHaveBeenCalledWith('account-1', {
-      profilePath: 'profile-1',
-      proxy: ''
-    })
+    expect(browserPool.launch).toHaveBeenCalledWith(
+      'account-1',
+      expect.objectContaining({
+        profilePath: 'profile-1',
+        proxy: '',
+        retailer: 'walmart',
+        priority: 100
+      })
+    )
     expect(runWalmartFlow).toHaveBeenCalledWith(
       browserContext,
       expect.objectContaining({

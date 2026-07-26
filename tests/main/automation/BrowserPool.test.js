@@ -74,6 +74,7 @@ describe('BrowserPool', () => {
       profilePath: 'C:/tmp/walmart-account',
       proxy: ''
     })
+    await vi.waitFor(() => expect(resolveLaunch).toBeTypeOf('function'))
     resolveLaunch()
 
     await expect(first).resolves.toBe(context)
@@ -125,6 +126,54 @@ describe('BrowserPool', () => {
       })
     ).rejects.toThrow('different proxy')
     expect(mocks.launchPersistentContext).toHaveBeenCalledTimes(1)
+    await pool.closeAll()
+  })
+
+  it('warms the requested retailer and never redirects Walmart to Target', async () => {
+    const pool = new BrowserPool({ setupWarmupMs: 0 })
+    const context = makeContext({ open: true })
+    mocks.launchPersistentContext.mockReset()
+    mocks.launchPersistentContext.mockResolvedValueOnce(context)
+
+    await pool.launch('walmart-account', {
+      profilePath: 'C:/tmp/walmart-account',
+      proxy: '',
+      retailer: 'walmart'
+    })
+
+    const setupPage = await context.newPage.mock.results[0].value
+    expect(setupPage.goto).toHaveBeenCalledWith(
+      'https://www.walmart.com/',
+      expect.objectContaining({ waitUntil: 'domcontentloaded' })
+    )
+    expect(setupPage.goto).not.toHaveBeenCalledWith('https://www.target.com/', expect.anything())
+    await pool.closeAll()
+  })
+
+  it('waits for capacity instead of failing a checkout launch immediately', async () => {
+    const pool = new BrowserPool({ maxConcurrent: 1, setupWarmupMs: 0, capacityWaitMs: 1000 })
+    const firstContext = makeContext({ open: true })
+    const secondContext = makeContext({ open: true })
+    mocks.launchPersistentContext.mockReset()
+    mocks.launchPersistentContext
+      .mockResolvedValueOnce(firstContext)
+      .mockResolvedValueOnce(secondContext)
+
+    await pool.launch('first', {
+      profilePath: 'C:/tmp/first',
+      proxy: '',
+      retailer: 'target'
+    })
+    const secondLaunch = pool.launch('second', {
+      profilePath: 'C:/tmp/second',
+      proxy: '',
+      retailer: 'walmart',
+      priority: 100
+    })
+
+    await vi.waitFor(() => expect(pool._capacityWaiters).toHaveLength(1))
+    await pool.close('first')
+    await expect(secondLaunch).resolves.toBe(secondContext)
     await pool.closeAll()
   })
 })
