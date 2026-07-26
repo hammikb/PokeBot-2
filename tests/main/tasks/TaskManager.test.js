@@ -170,7 +170,8 @@ describe('TaskManager test checkout', () => {
     const { manager, browserContext } = makeTaskManager(
       {
         targetCartApiEnabled: true,
-        targetCheckoutLiteMode: true
+        targetCheckoutLiteMode: true,
+        targetCommitNavigationEnabled: true
       },
       { payment_method_id: 'payment-1' }
     )
@@ -190,6 +191,7 @@ describe('TaskManager test checkout', () => {
       expect.objectContaining({
         useTargetCartApi: true,
         targetCheckoutLiteMode: true,
+        targetCommitNavigationEnabled: true,
         cardNumber: '4111111111111111',
         cardLast4: '1111',
         cvv: '456'

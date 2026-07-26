@@ -346,6 +346,7 @@ export function buildExperimentProfile({ task, settings = {}, appVersion = 'unkn
     cart_strategy:
       retailer === 'target' && settings.targetCartApiEnabled === true ? 'api_preferred' : 'browser',
     lite_mode: retailer === 'target' && settings.targetCheckoutLiteMode === true,
+    commit_navigation: retailer === 'target' && settings.targetCommitNavigationEnabled === true,
     browser_profile: 'persistent',
     monitor_source: 'supabase',
     app_version: String(appVersion || 'unknown').slice(0, 32),

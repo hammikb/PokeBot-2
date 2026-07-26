@@ -6,7 +6,8 @@ const RETAILER_SESSION_PAGES = {
   target: [
     'https://www.target.com/',
     'https://www.target.com/account',
-    'https://www.target.com/cart'
+    'https://www.target.com/cart',
+    'https://www.target.com/account/paymentcards'
   ],
   walmart: [
     'https://www.walmart.com/',

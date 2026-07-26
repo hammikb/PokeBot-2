@@ -11,6 +11,7 @@ import { SupabaseMonitorSource } from '../monitor/SupabaseMonitorSource.js'
 import { DROP_TYPES } from '../../shared/constants.js'
 import { createModuleLogger } from '../utils/logger.js'
 import { RetailerCircuitBreaker } from './RetailerCircuitBreaker.js'
+import { OrderSubmissionGate } from './OrderSubmissionGate.js'
 
 const log = createModuleLogger('TaskManager')
 const POKEMON_CENTER_AUTO_JOIN_ID = 'pokemon-center-auto-join'
@@ -461,8 +462,16 @@ export class TaskManager extends EventEmitter {
         return { success: false, results: [result] }
       }
 
+      const orderSubmissionGate =
+        task.retailer === 'target'
+          ? new OrderSubmissionGate(
+              task.mode === 'test-checkout' ? accountIds.length : task.orders_per_drop
+            )
+          : null
       const settled = await Promise.allSettled(
-        accountIds.map((accountId) => this._runOrdersForAccount(flow, task, dropEvent, accountId))
+        accountIds.map((accountId) =>
+          this._runOrdersForAccount(flow, task, dropEvent, accountId, orderSubmissionGate)
+        )
       )
       const results = settled.map((entry) =>
         entry.status === 'fulfilled'
@@ -486,7 +495,7 @@ export class TaskManager extends EventEmitter {
     }
   }
 
-  async _runOrdersForAccount(flow, task, dropEvent, accountId) {
+  async _runOrdersForAccount(flow, task, dropEvent, accountId, orderSubmissionGate = null) {
     const ordersRequested =
       task.retailer === 'target' &&
       task.mode !== 'test-checkout' &&
@@ -512,7 +521,8 @@ export class TaskManager extends EventEmitter {
         flow,
         { ...task, order_sequence: orderNumber, orders_per_drop: ordersRequested },
         dropEvent,
-        accountId
+        accountId,
+        orderSubmissionGate
       )
       orderResults.push(result)
       if (!result.success || result.testMode || result.requiresManualCheckout) break
@@ -529,7 +539,7 @@ export class TaskManager extends EventEmitter {
     }
   }
 
-  async _runFlowForAccount(flow, task, dropEvent, accountId) {
+  async _runFlowForAccount(flow, task, dropEvent, accountId, orderSubmissionGate = null) {
     const account = this._accountManager.getDecrypted(accountId)
     if (!account) return { accountId, success: false, error: 'Account not found' }
     const attemptId = this._checkoutTelemetry?.beginAttempt({ task, dropEvent, accountId })
@@ -593,6 +603,10 @@ export class TaskManager extends EventEmitter {
                   : false,
               useTargetCartApi: checkoutSettings.targetCartApiEnabled === true,
               targetCheckoutLiteMode: checkoutSettings.targetCheckoutLiteMode === true,
+              targetCommitNavigationEnabled:
+                checkoutSettings.targetCommitNavigationEnabled === true,
+              orderSubmissionGate,
+              orderSubmissionKey: `${accountId}:${task.order_sequence || 1}`,
               onStep: (message) => {
                 this._emitCheckoutStep(dropEvent, account, message)
                 this._checkoutTelemetry?.record(attemptId, message)

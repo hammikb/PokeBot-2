@@ -28,6 +28,7 @@ describe('CheckoutTelemetry', () => {
         settings: {
           targetCartApiEnabled: true,
           targetCheckoutLiteMode: true,
+          targetCommitNavigationEnabled: true,
           monitorMode: 'supabase'
         },
         appVersion: '1.2.3'
@@ -35,6 +36,7 @@ describe('CheckoutTelemetry', () => {
     ).toEqual({
       cart_strategy: 'api_preferred',
       lite_mode: true,
+      commit_navigation: true,
       browser_profile: 'persistent',
       monitor_source: 'supabase',
       app_version: '1.2.3',

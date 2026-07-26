@@ -6,7 +6,7 @@ describe('profile session preparation', () => {
     'stays on the selected %s retailer',
     (retailer) => {
       const urls = getSessionPreparationUrls(retailer)
-      expect(urls).toHaveLength(3)
+      expect(urls).toHaveLength(retailer === 'target' ? 4 : 3)
       const hosts = new Set(urls.map((url) => new URL(url).hostname))
       expect(hosts.size).toBe(1)
     }
@@ -14,5 +14,14 @@ describe('profile session preparation', () => {
 
   it('does not prepare unknown retailers', () => {
     expect(getSessionPreparationUrls('unknown')).toEqual([])
+  })
+
+  it('preloads saved Target payment data only during explicit Target preparation', () => {
+    expect(getSessionPreparationUrls('target')).toContain(
+      'https://www.target.com/account/paymentcards'
+    )
+    expect(getSessionPreparationUrls('walmart').some((url) => url.includes('target.com'))).toBe(
+      false
+    )
   })
 })

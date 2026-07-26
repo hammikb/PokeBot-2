@@ -74,6 +74,47 @@ export default function Settings() {
       <div className="border border-gray-800 rounded-lg p-3 bg-[#0d0d0f]">
         <div className="flex items-center justify-between gap-4">
           <div>
+            <div className="text-gray-300 uppercase tracking-wider text-sm">
+              Target Commit Navigation Experiment
+            </div>
+            <div className="text-gray-600 text-sm mt-1">
+              Continues after response headers, then waits for the exact controls needed. Compare
+              results in Checkout Analytics before making it the default.
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={settings.targetCommitNavigationEnabled === true}
+            onClick={() =>
+              saveSetting(
+                'targetCommitNavigationEnabled',
+                settings.targetCommitNavigationEnabled !== true
+              )
+            }
+            className={`relative w-12 h-7 rounded-full shrink-0 transition-colors ${
+              settings.targetCommitNavigationEnabled === true ? 'bg-red-600' : 'bg-gray-700'
+            }`}
+          >
+            <span
+              className={`pointer-events-none absolute left-0 top-1 w-5 h-5 bg-white rounded-full transition-transform ${
+                settings.targetCommitNavigationEnabled === true ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+            <span className="sr-only">Toggle Target commit navigation experiment</span>
+          </button>
+        </div>
+        <div className="text-xs mt-2 text-gray-500">
+          Current:{' '}
+          {settings.targetCommitNavigationEnabled === true
+            ? 'Commit navigation experiment'
+            : 'Stable DOMContentLoaded navigation'}
+        </div>
+      </div>
+
+      <div className="border border-gray-800 rounded-lg p-3 bg-[#0d0d0f]">
+        <div className="flex items-center justify-between gap-4">
+          <div>
             <div className="text-gray-300 uppercase tracking-wider text-sm">Target Cart API</div>
             <div className="text-gray-600 text-sm mt-1">
               Experimental. Browser-first is recommended while Target is rate limiting the API.

@@ -38,6 +38,9 @@ export async function runTargetFlow(
     maxPrice = null,
     useTargetCartApi = false,
     targetCheckoutLiteMode = false,
+    targetCommitNavigationEnabled = false,
+    orderSubmissionGate = null,
+    orderSubmissionKey = null,
     onStep = () => {},
     onMilestone = () => {},
     browserPool = null, // [TARGET] Pass the BrowserPool instance
@@ -69,6 +72,7 @@ export async function runTargetFlow(
   let cartStrategyActual = 'not_reached'
   let cartFallbackReason = null
   let cartQuantityActual = null
+  const navigationWaitUntil = targetCommitNavigationEnabled ? 'commit' : 'domcontentloaded'
   const withCartExecution = (result) => ({
     ...result,
     cartStrategyActual,
@@ -90,7 +94,7 @@ export async function runTargetFlow(
       onStep('Using API-based cart (10x faster!)')
       log.info('Using API for cart operations', { tcin, buyLimit })
       await page.goto('https://www.target.com/co-cart', {
-        waitUntil: 'domcontentloaded',
+        waitUntil: navigationWaitUntil,
         timeout: 30000
       })
     } else {
@@ -109,7 +113,10 @@ export async function runTargetFlow(
       } else {
         log.warn('Could not extract TCIN, falling back to browser automation')
       }
-      await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
+      await page.goto(productUrl, { waitUntil: navigationWaitUntil, timeout: 30000 })
+      if (targetCommitNavigationEnabled) {
+        await page.locator('body').waitFor({ state: 'attached', timeout: 5000 })
+      }
     }
 
     // [TARGET] Wait for Shape cookies after navigation
@@ -240,7 +247,8 @@ export async function runTargetFlow(
               notificationEngine,
               dropEvent,
               coordinator,
-              onMilestone
+              onMilestone,
+              navigationWaitUntil
             )
           }
         } else if (isTargetHighTrafficError(result.error)) {
@@ -271,7 +279,8 @@ export async function runTargetFlow(
               notificationEngine,
               dropEvent,
               coordinator,
-              onMilestone
+              onMilestone,
+              navigationWaitUntil
             )
           }
         } else {
@@ -287,7 +296,8 @@ export async function runTargetFlow(
             notificationEngine,
             dropEvent,
             coordinator,
-            onMilestone
+            onMilestone,
+            navigationWaitUntil
           )
         }
       } catch (err) {
@@ -306,7 +316,8 @@ export async function runTargetFlow(
         notificationEngine,
         dropEvent,
         coordinator,
-        onMilestone
+        onMilestone,
+        navigationWaitUntil
       )
     }
 
@@ -335,7 +346,7 @@ export async function runTargetFlow(
     // (saved address + payment already shown), so we just wait for "Place your order".
     onStep('Opening Target checkout')
     await page.goto('https://www.target.com/checkout', {
-      waitUntil: 'domcontentloaded',
+      waitUntil: navigationWaitUntil,
       timeout: 30000
     })
 
@@ -407,8 +418,24 @@ export async function runTargetFlow(
       coordinator,
       onMilestone,
       browserPool, // [TARGET] Pass for Shape monitoring during retries
-      accountId
+      accountId,
+      orderSubmissionGate,
+      orderSubmissionKey
     })
+
+    if (confirmed === 'quota-reached') {
+      onStep('Order limit already claimed by another account')
+      const { screenshotPath, tracePath } = (await trace.stop()) || {}
+      return withCartExecution({
+        success: false,
+        skipped: true,
+        orderLimitReached: true,
+        requiresManualCheckout: false,
+        screenshotPath,
+        tracePath,
+        message: 'Task order limit reached before this account submitted'
+      })
+    }
 
     const { screenshotPath, tracePath } = (await trace.stop()) || {}
 
@@ -524,7 +551,9 @@ export async function submitTargetOrder(
     onMilestone = () => {},
     maxSubmitRetries = 30,
     browserPool = null, // [TARGET] Added for Shape monitoring
-    accountId = null
+    accountId = null,
+    orderSubmissionGate = null,
+    orderSubmissionKey = null
   }
 ) {
   let placeOrderBtn = initialPlaceOrderBtn
@@ -569,6 +598,14 @@ export async function submitTargetOrder(
     if (!(await claimTargetAction(coordinator, `place-order:${attempt}`, 1500))) {
       await coordinator.waitForChange(0, 250)
       continue
+    }
+    if (orderSubmissionGate && !orderSubmissionGate.claim(orderSubmissionKey)) {
+      log.info('Target order submission skipped because task order limit is already claimed', {
+        accountId,
+        orderSubmissionKey,
+        gate: orderSubmissionGate.snapshot()
+      })
+      return 'quota-reached'
     }
     onMilestone(
       'order_submitted',
@@ -1168,13 +1205,17 @@ async function browserAddToCart(
   notificationEngine,
   dropEvent,
   coordinator = null,
-  onMilestone = () => {}
+  onMilestone = () => {},
+  navigationWaitUntil = 'domcontentloaded'
 ) {
   // The fast path may have navigated us to the cart page (which has no Add to cart button),
   // and the API may have failed, so always ensure we're on the product page before clicking.
   if (productUrl && !page.url().includes('/p/')) {
     onStep('Opening Target product page (browser fallback)')
-    await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
+    await page.goto(productUrl, { waitUntil: navigationWaitUntil, timeout: 30000 })
+    if (navigationWaitUntil === 'commit') {
+      await page.locator('body').waitFor({ state: 'attached', timeout: 5000 })
+    }
     await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
   }
 

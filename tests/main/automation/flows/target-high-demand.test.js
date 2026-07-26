@@ -306,6 +306,27 @@ describe('Target high-demand checkout submission', () => {
     expect(page.state.submitClicks).toBe(2)
     expect(page.reload).not.toHaveBeenCalled()
   })
+
+  it('does not click Place your order after another account claims the task limit', async () => {
+    const page = makeTargetPage()
+    const placeOrderButton = page.locator('button[data-test="placeOrderButton"]')
+    const gate = {
+      claim: vi.fn(() => false),
+      snapshot: vi.fn(() => ({ limit: 1, claimed: 1 }))
+    }
+
+    const result = await submitTargetOrder(page, placeOrderButton, {
+      cvv: null,
+      onStep: vi.fn(),
+      notificationEngine: null,
+      dropEvent: {},
+      orderSubmissionGate: gate,
+      orderSubmissionKey: 'account-b:1'
+    })
+
+    expect(result).toBe('quota-reached')
+    expect(page.state.submitClicks).toBe(0)
+  })
 })
 
 function makeRoute(resourceType, url) {
