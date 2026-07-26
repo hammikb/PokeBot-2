@@ -3,7 +3,7 @@ import { mkdirSync } from 'fs'
 import { createModuleLogger } from '../utils/logger.js'
 
 const log = createModuleLogger('BrowserPool')
-const DEFAULT_TIMEOUT = 30 * 60 * 1000 // 30 minutes
+const DEFAULT_TIMEOUT = 60 * 60 * 1000 // 60 minutes
 const HEALTH_CHECK_INTERVAL = 5 * 60 * 1000 // 5 minutes
 
 // Shape cookie configuration
@@ -11,10 +11,45 @@ const SHAPE_REFRESH_INTERVAL = 30 * 1000 // 30 seconds - MORE FREQUENT
 const SHAPE_COOKIE_NAMES = ['_shapes', 'shape', '_sfid', '_sctr', '_sdid']
 const SHAPE_MAX_RETRIES = 10 // More retries before warning
 
+// Shared browser launch arguments used by all contexts
+const DEFAULT_BROWSER_ARGS = [
+  '--no-sandbox',
+  '--disable-dev-shm-usage',
+  '--disable-setuid-sandbox',
+  '--no-first-run',
+  '--no-default-browser-check',
+  '--password-store=basic',
+  '--disable-background-networking',
+  '--disable-background-timer-throttling',
+  '--disable-backgrounding-occluded-windows',
+  '--disable-breakpad',
+  '--disable-component-extensions-with-background-pages',
+  '--disable-features=TranslateUI',
+  '--disable-ipc-flooding-protection',
+  '--disable-renderer-backgrounding',
+  '--force-color-profile=srgb',
+  '--metrics-recording-only',
+  '--mute-audio',
+  '--disable-hang-monitor',
+  '--disable-prompt-on-repost',
+  '--disable-sync',
+  '--enable-features=NetworkService,NetworkServiceInProcess',
+  '--disable-blink-features=AutomationControlled',
+  // CRITICAL: Use a realistic user agent
+  '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+]
+
 export class BrowserPool {
-  constructor({ maxConcurrent = 3, contextTimeout = DEFAULT_TIMEOUT } = {}) {
+  constructor({
+    maxConcurrent = 3,
+    contextTimeout = DEFAULT_TIMEOUT,
+    setupWarmupMs = 5000,
+    setupMouseDelayMs = 500
+  } = {}) {
     this._maxConcurrent = maxConcurrent
     this._contextTimeout = contextTimeout
+    this._setupWarmupMs = setupWarmupMs
+    this._setupMouseDelayMs = setupMouseDelayMs
     this._active = new Map()
     this._pending = new Map()
     this._pendingProxy = new Map()
@@ -54,7 +89,8 @@ export class BrowserPool {
   async _refreshShapeSession(accountId, context) {
     try {
       const pages = context.pages()
-      let page = pages.length > 0 ? pages[0] : await context.newPage()
+      // The setup page is closed after launch, so pages[0] may be dead.
+      const page = pages.find((p) => !p.isClosed()) || (await context.newPage())
 
       // CRITICAL: Always ensure we're on Target.com
       const currentUrl = page.url()
@@ -257,38 +293,18 @@ export class BrowserPool {
       throw err
     }
 
-    // CRITICAL: More realistic browser arguments
+    const argsCopy = [...DEFAULT_BROWSER_ARGS]
+    // _launchNew uses a different features set than launchContext
+    const mfIndex = argsCopy.findIndex((a) => a.startsWith('--disable-features='))
+    if (mfIndex >= 0)
+      argsCopy[mfIndex] = '--disable-features=TranslateUI,ChromeWhatsNewUI,MediaRouter'
+
     const contextOptions = {
       userDataDir: profilePath,
       headless: false,
       humanize: true,
       geoip: true,
-      args: [
-        '--no-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-setuid-sandbox',
-        '--no-first-run',
-        '--no-default-browser-check',
-        '--password-store=basic',
-        '--disable-background-networking',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-breakpad',
-        '--disable-component-extensions-with-background-pages',
-        '--disable-features=TranslateUI,ChromeWhatsNewUI,MediaRouter',
-        '--disable-ipc-flooding-protection',
-        '--disable-renderer-backgrounding',
-        '--force-color-profile=srgb',
-        '--metrics-recording-only',
-        '--mute-audio',
-        '--disable-hang-monitor',
-        '--disable-prompt-on-repost',
-        '--disable-sync',
-        '--enable-features=NetworkService,NetworkServiceInProcess',
-        '--disable-blink-features=AutomationControlled',
-        // CRITICAL: Use a realistic user agent
-        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      ]
+      args: argsCopy
     }
 
     const proxyUrl = buildProxyUrl(proxy)
@@ -306,28 +322,30 @@ export class BrowserPool {
       })
       const context = await launchPersistentContext(contextOptions)
 
-      // CRITICAL: Navigate to Target with realistic expectations
+      const setupPage = await context.newPage()
       try {
-        const page = await context.newPage()
         log.info('Navigating to Target.com', { accountId })
-        await page.goto('https://www.target.com', {
+        await setupPage.goto('https://www.target.com', {
           waitUntil: 'domcontentloaded',
           timeout: 45000
         })
         log.info('Initial Target navigation completed', { accountId })
 
         // CRITICAL: Wait for page to fully initialize
-        await new Promise((resolve) => setTimeout(resolve, 5000))
+        await new Promise((resolve) => setTimeout(resolve, this._setupWarmupMs))
 
         // CRITICAL: Do some initial mouse movement to trigger Shape
-        await page.mouse.move(500, 400)
-        await new Promise((resolve) => setTimeout(resolve, 500))
-        await page.mouse.move(700, 300)
+        await setupPage.mouse.move(500, 400)
+        await new Promise((resolve) => setTimeout(resolve, this._setupMouseDelayMs))
+        await setupPage.mouse.move(700, 300)
       } catch (navErr) {
         log.warn('Initial Target navigation failed, will retry via refresh loop', {
           accountId,
           error: navErr.message
         })
+      } finally {
+        // Close the setup page to prevent memory leak - checkout flows create their own pages
+        await setupPage.close().catch(() => {})
       }
 
       this._active.set(accountId, context)
@@ -366,31 +384,7 @@ export class BrowserPool {
       headless: false,
       humanize: true,
       geoip: true,
-      args: [
-        '--no-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-setuid-sandbox',
-        '--no-first-run',
-        '--no-default-browser-check',
-        '--password-store=basic',
-        '--disable-background-networking',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-breakpad',
-        '--disable-component-extensions-with-background-pages',
-        '--disable-features=TranslateUI',
-        '--disable-ipc-flooding-protection',
-        '--disable-renderer-backgrounding',
-        '--force-color-profile=srgb',
-        '--metrics-recording-only',
-        '--mute-audio',
-        '--disable-hang-monitor',
-        '--disable-prompt-on-repost',
-        '--disable-sync',
-        '--enable-features=NetworkService,NetworkServiceInProcess',
-        '--disable-blink-features=AutomationControlled',
-        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      ]
+      args: DEFAULT_BROWSER_ARGS
     }
 
     const proxyUrl = buildProxyUrl(proxy)

@@ -6,6 +6,7 @@
   "main": "./out/main/index.js",
   "author": "PokeBot2",
   "scripts": {
+    "clean": "node scripts/clean-build-artifacts.mjs",
     "format": "prettier --write .",
     "lint": "eslint --cache .",
     "test": "vitest run",

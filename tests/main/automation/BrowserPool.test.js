@@ -11,8 +11,15 @@ vi.mock('cloakbrowser', () => ({
 
 function makeContext({ open = true } = {}) {
   const handlers = {}
+  const setupPage = {
+    goto: vi.fn(async () => {}),
+    mouse: { move: vi.fn(async () => {}) },
+    close: vi.fn(async () => {})
+  }
   return {
     browser: vi.fn(() => (open ? {} : null)),
+    newPage: vi.fn(async () => setupPage),
+    pages: vi.fn(() => []),
     on: vi.fn((event, handler) => {
       handlers[event] = handler
     }),
@@ -25,7 +32,7 @@ function makeContext({ open = true } = {}) {
 
 describe('BrowserPool', () => {
   it('relaunches a saved profile when the cached context was closed manually', async () => {
-    const pool = new BrowserPool()
+    const pool = new BrowserPool({ setupWarmupMs: 0, setupMouseDelayMs: 0 })
     const closedContext = makeContext({ open: false })
     const freshContext = makeContext({ open: true })
     mocks.launchPersistentContext
@@ -44,10 +51,11 @@ describe('BrowserPool', () => {
     expect(relaunched).toBe(freshContext)
     expect(mocks.launchPersistentContext).toHaveBeenCalledTimes(2)
     expect(pool.getActiveCount()).toBe(1)
+    await pool.closeAll()
   })
 
   it('shares an in-flight launch when two jobs use the same account profile', async () => {
-    const pool = new BrowserPool()
+    const pool = new BrowserPool({ setupWarmupMs: 0, setupMouseDelayMs: 0 })
     const context = makeContext({ open: true })
     mocks.launchPersistentContext.mockReset()
     let resolveLaunch
@@ -71,10 +79,15 @@ describe('BrowserPool', () => {
     await expect(first).resolves.toBe(context)
     await expect(second).resolves.toBe(context)
     expect(mocks.launchPersistentContext).toHaveBeenCalledTimes(1)
+    await pool.closeAll()
   })
 
   it('pins a pre-warmed context until the account is released', async () => {
-    const pool = new BrowserPool({ contextTimeout: 1 })
+    const pool = new BrowserPool({
+      contextTimeout: 1,
+      setupWarmupMs: 0,
+      setupMouseDelayMs: 0
+    })
     const context = makeContext({ open: true })
     mocks.launchPersistentContext.mockReset()
     mocks.launchPersistentContext.mockResolvedValueOnce(context)
@@ -95,7 +108,7 @@ describe('BrowserPool', () => {
   })
 
   it('does not silently move an active cookie session to another proxy', async () => {
-    const pool = new BrowserPool()
+    const pool = new BrowserPool({ setupWarmupMs: 0, setupMouseDelayMs: 0 })
     const context = makeContext({ open: true })
     mocks.launchPersistentContext.mockReset()
     mocks.launchPersistentContext.mockResolvedValueOnce(context)
@@ -112,5 +125,6 @@ describe('BrowserPool', () => {
       })
     ).rejects.toThrow('different proxy')
     expect(mocks.launchPersistentContext).toHaveBeenCalledTimes(1)
+    await pool.closeAll()
   })
 })

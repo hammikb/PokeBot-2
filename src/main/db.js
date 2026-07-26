@@ -317,7 +317,7 @@ function createSqliteDb(dbPath) {
     } catch {
       // The failed handle may already be closed.
     }
-    console.warn(`Using JSON database fallback: ${firstLine(err.message)}`)
+    log.warn('Using JSON database fallback', { error: firstLine(err.message) })
     return null
   }
 }

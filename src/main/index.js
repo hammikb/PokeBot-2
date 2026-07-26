@@ -16,7 +16,6 @@ import { progressStreamer } from './utils/progressStreamer.js'
 import { PaymentManager } from './payments/PaymentManager.js'
 import { ShippingManager } from './shipping/ShippingManager.js'
 import { ThumbnailCache } from './thumbnails/ThumbnailCache.js'
-// import { ConfigManager } from './config/configManager.js'
 import { registerIpcHandlers } from './ipc.js'
 import { AuthSessionManager } from './supabase/AuthSessionManager.js'
 import { CheckoutTelemetry } from './telemetry/CheckoutTelemetry.js'
@@ -31,7 +30,8 @@ let pokemonCenterQueueJoiner
 let browserPool
 let encryptionKey = null
 let shutdownPromise = null
-const TEMP_DEV_VAULT_PASSWORD = 'pokebot-dev-vault'
+const VAULT_PASSWORD = import.meta.env.MAIN_VITE_VAULT_PASSWORD || 'pokebot-dev-vault'
+const CAPSOLVER_API_KEY = import.meta.env.MAIN_VITE_CAPSOLVER_API_KEY || null
 
 function getSettings() {
   try {
@@ -60,10 +60,9 @@ async function createMainWindow(encryptionKey) {
     maxWaitMin: 180,
     notificationEngine,
     openExternal: (url) => shell.openExternal(url),
-    capsolverApiKey: null
+    capsolverApiKey: CAPSOLVER_API_KEY
   })
-  // const configManager = new ConfigManager()
-  const configManager = null // Temporarily disabled
+  const configManager = null // Placeholder for future use
 
   // Per-user Supabase Auth session, reused by catalog browsing and task monitoring.
   // Silently restores a prior sign-in (encrypted refresh token in `settings`) before the
@@ -240,7 +239,7 @@ app.whenReady().then(async () => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  encryptionKey = deriveKeyLegacy(TEMP_DEV_VAULT_PASSWORD)
+  encryptionKey = deriveKeyLegacy(VAULT_PASSWORD)
   await createMainWindow(encryptionKey)
 
   app.on('activate', () => {

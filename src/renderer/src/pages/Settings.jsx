@@ -5,46 +5,16 @@ const FIELDS = [
 ]
 
 export default function Settings() {
-  const { settings, saveSetting, setMonitorMode, signOut } = useAppStore()
-  const mode = settings.monitorMode || 'local'
+  const { settings, saveSetting, signOut } = useAppStore()
 
   return (
     <div className="p-4 space-y-5 max-w-lg overflow-y-auto h-full">
       <h2 className="text-sm uppercase tracking-widest text-gray-400">Settings</h2>
 
-      <div>
-        <label className="text-gray-500 uppercase tracking-wider text-sm block mb-1.5">
-          Monitoring Source
-        </label>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => setMonitorMode('local')}
-            className={`flex-1 px-3 py-2 rounded uppercase tracking-wider text-sm font-bold border ${
-              mode === 'local'
-                ? 'bg-red-600 border-red-500 text-white'
-                : 'bg-[#111] border-gray-700 text-gray-400'
-            }`}
-          >
-            Local
-          </button>
-          <button
-            type="button"
-            onClick={() => setMonitorMode('supabase')}
-            className={`flex-1 px-3 py-2 rounded uppercase tracking-wider text-sm font-bold border ${
-              mode === 'supabase'
-                ? 'bg-red-600 border-red-500 text-white'
-                : 'bg-[#111] border-gray-700 text-gray-400'
-            }`}
-          >
-            Supabase
-          </button>
-        </div>
-        <div className="text-gray-600 text-sm mt-1.5">
-          {mode === 'local'
-            ? 'This computer polls retailers directly.'
-            : 'Receives drops from the central Supabase monitor. Restarts running tasks.'}
-        </div>
+      <div className="text-gray-400 text-sm border border-gray-800 rounded-lg p-3 bg-[#0d0d0f]">
+        <span className="text-red-500 font-bold uppercase tracking-widest">Monitoring:</span> All
+        tasks use the central PokeAlert Supabase monitor. Drops are detected by the Pi and pushed to
+        your local app for checkout.
       </div>
 
       <div>

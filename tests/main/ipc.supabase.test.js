@@ -61,7 +61,7 @@ function setup() {
       all: () => []
     }))
   }
-  const taskManager = { on: vi.fn(), setMonitorMode: vi.fn(async () => {}) }
+  const taskManager = { on: vi.fn() }
   const authSessionManager = makeAuthSessionManager()
   registerIpcHandlers({
     getDb: () => db,
@@ -89,11 +89,10 @@ describe('supabase catalog IPC handlers', () => {
     signIn.mockClear()
   })
 
-  it('MONITOR_SET_MODE saves the setting then restarts tasks', async () => {
-    const { handlers, settingsStore, taskManager } = setup()
-    await handlers.get(IPC.MONITOR_SET_MODE)({}, 'supabase')
-    expect(JSON.parse(settingsStore.monitorMode)).toBe('supabase')
-    expect(taskManager.setMonitorMode).toHaveBeenCalled()
+  it('does not expose the removed local monitoring mode switch', () => {
+    const { handlers } = setup()
+    expect(IPC.MONITOR_SET_MODE).toBeUndefined()
+    expect([...handlers.keys()]).not.toContain('monitor:set-mode')
   })
 
   it('SUPABASE_CATALOG_LIST reads the target_catalog reference list anonymously — no sign-in required', async () => {

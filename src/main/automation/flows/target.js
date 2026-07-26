@@ -3,11 +3,12 @@ import { startTrace } from '../TraceRecorder.js'
 import { TargetApiClient } from '../api/targetApi.js'
 import { startCheckoutDiagnostics } from '../CheckoutDiagnostics.js'
 import { TargetPageCoordinator } from '../TargetPageCoordinator.js'
+import { humanDelay } from './checkout-utils.js'
 import { createModuleLogger } from '../../utils/logger.js'
 
 const log = createModuleLogger('TargetFlow')
 const TARGET_CART_API_COOLDOWN_MS = 10 * 60 * 1000
-let targetCartApiBlockedUntil = 0
+const targetCartApiBlockedUntil = new Map() // accountId -> blocked timestamp
 
 const TARGET_LITE_BLOCKED_HOSTS = [
   'doubleclick.net',
@@ -90,7 +91,7 @@ export async function runTargetFlow(
   try {
     // Extract TCIN from URL for API operations
     const tcin = TargetApiClient.extractTcin(productUrl)
-    const useApi = tcin !== null && useTargetCartApi && !isTargetCartApiCoolingDown()
+    const useApi = tcin !== null && useTargetCartApi && !isTargetCartApiCoolingDown(accountId)
 
     // In API mode we don't need the product page at all — the cart API only needs a
     // `*.target.com` origin (for cookies + CORS) plus the tcin. Navigating straight to the
@@ -114,10 +115,7 @@ export async function runTargetFlow(
       if (tcin) {
         log.info('Using browser-first Target add to cart', {
           tcin,
-          reason: useTargetCartApi ? 'api-cooldown' : 'api-disabled',
-          blockedUntil: targetCartApiBlockedUntil
-            ? new Date(targetCartApiBlockedUntil).toISOString()
-            : null
+          reason: useTargetCartApi ? 'api-cooldown' : 'api-disabled'
         })
       } else {
         log.warn('Could not extract TCIN, falling back to browser automation')
@@ -157,6 +155,7 @@ export async function runTargetFlow(
     }
 
     onStep('Signed in to Target')
+    await humanDelay(100, 300)
     onMilestone('session_checked', 'Target session verified')
 
     if (useApi) {
@@ -252,13 +251,11 @@ export async function runTargetFlow(
               notificationEngine,
               dropEvent,
               coordinator,
-              onMilestone,
-              browserPool,
-              accountId // [TARGET] Pass accountId for Shape monitoring
+              onMilestone
             )
           }
         } else if (isTargetHighTrafficError(result.error)) {
-          markTargetCartApiRateLimited()
+          markTargetCartApiRateLimited(accountId)
           // A 429 does not prove this requested item was added. An older high-demand
           // item may still be in the cart, so verify the TCIN before opening checkout.
           onStep('Target is rate limiting cart requests - verifying the requested item')
@@ -285,9 +282,7 @@ export async function runTargetFlow(
               notificationEngine,
               dropEvent,
               coordinator,
-              onMilestone,
-              browserPool,
-              accountId
+              onMilestone
             )
           }
         } else {
@@ -303,9 +298,7 @@ export async function runTargetFlow(
             notificationEngine,
             dropEvent,
             coordinator,
-            onMilestone,
-            browserPool,
-            accountId
+            onMilestone
           )
         }
       } catch (err) {
@@ -324,9 +317,7 @@ export async function runTargetFlow(
         notificationEngine,
         dropEvent,
         coordinator,
-        onMilestone,
-        browserPool,
-        accountId
+        onMilestone
       )
     }
 
@@ -370,11 +361,8 @@ export async function runTargetFlow(
       timeout: 30000
     })
 
-    // [TARGET] Ensure Shape session is healthy before checkout
-    if (browserPool && accountId) {
-      await ensureShapeSession(page, browserPool, accountId, onStep)
-    }
-
+    // NOTE: Do NOT check/refresh Shape session here — ensureShapeSession navigates
+    // to target.com which destroys the cart state. Shape is checked before ATC only.
     await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
     onMilestone('checkout_opened', 'Target checkout loaded')
 
@@ -887,15 +875,16 @@ function isTargetHighTrafficError(error) {
   return /HTTP 429|DCO_RATE_LIMITED|rate limited|request throttled/i.test(String(error || ''))
 }
 
-export function markTargetCartApiRateLimited(now = Date.now()) {
-  targetCartApiBlockedUntil = Math.max(
-    targetCartApiBlockedUntil,
-    Number(now) + TARGET_CART_API_COOLDOWN_MS
-  )
+export function markTargetCartApiRateLimited(accountId, now = Date.now()) {
+  const blockedUntil = Number(now) + TARGET_CART_API_COOLDOWN_MS
+  const existing = targetCartApiBlockedUntil.get(accountId) || 0
+  targetCartApiBlockedUntil.set(accountId, Math.max(existing, blockedUntil))
 }
 
-export function isTargetCartApiCoolingDown(now = Date.now()) {
-  return Number(now) < targetCartApiBlockedUntil
+export function isTargetCartApiCoolingDown(accountId, now = Date.now()) {
+  if (!accountId) return false
+  const blockedUntil = targetCartApiBlockedUntil.get(accountId) || 0
+  return Number(now) < blockedUntil
 }
 
 export async function enableTargetCheckoutLiteMode(page) {
@@ -1194,13 +1183,8 @@ async function browserAddToCart(
   notificationEngine,
   dropEvent,
   coordinator = null,
-  onMilestone = () => {},
-  browserPool = null, // [TARGET] Added
-  accountId = null // [TARGET] Added
+  onMilestone = () => {}
 ) {
-  void browserPool
-  void accountId
-
   // The fast path may have navigated us to the cart page (which has no Add to cart button),
   // and the API may have failed, so always ensure we're on the product page before clicking.
   if (productUrl && !page.url().includes('/p/')) {
@@ -1239,35 +1223,23 @@ async function browserAddToCart(
   }
 
   onStep('Adding to cart (browser method)')
+  await humanDelay(100, 300)
   onMilestone('cart_attempted', `Target browser cart requested quantity ${buyLimit}`)
 
   if (!(await claimTargetAction(coordinator, 'add-to-cart', 1500))) {
     throw new Error('Target Add to cart action is already in progress')
   }
   await addToCartBtn.click({ timeout: 5000 })
-  await page.waitForTimeout(100)
   await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
 
-  // Handle "View cart & check out" modal if it appears
-  const viewCartBtn = page.locator('a[href="/cart"]:has-text("View cart")')
-  if ((await viewCartBtn.count()) > 0) {
-    onStep('Navigating to cart')
-    await viewCartBtn.first().click()
-    await page.waitForLoadState('domcontentloaded')
-  }
-
-  // Go to checkout
-  onStep('Opening Target cart')
-  await page.goto('https://www.target.com/co-cart', {
+  // Skip /co-cart entirely — go straight to /checkout. The checkout page shows
+  // the cart items and we verify the TCIN there. Saves 1-2 seconds on page load.
+  onStep('Going straight to checkout (skipping cart page)')
+  await page.goto('https://www.target.com/checkout', {
     waitUntil: 'domcontentloaded',
     timeout: 30000
   })
   await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
-
-  const tcin = TargetApiClient.extractTcin(productUrl)
-  if (tcin && !(await waitForTargetCartTcin(page, tcin, 5000, coordinator))) {
-    throw new Error('Add to cart click did not put the requested item in the cart')
-  }
 }
 
 export function getVisibleTargetAddToCartButton(page) {
@@ -1285,7 +1257,7 @@ export async function waitForTargetAddToCartReady(
     notificationEngine = null,
     dropEvent = {},
     coordinator = null,
-    timeoutMs = 45000,
+    timeoutMs = 15000,
     pollMs = 150
   } = {}
 ) {
@@ -1376,11 +1348,6 @@ async function waitForTargetCartState(page, tcin, timeoutMs, coordinator = null)
     await waitForTargetSignal(page, coordinator, snapshot, 1000)
   }
   return lastState
-}
-
-async function waitForTargetCartTcin(page, tcin, timeoutMs, coordinator = null) {
-  const state = await waitForTargetCartState(page, tcin, timeoutMs, coordinator)
-  return state.present
 }
 
 async function confirmRequestedTargetCartItem(

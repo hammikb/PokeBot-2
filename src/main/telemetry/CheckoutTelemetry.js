@@ -341,7 +341,7 @@ export function buildExperimentProfile({ task, settings = {}, appVersion = 'unkn
       retailer === 'target' && settings.targetCartApiEnabled === true ? 'api_preferred' : 'browser',
     lite_mode: retailer === 'target' && settings.targetCheckoutLiteMode === true,
     browser_profile: 'persistent',
-    monitor_source: settings.monitorMode || 'local',
+    monitor_source: 'supabase',
     app_version: String(appVersion || 'unknown').slice(0, 32),
     order_sequence: Math.max(1, Number(task?.order_sequence) || 1),
     orders_per_drop: Math.max(1, Number(task?.orders_per_drop) || 1)

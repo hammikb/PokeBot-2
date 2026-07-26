@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { IPC, RETAILER_BUY_LIMITS, DROP_TYPES } from '../shared/constants.js'
+import { createModuleLogger } from './utils/logger.js'
 import {
   addCatalogItemFromUrl,
   deleteCatalogItem,
@@ -20,6 +21,7 @@ import { getPublicClient } from './supabase/session.js'
 import { findWalmartMatch, findWalmartMatchCached } from './products/WalmartMatch.js'
 import { persistTaskState, TASK_STATE } from './tasks/TaskState.js'
 
+const log = createModuleLogger('IPC')
 const SUPPORTED_TASK_RETAILERS = new Set(['target', 'walmart', 'pokemon-center', 'samsclub'])
 const TASK_UPDATE_COLUMNS = {
   retailer: 'retailer',
@@ -75,9 +77,9 @@ export function registerIpcHandlers({
         },
         { onConflict: 'catalog_item_id,retailer' }
       )
-      if (error) console.warn('Supabase Walmart listing sync skipped', error.message)
+      if (error) log.warn('Supabase Walmart listing sync skipped', { error: error.message })
     } catch (error) {
-      console.warn('Supabase Walmart listing sync skipped', error.message)
+      log.warn('Supabase Walmart listing sync skipped', { error: error.message })
     }
   }
 
@@ -94,16 +96,6 @@ export function registerIpcHandlers({
       return taskManager.setPokemonCenterAutoJoin(value === true)
     }
     return true
-  })
-
-  // Monitor mode (local vs supabase)
-  ipcMain.handle(IPC.MONITOR_SET_MODE, async (_, mode) => {
-    const next = mode === 'supabase' ? 'supabase' : 'local'
-    getDb()
-      .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
-      .run('monitorMode', JSON.stringify(next))
-    await taskManager.setMonitorMode(next)
-    return next
   })
 
   // Per-user Supabase Auth — replaces the old shared "bot account" (email/password
@@ -253,7 +245,16 @@ export function registerIpcHandlers({
   // Accounts
   ipcMain.handle(IPC.ACCOUNTS_GET, () => accountManager.getAll())
   ipcMain.handle(IPC.ACCOUNTS_CREATE, async (_, data) => {
-    const accountData = { ...(data || {}) }
+    if (
+      !data ||
+      !String(data.name || '').trim() ||
+      !data.retailer ||
+      !data.username ||
+      !data.password
+    ) {
+      throw new Error('name, retailer, username, and password are required to create an account')
+    }
+    const accountData = { ...data }
     if (!String(accountData.proxy || '').trim()) {
       accountData.proxy = accountManager.findAvailableProxy(getSettings().proxies)
     }
@@ -400,7 +401,7 @@ export function registerIpcHandlers({
         dropType: 'account_session_check'
       },
       onStep: (message) => {
-        console.log(`[target-session] [${account.name}] ${message}`)
+        log.info('Target session check step', { account: account.name, message })
         mainWindow?.webContents?.send(IPC.FEED_EVENT, {
           id: randomUUID(),
           retailer: 'target',
@@ -433,7 +434,7 @@ export function registerIpcHandlers({
         dropType: 'account_auto_login'
       },
       onStep: (message) => {
-        console.log(`[target-auto-login] [${account.name}] ${message}`)
+        log.info('Target auto-login step', { account: account.name, message })
         mainWindow?.webContents?.send(IPC.FEED_EVENT, {
           id: randomUUID(),
           retailer: 'target',
@@ -881,7 +882,7 @@ async function emitCatalogLookupFallback({ mainWindow, notificationEngine, produ
     timestamp: Date.now(),
     createdAt: new Date().toISOString()
   }
-  console.warn(`[catalog] ${event.productName} (${productUrl})`)
+  log.warn('Catalog lookup fallback', { productUrl, error: shortError(error) })
   mainWindow?.webContents?.send(IPC.FEED_EVENT, event)
   await notificationEngine?.fire(event)
 }

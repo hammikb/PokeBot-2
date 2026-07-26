@@ -99,9 +99,26 @@ def playwright_proxy(value):
     return config
 
 
-def proxy_label(value):
+def proxy_label(value, index=None):
     parsed = urlsplit(value)
-    return f"{parsed.hostname}:{parsed.port}"
+    prefix = f"proxy[{index + 1:02d}] " if index is not None else ""
+    return f"{prefix}{parsed.hostname}:{parsed.port}"
+
+
+def is_proxy_gateway_error(exc):
+    message = str(exc).lower()
+    return isinstance(exc, httpx.ProxyError) or any(
+        marker in message
+        for marker in (
+            "502 bad gateway",
+            "503 service unavailable",
+            "504 gateway timeout",
+            "http 502",
+            "http 503",
+            "http 504",
+            "proxy error",
+        )
+    )
 
 
 def pokemon_center_client(proxy, headers):
@@ -247,21 +264,17 @@ def queue_state_from_text(text, url=""):
     text = text.lower()
     marker_count = sum(marker in text for marker in QUEUE_MARKERS)
     url = url.lower()
-    # During high-traffic windows Imperva may show a trusted browser the queue
-    # (CWUDNSAI=43) while showing an automated probe its security interstitial
-    # (SWUDNSAI=31). Either short wrapper is enough reason to wake Electron: its
-    # persistent local browser is the authoritative queue client.
-    imperva_wrapper = (
-        len(text) < 20_000
-        and "_incapsula_resource" in text
-        and any(
-            marker in text
-            for marker in ("cwudnsai=43", "swudnsai=31", "edet=47", "edet=12")
-        )
-    )
-    return imperva_wrapper or marker_count >= 2 or (
+    # Incapsula/Imperva wrappers are bot-protection responses, not proof that a
+    # waiting room is open. Only explicit queue copy (or a queue URL plus queue
+    # copy) may trigger the time-sensitive alert.
+    return marker_count >= 2 or (
         any(token in url for token in ("queue", "waitingroom", "queue-it")) and marker_count >= 1
     )
+
+
+def is_security_interstitial(text):
+    text = text.lower()
+    return len(text) < 20_000 and "_incapsula_resource" in text
 
 
 async def run():
@@ -293,36 +306,79 @@ async def run():
         consecutive_errors = 0
         bytes_used = 0
         last_bandwidth_log = time.monotonic()
+        first_success_logged = False
 
         while True:
             started = time.monotonic()
             check_succeeded = False
             try:
-                # Read no more than 64 KiB of the decoded response. The active
-                # Imperva wrapper is about 1 KiB; a normal storefront response is
-                # closed early instead of downloading megabytes of HTML.
-                chunks = []
-                decoded_bytes = 0
-                async with client.stream("GET", CHECK_URL) as response:
-                    status = response.status_code
-                    async for chunk in response.aiter_bytes():
-                        remaining = 65_536 - decoded_bytes
-                        if remaining <= 0:
-                            break
-                        chunks.append(chunk[:remaining])
-                        decoded_bytes += min(len(chunk), remaining)
-                        if decoded_bytes >= 65_536:
-                            break
-                    final_url = str(response.url)
+                gateway_failovers = 0
+                while True:
+                    try:
+                        # Read no more than 64 KiB of the decoded response. The active
+                        # Imperva wrapper is about 1 KiB; a normal storefront response is
+                        # closed early instead of downloading megabytes of HTML.
+                        chunks = []
+                        decoded_bytes = 0
+                        async with client.stream("GET", CHECK_URL) as response:
+                            status = response.status_code
+                            async for chunk in response.aiter_bytes():
+                                remaining = 65_536 - decoded_bytes
+                                if remaining <= 0:
+                                    break
+                                chunks.append(chunk[:remaining])
+                                decoded_bytes += min(len(chunk), remaining)
+                                if decoded_bytes >= 65_536:
+                                    break
+                            final_url = str(response.url)
 
-                body = b"".join(chunks).decode("utf-8", errors="ignore")
-                bytes_used += decoded_bytes
-                queue_open = queue_state_from_text(body, final_url)
-                if status not in (200, 301, 302, 303, 307, 308) and not queue_open:
-                    raise RuntimeError(f"Pokemon Center returned HTTP {status}")
+                        body = b"".join(chunks).decode("utf-8", errors="ignore")
+                        if is_security_interstitial(body):
+                            raise RuntimeError(
+                                "Pokemon Center returned an Imperva security interstitial"
+                            )
+                        queue_open = queue_state_from_text(body, final_url)
+                        if (
+                            status not in (200, 301, 302, 303, 307, 308)
+                            and not queue_open
+                        ):
+                            raise RuntimeError(f"Pokemon Center returned HTTP {status}")
+                        bytes_used += decoded_bytes
+                        break
+                    except Exception as exc:
+                        max_failovers = min(2, len(proxies) - 1)
+                        if (
+                            not is_proxy_gateway_error(exc)
+                            or gateway_failovers >= max_failovers
+                        ):
+                            raise
+
+                        previous_proxy = proxy_label(
+                            proxies[proxy_index], proxy_index
+                        )
+                        await client.aclose()
+                        proxy_index = (proxy_index + 1) % len(proxies)
+                        client = pokemon_center_client(
+                            proxies[proxy_index], headers
+                        )
+                        gateway_failovers += 1
+                        print(
+                            "[WARNING] Pokemon Center proxy gateway failed; "
+                            f"immediate failover {previous_proxy} -> "
+                            f"{proxy_label(proxies[proxy_index], proxy_index)} "
+                            f"(retry {gateway_failovers}/{max_failovers})",
+                            flush=True,
+                        )
 
                 consecutive_errors = 0
                 check_succeeded = True
+                if not first_success_logged:
+                    await remote_log(
+                        "Pokemon Center proxied check succeeded "
+                        f"(HTTP {status}, queue_open={str(queue_open).lower()}, "
+                        f"{proxy_label(proxies[proxy_index], proxy_index)})"
+                    )
+                    first_success_logged = True
                 if queue_open:
                     consecutive_closed = 0
                     if not queue_was_open:
@@ -349,15 +405,24 @@ async def run():
             except Exception as exc:
                 consecutive_errors += 1
                 print(f"[WARNING] Check failed ({consecutive_errors}): {exc}", flush=True)
-                blocked_response = "HTTP 403" in str(exc) or "HTTP 429" in str(exc)
-                if blocked_response or consecutive_errors % 3 == 0:
-                    previous_proxy = proxy_label(proxies[proxy_index])
+                blocked_response = any(
+                    marker in str(exc)
+                    for marker in (
+                        "HTTP 403",
+                        "HTTP 429",
+                        "Imperva security interstitial",
+                    )
+                )
+                gateway_error = is_proxy_gateway_error(exc)
+                if blocked_response or gateway_error or consecutive_errors % 3 == 0:
+                    previous_proxy = proxy_label(proxies[proxy_index], proxy_index)
                     await client.aclose()
                     proxy_index = (proxy_index + 1) % len(proxies)
                     client = pokemon_center_client(proxies[proxy_index], headers)
                     await remote_log(
                         "Pokemon Center proxy rotated after repeated errors "
-                        f"({previous_proxy} -> {proxy_label(proxies[proxy_index])})",
+                        f"({previous_proxy} -> "
+                        f"{proxy_label(proxies[proxy_index], proxy_index)})",
                         "warning",
                     )
                 if consecutive_errors in (1, 5, 20):
@@ -373,6 +438,10 @@ async def run():
                 last_bandwidth_log = time.monotonic()
 
             interval = OPEN_CHECK_SECONDS if queue_was_open else CHECK_SECONDS
+            if queue_was_open and consecutive_closed:
+                # Once the queue appears closed, confirm promptly rather than
+                # waiting the full queue-open interval between confirmations.
+                interval = CHECK_SECONDS
             if not check_succeeded:
                 # Avoid repeating the old tight 403 loop. Errors back off from
                 # one minute to at most fifteen minutes; a successful proxied

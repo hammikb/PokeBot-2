@@ -177,6 +177,44 @@ export class TargetApiClient {
   }
 
   /**
+   * Get inventory quantities from Target's RedSky API.
+   * This is the "golden field" — available_to_promise_network.quantity
+   * shows the exact network quantity before the website shows "in stock."
+   */
+  async getInventoryQuantities(tcin) {
+    try {
+      const response = await axios.get(`${this.apiUrl}/web/pdp_client_v1`, {
+        params: {
+          key: this._getApiKey(),
+          tcin,
+          store_id: '3991',
+          pricing_store_id: '3991',
+          has_pricing_store_id: 'true'
+        },
+        headers: this._getHeaders()
+      })
+
+      const product = response.data?.data?.product || {}
+      const atp = product.available_to_promise_network || {}
+      const fulfillment = product.fulfillment || {}
+
+      return {
+        success: true,
+        tcin,
+        title: product?.item?.product_description?.title || null,
+        availableQuantity: atp.quantity ?? 0,
+        availability: atp.availability || null,
+        shippingQuantity: fulfillment?.shipping_options?.available_quantity ?? 0,
+        pickupQuantity: fulfillment?.pickup_options?.available_quantity ?? 0,
+        price: product?.price?.current_retail || null
+      }
+    } catch (err) {
+      log.warn('Inventory check failed', { tcin, error: err.message })
+      return { success: false, tcin, error: err.message, availableQuantity: 0 }
+    }
+  }
+
+  /**
    * Extract TCIN from Target product URL
    */
   static extractTcin(url) {
@@ -195,6 +233,10 @@ export class TargetApiClient {
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       Accept: 'application/json',
       'Accept-Language': 'en-US,en;q=0.9',
+      'X-Requested-With': 'XMLHttpRequest',
+      'Sec-Fetch-Dest': 'empty',
+      'Sec-Fetch-Mode': 'cors',
+      'Sec-Fetch-Site': 'same-site',
       Cookie: cookieString,
       Referer: 'https://www.target.com/',
       Origin: 'https://www.target.com'

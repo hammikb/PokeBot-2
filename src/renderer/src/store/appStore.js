@@ -288,10 +288,6 @@ export const useAppStore = create((set, get) => ({
     await get().loadSettings()
     return result
   },
-  setMonitorMode: async (mode) => {
-    await invoke(IPC.MONITOR_SET_MODE, mode)
-    await get().loadSettings()
-  },
   checkAuthStatus: async () => {
     try {
       const status = await invoke(IPC.AUTH_GET_STATUS)

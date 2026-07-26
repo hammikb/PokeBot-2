@@ -38,7 +38,7 @@ const SAMSCLUB_TASK = {
   product_name: 'Prismatic Evolutions Super Premium Collection'
 }
 
-function makeManager(monitorMode) {
+function makeManager() {
   const source = makeFakeSource()
   const db = {
     prepare: vi.fn(() => ({
@@ -52,14 +52,14 @@ function makeManager(monitorMode) {
     notificationEngine: { fire: vi.fn() },
     browserPool: { launch: vi.fn(), close: vi.fn() },
     getDb: () => db,
-    getSettings: () => ({ monitorMode }),
+    getSettings: () => ({}),
     encryptionKey: Buffer.alloc(32),
     createSupabaseSource: async () => source
   })
   return { manager, source }
 }
 
-describe('TaskManager monitor mode', () => {
+describe('TaskManager central monitoring', () => {
   it('auto-joins the Pokemon Center queue without creating a task', async () => {
     const source = makeFakeSource()
     const pokemonCenterQueueJoiner = {
@@ -117,8 +117,8 @@ describe('TaskManager monitor mode', () => {
     })
   })
 
-  it('in supabase mode subscribes the product instead of polling', async () => {
-    const { manager, source } = makeManager('supabase')
+  it('subscribes the product through Supabase instead of polling locally', async () => {
+    const { manager, source } = makeManager()
     manager.startTask(TARGET_TASK)
     await vi.waitFor(() => expect(source.addProduct).toHaveBeenCalled())
     expect(source.addProduct).toHaveBeenCalledWith({
@@ -131,7 +131,7 @@ describe('TaskManager monitor mode', () => {
   })
 
   it("always routes Sam's Club monitoring through the Pi while checkout remains local", async () => {
-    const { manager, source } = makeManager('local')
+    const { manager, source } = makeManager()
     manager.startTask(SAMSCLUB_TASK)
     await vi.waitFor(() => expect(source.addProduct).toHaveBeenCalled())
     expect(source.addProduct).toHaveBeenCalledWith({
@@ -188,7 +188,7 @@ describe('TaskManager monitor mode', () => {
   })
 
   it('routes a supabase drop into the checkout path (emits drop)', async () => {
-    const { manager, source } = makeManager('supabase')
+    const { manager, source } = makeManager()
     const drops = []
     manager.on('drop', (e) => drops.push(e))
     manager.startTask(TARGET_TASK)
@@ -205,7 +205,7 @@ describe('TaskManager monitor mode', () => {
   })
 
   it('re-emits monitoring when Start is clicked for an already resumed task', async () => {
-    const { manager, source } = makeManager('supabase')
+    const { manager, source } = makeManager()
     const statuses = []
     manager.on('taskStatus', (event) => statuses.push(event))
 
@@ -220,7 +220,7 @@ describe('TaskManager monitor mode', () => {
   })
 
   it('stopTask unsubscribes centrally (explicit stop means stop watching)', async () => {
-    const { manager, source } = makeManager('supabase')
+    const { manager, source } = makeManager()
     manager.startTask(TARGET_TASK)
     await vi.waitFor(() => expect(source.addProduct).toHaveBeenCalled())
 
@@ -234,7 +234,7 @@ describe('TaskManager monitor mode', () => {
   })
 
   it('stopAll({ unsubscribe: false }) releases channels but keeps subscriptions (app quit)', async () => {
-    const { manager, source } = makeManager('supabase')
+    const { manager, source } = makeManager()
     manager.startTask(TARGET_TASK)
     await vi.waitFor(() => expect(source.addProduct).toHaveBeenCalled())
 
@@ -245,7 +245,7 @@ describe('TaskManager monitor mode', () => {
   })
 
   it('unsubscribeCentral removes the subscription for a task that is not running', async () => {
-    const { manager, source } = makeManager('supabase')
+    const { manager, source } = makeManager()
 
     await manager.unsubscribeCentral(TARGET_TASK)
 
@@ -256,24 +256,13 @@ describe('TaskManager monitor mode', () => {
     })
   })
 
-  it('unsubscribeCentral is a no-op in local mode', async () => {
-    const { manager, source } = makeManager('local')
+  it('uses central monitoring even when an obsolete local setting remains in the database', async () => {
+    const { manager, source } = makeManager()
+    manager._getSettings = () => ({ monitorMode: 'local' })
 
-    await manager.unsubscribeCentral(TARGET_TASK)
-
-    expect(source.unsubscribe).not.toHaveBeenCalled()
-  })
-
-  it('setMonitorMode stops active tasks and restarts them under the new source', async () => {
-    const { manager, source } = makeManager('local')
     manager.startTask(TARGET_TASK)
-    expect(manager.getActiveTasks()).toContain('task-1')
-
-    // getSettings is read fresh inside startTask; flip mode then restart.
-    manager._getSettings = () => ({ monitorMode: 'supabase' })
-    await manager.setMonitorMode('supabase')
 
     await vi.waitFor(() => expect(source.addProduct).toHaveBeenCalled())
-    expect(manager.getActiveTasks()).toContain('task-1')
+    expect(manager._tasks.get(TARGET_TASK.id).source).toBe('supabase')
   })
 })

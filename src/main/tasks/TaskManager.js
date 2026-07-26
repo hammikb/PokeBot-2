@@ -1,19 +1,10 @@
 import { randomUUID } from 'crypto'
 import { EventEmitter } from 'events'
-import { MonitorEngine } from '../monitor/MonitorEngine.js'
-import { MonitorBrowserContext } from '../monitor/MonitorBrowserContext.js'
 import { runWalmartFlow } from '../automation/flows/walmart.js'
 import { runTargetFlow } from '../automation/flows/target.js'
 import { runPokemonCenterFlow } from '../automation/flows/pokemon-center.js'
 import { runCostcoFlow } from '../automation/flows/costco.js'
 import { runSamsClubFlow } from '../automation/flows/samsclub.js'
-import { WalmartPoller } from '../monitor/retailers/walmart.js'
-import { TargetPoller } from '../monitor/retailers/target.js'
-import { PokemonCenterPoller } from '../monitor/retailers/pokemon-center.js'
-import { BestBuyPoller } from '../monitor/retailers/bestbuy.js'
-import { CostcoPoller } from '../monitor/retailers/costco.js'
-import { GameStopPoller } from '../monitor/retailers/gamestop.js'
-import { SamsClubPoller } from '../monitor/retailers/samsclub.js'
 import { RetryManager } from '../utils/retryManager.js'
 import { extractProductKey } from '../products/productKey.js'
 import { SupabaseMonitorSource } from '../monitor/SupabaseMonitorSource.js'
@@ -24,16 +15,6 @@ const log = createModuleLogger('TaskManager')
 const POKEMON_CENTER_AUTO_JOIN_ID = 'pokemon-center-auto-join'
 const POKEMON_CENTER_QUEUE_URL = 'https://www.pokemoncenter.com/'
 const POKEMON_CENTER_QUEUE_ALERT_COOLDOWN_MS = 6 * 60 * 60 * 1000
-
-const POLLERS = {
-  walmart: WalmartPoller,
-  target: TargetPoller,
-  'pokemon-center': PokemonCenterPoller,
-  bestbuy: BestBuyPoller,
-  costco: CostcoPoller,
-  gamestop: GameStopPoller,
-  samsclub: SamsClubPoller
-}
 
 const FLOWS = {
   walmart: runWalmartFlow,
@@ -68,8 +49,6 @@ export class TaskManager extends EventEmitter {
     this._getDb = getDb
     this._getSettings = getSettings
     this._authSessionManager = authSessionManager
-    this._monitor = new MonitorEngine()
-    this._monitor.on('drop', (event) => this._onDrop(event))
     this._tasks = new Map()
     this._warmAccountsByTask = new Map()
     this._warmAccountRefs = new Map()
@@ -77,10 +56,6 @@ export class TaskManager extends EventEmitter {
     this._pokemonCenterAutoJoinEnabled = false
     this._pokemonCenterQueueAlertedAt = 0
 
-    // One shared browser context per retailer — Guppy's exact approach:
-    // one Chrome window (off-screen) with one tab per monitored product.
-    // All tabs share the same Akamai cookies → trust accumulates faster.
-    this._monitorContexts = new Map() // retailer → MonitorBrowserContext
     this._supabaseSource = null
     this._supabaseSourcePromise = null
     this._createSupabaseSource = createSupabaseSource || (() => this._buildSupabaseSource())
@@ -93,17 +68,6 @@ export class TaskManager extends EventEmitter {
         })
       })
     })
-  }
-
-  _getMonitorContext(retailer) {
-    if (!this._pool) return null
-    if (!this._monitorContexts.has(retailer)) {
-      this._monitorContexts.set(
-        retailer,
-        new MonitorBrowserContext({ browserPool: this._pool, retailer })
-      )
-    }
-    return this._monitorContexts.get(retailer)
   }
 
   async _buildSupabaseSource() {
@@ -131,8 +95,6 @@ export class TaskManager extends EventEmitter {
           return source
         })
         .catch((error) => {
-          // Do not cache a rejected connection forever. Authentication may finish
-          // or the network may recover before the next attempt.
           this._supabaseSourcePromise = null
           throw error
         })
@@ -142,75 +104,29 @@ export class TaskManager extends EventEmitter {
 
   startTask(taskRow) {
     if (this._tasks.has(taskRow.id)) {
-      // The renderer may have mounted after startup auto-resume emitted its first
-      // status event. Re-emit the real state when Start is clicked instead of
-      // silently returning and leaving the task looking stuck on idle.
       this._emitStatus(taskRow.id, 'monitoring')
       return
     }
-    this._retainTaskAccounts(taskRow)
-    const mode = this._getSettings().monitorMode || 'local'
-    const productKey = extractProductKey(taskRow.retailer, taskRow.product_url)
-    const isPokemonCenterQueueTask =
-      taskRow.retailer === 'pokemon-center' && productKey === 'site-queue'
-    const isCentralOnlyRetailer = taskRow.retailer === 'samsclub' || isPokemonCenterQueueTask
-    const needsLocalRetailerPoller =
-      taskRow.retailer === 'pokemon-center' && !isPokemonCenterQueueTask
-
-    // Pokemon Center's site-wide queue and Sam's Club stock are detected
-    // centrally by the Pi even when other retailers use local monitoring.
-    // Checkout still runs locally in the signed-in account browser after a drop.
-    if ((mode === 'supabase' && !needsLocalRetailerPoller) || isCentralOnlyRetailer) {
-      this._tasks.set(taskRow.id, { ...taskRow, source: 'supabase' })
-      this._emitStatus(taskRow.id, 'monitoring')
-      this._startSupabaseTask(taskRow).catch((err) => {
-        log.error('Failed to start Supabase monitor task', {
-          taskId: taskRow.id,
-          retailer: taskRow.retailer,
-          productUrl: taskRow.product_url,
-          error: err.message
-        })
-        this._emitStatus(taskRow.id, 'error')
-        this.emit('drop', {
-          retailer: taskRow.retailer,
-          productName: `Supabase monitor error: ${err.message}`,
-          productUrl: taskRow.product_url,
-          dropType: 'supabase_notice'
-        })
-      })
-      return
-    }
-
-    const PollerClass = POLLERS[taskRow.retailer]
-    if (!PollerClass) {
-      this._emitStatus(taskRow.id, 'error')
-      return
-    }
-
-    // Target uses the shared MonitorBrowserContext (one window, one tab per product).
-    // Other retailers fall back to browserPool (one context per product) until
-    // they are updated to support monitorContext.
-    const monitorContext = ['target', 'pokemon-center', 'samsclub'].includes(taskRow.retailer)
-      ? this._getMonitorContext(taskRow.retailer)
-      : null
-
-    const settings = this._getSettings()
-    const walmartMonitorMethod = settings.walmartMonitorMethod || 'axios'
-    const poller = new PollerClass({
-      productUrl: taskRow.product_url,
-      maxPrice: taskRow.max_price,
-      monitorContext,
-      // browserPool is still passed as fallback for retailers that don't yet
-      // use monitorContext, and for the TargetPoller legacy path.
-      // Browser interception is much more expensive than Walmart's lightweight
-      // HTTP check. Opt into it only for listings that reject the HTTP path.
-      browserPool:
-        taskRow.retailer === 'walmart' && walmartMonitorMethod !== 'browser' ? null : this._pool
-    })
-
-    this._tasks.set(taskRow.id, { ...taskRow, poller, source: 'local' })
-    this._monitor.addTask({ id: taskRow.id, poller, intervalMs: taskRow.interval_ms || 4000 })
+    this._tasks.set(taskRow.id, { ...taskRow, source: 'supabase' })
     this._emitStatus(taskRow.id, 'monitoring')
+    // Pre-warm proxy accounts — the Pi handles monitoring but checkout runs
+    // locally, and proxy browser launch is slow.
+    this._retainTaskAccounts(taskRow)
+    this._startSupabaseTask(taskRow).catch((err) => {
+      log.error('Failed to start Supabase monitor task', {
+        taskId: taskRow.id,
+        retailer: taskRow.retailer,
+        productUrl: taskRow.product_url,
+        error: err.message
+      })
+      this._emitStatus(taskRow.id, 'error')
+      this.emit('drop', {
+        retailer: taskRow.retailer,
+        productName: `Supabase monitor error: ${err.message}`,
+        productUrl: taskRow.product_url,
+        dropType: 'supabase_notice'
+      })
+    })
   }
 
   async _startSupabaseTask(taskRow) {
@@ -226,24 +142,17 @@ export class TaskManager extends EventEmitter {
 
   stopTask(id, { unsubscribe = true } = {}) {
     const entry = this._tasks.get(id)
-    if (entry?.source === 'supabase') {
-      if (unsubscribe) {
-        // Explicit stop = this user stops watching: decrement the central
-        // ref count so the Pi drops the product once nobody else watches it.
-        this._supabaseSource
-          ?.unsubscribe({
-            productUrl: entry.product_url,
-            retailer: entry.retailer,
-            productKey: extractProductKey(entry.retailer, entry.product_url)
-          })
-          .catch(() => {})
-      } else {
-        // App shutdown: close the realtime channel but keep the subscription —
-        // quitting the app is not "stop watching this product".
-        this._supabaseSource?.releaseChannel(entry.product_url).catch(() => {})
-      }
+    if (!entry) return
+    if (unsubscribe) {
+      this._supabaseSource
+        ?.unsubscribe({
+          productUrl: entry.product_url,
+          retailer: entry.retailer,
+          productKey: extractProductKey(entry.retailer, entry.product_url)
+        })
+        .catch(() => {})
     } else {
-      this._monitor.removeTask(id)
+      this._supabaseSource?.releaseChannel(entry.product_url).catch(() => {})
     }
     this._releaseTaskAccounts(id)
     this._tasks.delete(id)
@@ -255,50 +164,19 @@ export class TaskManager extends EventEmitter {
   }
 
   async shutdown() {
-    // Keep central subscriptions, but await every local monitor context so no
-    // managed browser survives after the Electron window closes.
     this.stopAll({ unsubscribe: false })
-    const monitorContexts = [...this._monitorContexts.values()]
-    this._monitorContexts.clear()
-    await Promise.allSettled([
-      ...monitorContexts.map((context) => context.closeAll()),
-      this._supabaseSource?.stop?.()
-    ])
+    await this._supabaseSource?.stop?.().catch(() => {})
     this._supabaseSource = null
     this._supabaseSourcePromise = null
   }
 
-  // Remove this user's central subscription for a task regardless of whether it
-  // is currently running — deleting a stopped task must still tell Supabase, or
-  // the Pi keeps monitoring a product nobody is watching. No-op in local mode.
   async unsubscribeCentral(taskRow) {
-    if (
-      (this._getSettings().monitorMode || 'local') !== 'supabase' &&
-      taskRow.retailer !== 'pokemon-center'
-    )
-      return
     const source = await this._getSupabaseSource()
     await source.unsubscribe({
       productUrl: taskRow.product_url,
       retailer: taskRow.retailer,
       productKey: extractProductKey(taskRow.retailer, taskRow.product_url)
     })
-  }
-
-  async setMonitorMode() {
-    // Restart every active task under whatever monitorMode getSettings() now
-    // returns. Caller persists the setting before invoking this.
-    const activeIds = [...this._tasks.keys()]
-    this.stopAll()
-    if (this._supabaseSource) {
-      await this._supabaseSource.stop().catch(() => {})
-      this._supabaseSource = null
-      this._supabaseSourcePromise = null
-    }
-    for (const id of activeIds) {
-      const task = this._getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(id)
-      if (task) this.startTask(task)
-    }
   }
 
   async setPokemonCenterAutoJoin(enabled) {
@@ -336,8 +214,6 @@ export class TaskManager extends EventEmitter {
       }
       return { enabled: true, connected: true }
     } catch (error) {
-      // Keep the durable armed state. AuthSessionManager's change listener retries
-      // after sign-in, and the cleared source promise makes that retry possible.
       log.warn('Pokemon Center auto-join armed; connection will retry', {
         error: error.message
       })
@@ -450,11 +326,9 @@ export class TaskManager extends EventEmitter {
     const flow = FLOWS[dropEvent.retailer]
     if (!flow) return
 
-    // For test-checkout mode, ensure mode is passed through
     if (task.mode === 'test-checkout') {
       await this._runFlowsForTask({ ...task, mode: 'test-checkout' }, dropEvent)
     } else {
-      // auto-checkout / monitor-and-buy mode
       await this._runFlowsForTask(task, dropEvent)
     }
   }
@@ -595,7 +469,6 @@ export class TaskManager extends EventEmitter {
     if (!account) return { accountId, success: false, error: 'Account not found' }
     const attemptId = this._checkoutTelemetry?.beginAttempt({ task, dropEvent, accountId })
 
-    // Create retry manager for this checkout
     const retryManager = new RetryManager({
       maxRetries: 3,
       initialDelay: 2000,
@@ -603,7 +476,6 @@ export class TaskManager extends EventEmitter {
     })
 
     try {
-      // Wrap the entire checkout flow in retry logic
       const result = await retryManager.retry(
         async (attempt) => {
           if (attempt > 1) {
@@ -656,8 +528,6 @@ export class TaskManager extends EventEmitter {
               onMilestone: (stage, detail) => {
                 this._checkoutTelemetry?.record(attemptId, stage, `milestone:${detail}`)
               },
-              // SHAPE COOKIE MANAGEMENT: Pass the browser pool and account ID
-              // so TargetFlow can monitor and refresh Shape session health
               browserPool: this._pool,
               accountId: accountId
             })
@@ -670,7 +540,6 @@ export class TaskManager extends EventEmitter {
             }
             return flowResult
           } catch (err) {
-            // Close context on error before retrying
             await this._closeAccountContext(accountId)
             throw err
           }
@@ -684,7 +553,6 @@ export class TaskManager extends EventEmitter {
             )
           },
           shouldRetry: (err) => {
-            // Retry on network errors and timeouts, but not on validation errors
             return isRetryableCheckoutError(err.message, err.code)
           }
         }
@@ -732,8 +600,6 @@ export class TaskManager extends EventEmitter {
     }
   }
 
-  // Queue pages ride the same persistent account context. Never tear that
-  // context down from a checkout retry/error while a queue is still active.
   async _closeAccountContext(accountId) {
     if (this._queueJoiner?.isUsingAccount(accountId)) return
     if (this._pool.isPinned?.(accountId)) return
@@ -753,6 +619,11 @@ export class TaskManager extends EventEmitter {
 
       const account = this._accountManager.getDecrypted(accountId)
       if (!account?.profile_path) continue
+
+      // Only pre-warm when using a proxy — proxy connections are slow to
+      // establish and need Shape cookie hydration to beat Akamai bot detection.
+      if (!String(account.proxy || '').trim()) continue
+
       const startedAt = Date.now()
       this._pool
         .pin(accountId, { profilePath: account.profile_path, proxy: account.proxy })

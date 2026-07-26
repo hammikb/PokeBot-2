@@ -1,3 +1,7 @@
+import { createModuleLogger } from '../utils/logger.js'
+
+const log = createModuleLogger('Captcha')
+
 const CAPTCHA_SELECTORS = [
   'iframe[src*="recaptcha"]',
   'iframe[src*="captcha"]',
@@ -55,11 +59,11 @@ async function detectCaptchaConfig(page) {
 async function solveCaptchaWithCapsolver(page, apiKey, notificationEngine, dropEvent) {
   const config = await detectCaptchaConfig(page);
   if (!config) {
-    console.log('No CAPTCHA widget found to solve.');
+    log.warn('No CAPTCHA widget found to solve.');
     return false;
   }
 
-  console.log(`Solving ${config.type} with sitekey ${config.sitekey}`);
+  log.info(`Solving ${config.type} with sitekey ${config.sitekey}`);
   const task = {
     type: config.type,
     websiteURL: page.url(),
@@ -121,7 +125,7 @@ export async function waitForCaptchaIfNeeded(page, notificationEngine, dropEvent
         if (!stillPresent) return;
       }
     } catch (error) {
-      console.error('CapSolver auto-solve failed, falling back to manual:', error.message);
+      log.warn('CapSolver auto-solve failed, falling back to manual', { error: error.message });
     }
   }
 

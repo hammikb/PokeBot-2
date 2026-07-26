@@ -36,7 +36,6 @@ export const IPC = {
   ACCOUNTS_DELETE: 'accounts:delete',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
-  MONITOR_SET_MODE: 'monitor:set-mode',
   AUTH_SIGN_IN: 'auth:sign-in',
   AUTH_SIGN_UP: 'auth:sign-up',
   AUTH_SIGN_OUT: 'auth:sign-out',

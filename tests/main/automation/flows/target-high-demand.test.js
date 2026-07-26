@@ -219,10 +219,11 @@ describe('Target high-demand checkout submission', () => {
   })
 
   it('temporarily bypasses the cart API after Target rate limits it', () => {
-    markTargetCartApiRateLimited(1_000)
+    markTargetCartApiRateLimited('account-1', 1_000)
 
-    expect(isTargetCartApiCoolingDown(1_001)).toBe(true)
-    expect(isTargetCartApiCoolingDown(601_001)).toBe(false)
+    expect(isTargetCartApiCoolingDown('account-1', 1_001)).toBe(true)
+    expect(isTargetCartApiCoolingDown('account-2', 1_001)).toBe(false)
+    expect(isTargetCartApiCoolingDown('account-1', 601_001)).toBe(false)
   })
 
   it('targets only visible Add to cart buttons so hidden disabled duplicates are ignored', () => {

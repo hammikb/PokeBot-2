@@ -2,6 +2,23 @@ import { waitForCaptchaIfNeeded } from '../captcha.js'
 import { startTrace } from '../TraceRecorder.js'
 import { NativeInputBridge } from '../NativeInputBridge.js'
 import { startCheckoutDiagnostics } from '../CheckoutDiagnostics.js'
+import {
+  ATC_SELECTOR,
+  CART_CONFIRMATION_SELECTOR,
+  QUEUE_JOIN_SELECTOR,
+  ATC_AFTER_QUEUE_SELECTOR,
+  CVV_SELECTOR,
+  PLACE_ORDER_SELECTOR,
+  CHECKOUT_READY_SELECTOR,
+  SIGN_IN_LINK_SELECTOR,
+  USERNAME_SELECTOR,
+  PASSWORD_SELECTOR,
+  CONTINUE_BTN_SELECTOR,
+  SIGN_IN_BTN_SELECTOR,
+  ORDER_CONFIRMATION_SELECTOR,
+  ORDER_NUMBER_SELECTOR
+} from './walmart-page-utils.js'
+import { humanDelay } from './checkout-utils.js'
 
 export async function runWalmartFlow(
   context,
@@ -33,39 +50,33 @@ export async function runWalmartFlow(
 
     // Check for queue first
     onStep('Checking Walmart queue')
-    const queueBtn = page.locator(
-      'button:has-text("Join Waitlist"), button:has-text("Get In Line"), button:has-text("Join queue")'
-    )
+    const queueBtn = page.locator(QUEUE_JOIN_SELECTOR)
     if ((await queueBtn.count()) > 0) {
       onStep('Joining Walmart queue')
       await queueBtn.first().click()
       await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
       // Wait up to 10 minutes to exit queue
-      await page.waitForSelector(
-        '[class*="add-to-cart"]:not([disabled]), button[data-automation-id="atc"]:not([disabled])',
-        { timeout: 600000 }
-      )
+      await page.waitForSelector(ATC_AFTER_QUEUE_SELECTOR, { timeout: 600000 })
     }
 
     // The extension clicks after a short interaction settle rather than sleeping
     // for several seconds. Keep a minimal pause, then wait on real page state.
     onStep('Clicking Add to cart')
-    const atcBtn = page.locator('button[data-automation-id="atc"], button:has-text("Add to cart")')
+    const atcBtn = page.locator(ATC_SELECTOR)
 
     // Hover before clicking (more human-like, optional for environments that don't support it)
     await atcBtn.first().hover?.()
     await page.waitForTimeout?.(100)
 
     await atcBtn.first().click({ timeout: 15000 })
+    await humanDelay(300, 700)
     await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
 
     onStep('Waiting for cart confirmation')
-    const cartSignal = page
-      .locator(
-        '[data-automation-id="cart-item-count"]:visible, [aria-label*="cart" i]:visible:has-text("1"), [role="alert"]:visible:has-text("Added to cart"), button:visible:has-text("View cart")'
-      )
-      .first()
+    const cartSignal = page.locator(CART_CONFIRMATION_SELECTOR).first()
     await cartSignal.waitFor({ state: 'visible', timeout: 1200 }).catch(() => {})
+
+    await humanDelay(200, 600)
 
     // Go to checkout
     onStep('Opening checkout')
@@ -75,30 +86,22 @@ export async function runWalmartFlow(
     })
     await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
 
-    const checkoutReady = page
-      .locator(
-        'input[name="cvv"]:visible, input[autocomplete="cc-csc"]:visible, button[data-automation-id="place-order"]:visible, button:visible:has-text("Place order")'
-      )
-      .first()
+    const checkoutReady = page.locator(CHECKOUT_READY_SELECTOR).first()
     await checkoutReady.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {})
+
+    await humanDelay(200, 500)
 
     // Enter CVV
     onStep('Checking CVV field')
-    const cvvField = page.locator(
-      'input[name="cvv"], input[placeholder*="CVV"], input[aria-label*="CVV"], input[aria-label*="cvv"]'
-    )
+    const cvvField = page.locator(CVV_SELECTOR)
     if ((await cvvField.count()) > 0) {
       onStep('Filling CVV')
       // Use native OS keyboard input — avoids CDP Input.dispatchKeyEvent detection
-      const cvvSelector =
-        'input[name="cvv"], input[placeholder*="CVV"], input[aria-label*="CVV"], input[aria-label*="cvv"]'
-      await input.fill(cvvSelector, cvv)
+      await input.fill(CVV_SELECTOR, cvv)
     }
 
     // Place order
-    const placeOrderBtn = page.locator(
-      'button:has-text("Place order"), button[data-automation-id="place-order"], button:has-text("Place Order")'
-    )
+    const placeOrderBtn = page.locator(PLACE_ORDER_SELECTOR)
     if (isTestMode) {
       onStep('Waiting for Place order button')
       await placeOrderBtn.first().waitFor({ state: 'visible', timeout: 15000 })
@@ -116,22 +119,18 @@ export async function runWalmartFlow(
       }
     }
 
+    await humanDelay(300, 800)
     onStep('Clicking Place order')
     // Use native OS mouse click — avoids CDP Input.dispatchMouseEvent detection
-    const placeOrderSelector =
-      'button:has-text("Place order"), button[data-automation-id="place-order"], button:has-text("Place Order")'
-    await input.click(placeOrderSelector)
+    await input.click(PLACE_ORDER_SELECTOR)
 
     // Wait for confirmation
     onStep('Waiting for order confirmation')
-    await page.waitForSelector(
-      '[class*="order-confirmation"], [class*="thank-you"], [class*="orderConfirmation"]',
-      { timeout: 30000 }
-    )
+    await page.waitForSelector(ORDER_CONFIRMATION_SELECTOR, { timeout: 30000 })
 
     let orderId = 'unknown'
     try {
-      orderId = await page.textContent('[class*="order-number"], [class*="orderNumber"]')
+      orderId = await page.textContent(ORDER_NUMBER_SELECTOR)
     } catch {
       // Some Walmart confirmation pages omit or delay the visible order number.
     }
@@ -175,9 +174,7 @@ async function ensureWalmartSignedIn(
   productUrl
 ) {
   onStep('Checking Walmart sign-in state')
-  const signInLink = page.locator(
-    'a:has-text("Sign in"), button:has-text("Sign in"), button:has-text("Sign In"), [data-automation-id="sign-in"]'
-  )
+  const signInLink = page.locator(SIGN_IN_LINK_SELECTOR)
   if ((await signInLink.count()) === 0) {
     onStep('Already signed into Walmart')
     return
@@ -196,27 +193,23 @@ async function ensureWalmartSignedIn(
   await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
 
   onStep('Filling Walmart email')
-  const usernameField = page.locator(
-    'input[name="email"], input[type="email"], input[autocomplete*="username"], input[id*="email"]'
-  )
+  const usernameField = page.locator(USERNAME_SELECTOR)
   await usernameField.first().waitFor({ state: 'visible', timeout: 15000 })
   await usernameField.first().fill(username)
 
-  const continueBtn = page.locator('button:has-text("Continue"), button[type="submit"]')
+  const continueBtn = page.locator(CONTINUE_BTN_SELECTOR)
   if ((await continueBtn.count()) > 0) {
     onStep('Submitting Walmart email')
     await continueBtn.first().click({ timeout: 10000 })
     await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
   }
 
-  const passwordField = page.locator('input[name="password"], input[type="password"]')
+  const passwordField = page.locator(PASSWORD_SELECTOR)
   onStep('Filling Walmart password')
   await passwordField.first().waitFor({ state: 'visible', timeout: 15000 })
   await passwordField.first().fill(account.password)
 
-  const signInBtn = page.locator(
-    'button:has-text("Sign in"), button:has-text("Sign In"), button[type="submit"]'
-  )
+  const signInBtn = page.locator(SIGN_IN_BTN_SELECTOR)
   onStep('Submitting Walmart sign-in')
   await signInBtn.first().click({ timeout: 10000 })
   await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
