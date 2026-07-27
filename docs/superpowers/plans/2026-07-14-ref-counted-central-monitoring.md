@@ -145,10 +145,10 @@ insert into public.products (id, retailer, product_url, product_key, name, activ
 values ('00000000-0000-0000-0000-000000000001', 'target', 'https://example.com/test', 'test-key-1', 'Trigger test product', false)
 on conflict (id) do update set active = false;
 
--- Insert a subscription for the test@gmail.com user created in a prior session.
+-- Insert a subscription for the redacted@example.invalid user created in a prior session.
 insert into public.subscriptions (user_id, product_id)
 select id, '00000000-0000-0000-0000-000000000001'
-from auth.users where email = 'test@gmail.com'
+from auth.users where email = 'redacted@example.invalid'
 on conflict do nothing;
 
 select active from public.products where id = '00000000-0000-0000-0000-000000000001';

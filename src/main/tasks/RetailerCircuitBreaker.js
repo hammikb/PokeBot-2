@@ -61,13 +61,16 @@ export class RetailerCircuitBreaker {
   }
 
   snapshot() {
+    const now = this.now()
     return Object.fromEntries(
       [...this.states.entries()].map(([retailer, state]) => [
         retailer,
         {
           failures: state.failures.length,
           openedAt: state.openedAt || null,
-          reason: state.reason || null
+          reason: state.reason || null,
+          open: Boolean(state.openedAt && now - state.openedAt < this.cooldownMs),
+          remainingMs: state.openedAt ? Math.max(0, this.cooldownMs - (now - state.openedAt)) : 0
         }
       ])
     )

@@ -33,3 +33,7 @@ textarea,
 select {
   user-select: text;
 }
+
+.detail-label {
+  @apply text-[10px] uppercase tracking-[0.18em] text-gray-600;
+}

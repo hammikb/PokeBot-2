@@ -133,6 +133,17 @@ const IPC_ARG_SCHEMAS = {
   [IPC.SHIPPING_UPDATE]: idObjectArgs,
   [IPC.SHIPPING_DELETE]: stringArg,
   [IPC.SHIPPING_SET_DEFAULT]: stringArg,
+  [IPC.CHECKOUT_ANALYTICS_GET]: z.tuple([
+    z
+      .object({
+        limit: z.number().int().min(1).max(500).optional(),
+        days: z.number().int().min(1).max(3650).nullable().optional(),
+        retailer: z.string().max(40).optional(),
+        outcome: z.string().max(40).optional()
+      })
+      .optional()
+  ]),
+  [IPC.MONITOR_HEALTH_GET]: emptyArgs,
   [IPC.QUEUE_JOIN]: objectArg,
   [IPC.QUEUE_STOP]: stringArg,
   [IPC.SYSTEM_HEALTH_GET]: emptyArgs,
@@ -165,6 +176,8 @@ export function registerIpcHandlers({
   queueJoiner,
   pokemonCenterQueueJoiner,
   authSessionManager,
+  checkoutTelemetry,
+  monitorHealth,
   getStartupDiagnostics = () => null
 }) {
   const registeredChannels = new Set()
@@ -213,6 +226,14 @@ export function registerIpcHandlers({
 
   // Settings
   ipcMain.handle(IPC.SYSTEM_HEALTH_GET, () => getStartupDiagnostics())
+  ipcMain.handle(IPC.MONITOR_HEALTH_GET, () => {
+    if (!monitorHealth) throw new Error('Monitor health is unavailable')
+    return monitorHealth.getSnapshot()
+  })
+  ipcMain.handle(IPC.CHECKOUT_ANALYTICS_GET, (_, filters = {}) => {
+    if (!checkoutTelemetry) throw new Error('Checkout analytics is unavailable')
+    return checkoutTelemetry.getAnalytics(filters)
+  })
   ipcMain.handle(IPC.SETTINGS_GET, () => getSettings())
   ipcMain.handle(IPC.SETTINGS_SET, async (_, key, value) => {
     if (typeof key !== 'string' || !key) throw new Error('settings key must be a non-empty string')
@@ -481,6 +502,7 @@ export function registerIpcHandlers({
   })
   ipcMain.handle(IPC.ACCOUNTS_SET_STATUS, (_, id, status) => {
     accountManager.setStatus(id, status)
+    if (status !== 'manual_review') taskManager.clearAccountManualReview?.(id)
     return true
   })
   ipcMain.handle(IPC.ACCOUNTS_OPEN_SESSION, async (_, id) => {
@@ -664,6 +686,9 @@ export function registerIpcHandlers({
   ipcMain.handle(IPC.TASKS_UPDATE, (_, id, data) => {
     const task = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(id)
     if (!task) throw new Error('Task not found')
+    if (taskManager.getActiveTasks().includes(id)) {
+      throw new Error('Stop this task before editing its retailer or monitor configuration')
+    }
     const retailer = data.retailer || task.retailer
     if (!SUPPORTED_TASK_RETAILERS.has(retailer)) {
       throw new Error('Task editing is not supported for this retailer')
@@ -685,12 +710,21 @@ export function registerIpcHandlers({
     return true
   })
   ipcMain.handle(IPC.MONITORS_LIST, () => listProductMonitors(getDb()))
-  ipcMain.handle(IPC.MONITORS_SAVE, (_, data) => {
+  ipcMain.handle(IPC.MONITORS_SAVE, async (_, data) => {
     if (!data?.name || !Array.isArray(data.sources)) {
       throw new Error('Monitor name and retailer sources are required')
     }
     const db = getDb()
     const monitorId = data.id || randomUUID()
+    if (data.id) {
+      const activeTaskIds = new Set(taskManager.getActiveTasks())
+      const existingSources = db
+        .prepare('SELECT * FROM monitor_sources WHERE monitor_id = ?')
+        .all(monitorId)
+      if (existingSources.some((source) => source.task_id && activeTaskIds.has(source.task_id))) {
+        throw new Error('Stop this product monitor before editing its retailer sources')
+      }
+    }
     const now = Math.floor(Date.now() / 1000)
     db.prepare(
       `INSERT INTO product_monitors
@@ -762,7 +796,9 @@ export function registerIpcHandlers({
           source.intervalMs || 4000
         )
       } else if (taskId) {
-        taskManager.stopTask(taskId)
+        const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId)
+        const stopped = await taskManager.stopTask(taskId)
+        if (!stopped && task) await taskManager.unsubscribeCentral(task)
         db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
         taskId = null
       }
@@ -815,8 +851,8 @@ export function registerIpcHandlers({
     for (const source of sources) {
       if (!source.task_id) continue
       const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(source.task_id)
-      taskManager.stopTask(source.task_id)
-      if (task) await taskManager.unsubscribeCentral(task).catch(() => {})
+      const stopped = await taskManager.stopTask(source.task_id)
+      if (!stopped && task) await taskManager.unsubscribeCentral(task).catch(() => {})
       db.prepare('DELETE FROM tasks WHERE id = ?').run(source.task_id)
     }
     db.prepare('DELETE FROM monitor_sources WHERE monitor_id = ?').run(id)
@@ -833,12 +869,17 @@ export function registerIpcHandlers({
   ipcMain.handle(IPC.CATALOG_DELETE, (_, id) => deleteCatalogItem(getDb, id))
   ipcMain.handle(IPC.PROXIES_DOWNLOAD, async (_, url) => downloadProxies(url))
   ipcMain.handle(IPC.PROXIES_TEST, async (_, proxy) => testProxy(proxy))
-  ipcMain.handle(IPC.TASKS_START, (_, id) => {
+  ipcMain.handle(IPC.TASKS_START, async (_, id) => {
     const db = getDb()
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)
     if (task) {
       persistTaskState(db, id, TASK_STATE.MONITORING)
-      taskManager.startTask({ ...task, status: TASK_STATE.MONITORING })
+      try {
+        await taskManager.startTask({ ...task, status: TASK_STATE.MONITORING })
+      } catch (error) {
+        persistTaskState(db, id, TASK_STATE.IDLE)
+        throw error
+      }
     }
     return true
   })
@@ -847,18 +888,21 @@ export function registerIpcHandlers({
     if (!task) throw new Error('Task not found')
     return taskManager.testTask(task)
   })
-  ipcMain.handle(IPC.TASKS_STOP, (_, id) => {
-    persistTaskState(getDb(), id, TASK_STATE.IDLE)
-    taskManager.stopTask(id)
+  ipcMain.handle(IPC.TASKS_STOP, async (_, id) => {
+    const db = getDb()
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)
+    const stopped = await taskManager.stopTask(id)
+    if (!stopped && task) await taskManager.unsubscribeCentral(task)
+    persistTaskState(db, id, TASK_STATE.IDLE)
     return true
   })
   ipcMain.handle(IPC.TASKS_DELETE, async (_, id) => {
     const task = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(id)
-    taskManager.stopTask(id)
+    const stopped = await taskManager.stopTask(id)
     // stopTask only unsubscribes tasks running in this session; a deleted task
     // that was stopped (or from a previous session) must still drop its central
     // subscription or the Pi keeps monitoring it. Idempotent if both run.
-    if (task) await taskManager.unsubscribeCentral(task).catch(() => {})
+    if (!stopped && task) await taskManager.unsubscribeCentral(task).catch(() => {})
     getDb().prepare('DELETE FROM tasks WHERE id = ?').run(id)
     return true
   })

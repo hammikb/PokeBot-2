@@ -47,9 +47,9 @@ it('signs up and sets the realtime auth token when a session is returned', async
   createClient.mockReturnValueOnce({ auth: { signInWithPassword, signUp }, realtime: { setAuth } })
   const sc = new SupabaseClient({ url: 'https://x.supabase.co', key: 'k' })
 
-  const session = await sc.signUp('new@example.com', 'pw123')
+  const session = await sc.signUp('redacted@example.invalid', 'pw123')
 
-  expect(signUp).toHaveBeenCalledWith({ email: 'new@example.com', password: 'pw123' })
+  expect(signUp).toHaveBeenCalledWith({ email: 'redacted@example.invalid', password: 'pw123' })
   expect(setAuth).toHaveBeenCalledWith('jwt-signup')
   expect(session).toEqual({ access_token: 'jwt-signup', refresh_token: 'rt-signup' })
 })
@@ -59,7 +59,7 @@ it('signUp throws when Supabase returns no session (e.g. email confirmation stil
   createClient.mockReturnValueOnce({ auth: { signInWithPassword, signUp }, realtime: { setAuth } })
   const sc = new SupabaseClient({ url: 'https://x.supabase.co', key: 'k' })
 
-  await expect(sc.signUp('new@example.com', 'pw123')).rejects.toThrow(
+  await expect(sc.signUp('redacted@example.invalid', 'pw123')).rejects.toThrow(
     'Supabase sign-up succeeded but returned no session'
   )
 })
@@ -205,12 +205,12 @@ import { decrypt } from '../../../src/main/crypto.js'
 
 function makeFakeClient() {
   return {
-    signIn: vi.fn(async () => ({ refresh_token: 'rt-1', user: { id: 'u1', email: 'a@b.com' } })),
-    signUp: vi.fn(async () => ({ refresh_token: 'rt-2', user: { id: 'u2', email: 'c@d.com' } })),
+    signIn: vi.fn(async () => ({ refresh_token: 'rt-1', user: { id: 'u1', email: 'redacted@example.invalid' } })),
+    signUp: vi.fn(async () => ({ refresh_token: 'rt-2', user: { id: 'u2', email: 'redacted@example.invalid' } })),
     signOut: vi.fn(async () => {}),
     restoreSession: vi.fn(async () => ({
       refresh_token: 'rt-3',
-      user: { id: 'u1', email: 'a@b.com' }
+      user: { id: 'u1', email: 'redacted@example.invalid' }
     })),
     client: { fakeRawClient: true }
   }
@@ -245,20 +245,20 @@ describe('AuthSessionManager', () => {
     const changes = []
     manager.on('change', (s) => changes.push(s))
 
-    await manager.signIn('a@b.com', 'pw')
+    await manager.signIn('redacted@example.invalid', 'pw')
 
-    expect(client.signIn).toHaveBeenCalledWith('a@b.com', 'pw')
+    expect(client.signIn).toHaveBeenCalledWith('redacted@example.invalid', 'pw')
     const stored = JSON.parse(db._store.authRefreshTokenEnc)
     expect(decrypt(stored, KEY)).toBe('rt-1')
-    expect(changes).toEqual([{ authenticated: true, user: { id: 'u1', email: 'a@b.com' } }])
+    expect(changes).toEqual([{ authenticated: true, user: { id: 'u1', email: 'redacted@example.invalid' } }])
     expect(manager.getStatus()).toEqual({
       authenticated: true,
-      user: { id: 'u1', email: 'a@b.com' }
+      user: { id: 'u1', email: 'redacted@example.invalid' }
     })
   })
 
   it('restoreSession with a stored token restores it and re-saves the new one', async () => {
-    await manager.signIn('a@b.com', 'pw') // seeds a stored token
+    await manager.signIn('redacted@example.invalid', 'pw') // seeds a stored token
     client.restoreSession.mockClear()
 
     const ok = await manager.restoreSession()
@@ -267,7 +267,7 @@ describe('AuthSessionManager', () => {
     expect(client.restoreSession).toHaveBeenCalledWith('rt-1')
     expect(manager.getStatus()).toEqual({
       authenticated: true,
-      user: { id: 'u1', email: 'a@b.com' }
+      user: { id: 'u1', email: 'redacted@example.invalid' }
     })
   })
 
@@ -280,7 +280,7 @@ describe('AuthSessionManager', () => {
   })
 
   it('restoreSession clears a stale token when the client rejects it', async () => {
-    await manager.signIn('a@b.com', 'pw')
+    await manager.signIn('redacted@example.invalid', 'pw')
     client.restoreSession.mockRejectedValueOnce(new Error('expired'))
 
     const ok = await manager.restoreSession()
@@ -291,7 +291,7 @@ describe('AuthSessionManager', () => {
   })
 
   it('signOut clears the stored token and reports unauthenticated', async () => {
-    await manager.signIn('a@b.com', 'pw')
+    await manager.signIn('redacted@example.invalid', 'pw')
 
     await manager.signOut()
 
@@ -626,27 +626,27 @@ describe('auth IPC handlers', () => {
     const { handlers, authSessionManager } = setup()
     authSessionManager.getStatus.mockReturnValue({
       authenticated: true,
-      user: { id: 'u1', email: 'a@b.com' }
+      user: { id: 'u1', email: 'redacted@example.invalid' }
     })
     const result = await handlers.get(IPC.AUTH_GET_STATUS)({})
-    expect(result).toEqual({ authenticated: true, user: { id: 'u1', email: 'a@b.com' } })
+    expect(result).toEqual({ authenticated: true, user: { id: 'u1', email: 'redacted@example.invalid' } })
   })
 
   it('AUTH_SIGN_IN signs in with the given credentials and returns the resulting status', async () => {
     const { handlers, authSessionManager } = setup()
     authSessionManager.getStatus.mockReturnValue({
       authenticated: true,
-      user: { id: 'u1', email: 'a@b.com' }
+      user: { id: 'u1', email: 'redacted@example.invalid' }
     })
-    const result = await handlers.get(IPC.AUTH_SIGN_IN)({}, { email: 'a@b.com', password: 'pw' })
-    expect(authSessionManager.signIn).toHaveBeenCalledWith('a@b.com', 'pw')
-    expect(result).toEqual({ authenticated: true, user: { id: 'u1', email: 'a@b.com' } })
+    const result = await handlers.get(IPC.AUTH_SIGN_IN)({}, { email: 'redacted@example.invalid', password: 'pw' })
+    expect(authSessionManager.signIn).toHaveBeenCalledWith('redacted@example.invalid', 'pw')
+    expect(result).toEqual({ authenticated: true, user: { id: 'u1', email: 'redacted@example.invalid' } })
   })
 
   it('AUTH_SIGN_UP signs up with the given credentials', async () => {
     const { handlers, authSessionManager } = setup()
-    await handlers.get(IPC.AUTH_SIGN_UP)({}, { email: 'new@b.com', password: 'pw' })
-    expect(authSessionManager.signUp).toHaveBeenCalledWith('new@b.com', 'pw')
+    await handlers.get(IPC.AUTH_SIGN_UP)({}, { email: 'redacted@example.invalid', password: 'pw' })
+    expect(authSessionManager.signUp).toHaveBeenCalledWith('redacted@example.invalid', 'pw')
   })
 
   it('AUTH_SIGN_OUT signs out and returns the resulting (unauthenticated) status', async () => {
@@ -1426,7 +1426,7 @@ const FIELDS = [
     key: 'discordWebhook',
     label: 'Discord Webhook URL',
     type: 'text',
-    placeholder: 'https://discord.com/api/webhooks/...'
+    placeholder: 'https://discord.com/api/webhooks/REDACTED'
   },
   { key: 'twilioSid', label: 'Twilio Account SID', type: 'text', placeholder: 'ACxxxxxxxx' },
   { key: 'twilioToken', label: 'Twilio Auth Token', type: 'password', placeholder: '••••••••' },

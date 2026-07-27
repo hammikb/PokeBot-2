@@ -42,6 +42,7 @@ export async function runTargetFlow(
     orderSubmissionGate = null,
     orderSubmissionKey = null,
     onStep = () => {},
+    onBeforeSubmit = () => {},
     onMilestone = () => {},
     browserPool = null, // [TARGET] Pass the BrowserPool instance
     accountId = null // [TARGET] Pass the account ID for Shape tracking
@@ -69,6 +70,7 @@ export async function runTargetFlow(
   })
   const isTestMode = mode === 'test-checkout'
   let requiresManual = false
+  let orderSubmissionAttempted = false
   let cartStrategyActual = 'not_reached'
   let cartFallbackReason = null
   let cartQuantityActual = null
@@ -420,7 +422,11 @@ export async function runTargetFlow(
       browserPool, // [TARGET] Pass for Shape monitoring during retries
       accountId,
       orderSubmissionGate,
-      orderSubmissionKey
+      orderSubmissionKey,
+      onBeforeSubmit,
+      onSubmissionAttempted: () => {
+        orderSubmissionAttempted = true
+      }
     })
 
     if (confirmed === 'quota-reached') {
@@ -451,34 +457,57 @@ export async function runTargetFlow(
         message: 'Target order placed successfully'
       })
     } else {
-      onStep('Order status unclear - check manually')
+      const submissionUncertain = orderSubmissionAttempted
+      onStep(
+        submissionUncertain
+          ? 'Order status unclear - check manually and do not retry'
+          : 'Checkout requires manual review before order submission'
+      )
       requiresManual = true
       return withCartExecution({
         success: false,
         requiresManualCheckout: true,
+        terminal: submissionUncertain,
+        orderSubmissionAttempted,
+        submissionUncertain,
         screenshotPath,
         tracePath,
-        message: 'Order may have been placed - verify manually'
+        error: submissionUncertain
+          ? 'Target order submission status is uncertain. Do not retry; verify the order history and cart manually.'
+          : undefined,
+        message: submissionUncertain
+          ? 'Target order submission status is uncertain. Do not retry; verify manually.'
+          : 'Target checkout requires manual review before order submission.'
       })
     }
   } catch (err) {
+    const submissionUncertain = orderSubmissionAttempted && !isTestMode
+    if (submissionUncertain) requiresManual = true
     onStep(`Error: ${err.message}`)
     log.error('Target checkout flow failed', {
       error: err.message,
       url: page?.url?.() || null
     })
-    const diagnosticsPath = await diagnostics.capture(err, { stage: 'checkout-flow' })
-    await trace.capture(page)
-    const { screenshotPath, tracePath } = (await trace.stop()) || {}
+    const diagnosticsPath = await diagnostics
+      .capture(err, { stage: 'checkout-flow' })
+      .catch(() => null)
+    await trace.capture(page).catch(() => {})
+    const { screenshotPath, tracePath } = (await trace.stop().catch(() => null)) || {}
+    const submissionMessage =
+      'Target order submission status is uncertain. Do not retry; verify the order history and cart manually.'
 
     return withCartExecution({
       success: false,
-      requiresManualCheckout: requiresManual,
+      requiresManualCheckout: requiresManual || submissionUncertain,
+      terminal: submissionUncertain,
+      orderSubmissionAttempted,
+      submissionUncertain,
       screenshotPath,
       tracePath,
       diagnosticsPath,
-      error: err.message,
-      message: `Target checkout failed: ${err.message}`
+      cause: submissionUncertain ? err.message : undefined,
+      error: submissionUncertain ? submissionMessage : err.message,
+      message: submissionUncertain ? submissionMessage : `Target checkout failed: ${err.message}`
     })
   } finally {
     diagnostics.dispose()
@@ -553,7 +582,9 @@ export async function submitTargetOrder(
     browserPool = null, // [TARGET] Added for Shape monitoring
     accountId = null,
     orderSubmissionGate = null,
-    orderSubmissionKey = null
+    orderSubmissionKey = null,
+    onBeforeSubmit = () => {},
+    onSubmissionAttempted = () => {}
   }
 ) {
   let placeOrderBtn = initialPlaceOrderBtn
@@ -607,6 +638,8 @@ export async function submitTargetOrder(
       })
       return 'quota-reached'
     }
+    await onBeforeSubmit()
+    onSubmissionAttempted()
     onMilestone(
       'order_submitted',
       attempt === 0 ? 'Target Place your order clicked' : `Target order retry ${attempt} clicked`

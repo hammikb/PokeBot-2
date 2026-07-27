@@ -1,0 +1,2 @@
+-- No local seed data. Production catalog and monitor data are intentionally
+-- never copied into source control.

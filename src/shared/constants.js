@@ -73,6 +73,8 @@ export const IPC = {
   SHIPPING_UPDATE: 'shipping:update',
   SHIPPING_DELETE: 'shipping:delete',
   SHIPPING_SET_DEFAULT: 'shipping:set-default',
+  CHECKOUT_ANALYTICS_GET: 'checkout-analytics:get',
+  MONITOR_HEALTH_GET: 'monitor-health:get',
   SYSTEM_HEALTH_GET: 'system:health:get'
 }
 

@@ -38,6 +38,12 @@ export const useAppStore = create((set, get) => ({
   authUser: null,
   authError: '',
   startupHealth: null,
+  monitorHealth: null,
+  monitorHealthLoading: false,
+  monitorHealthError: '',
+  checkoutAnalytics: null,
+  checkoutAnalyticsLoading: false,
+  checkoutAnalyticsError: '',
 
   loadTasks: async () => {
     const tasks = await invoke(IPC.TASKS_GET)
@@ -95,6 +101,41 @@ export const useAppStore = create((set, get) => ({
       startupHealth,
       proxyTestResults: settings.proxyTestResults || {}
     })
+  },
+  loadMonitorHealth: async () => {
+    set((state) => ({
+      monitorHealthLoading: state.monitorHealth == null,
+      monitorHealthError: ''
+    }))
+    try {
+      const monitorHealth = await invoke(IPC.MONITOR_HEALTH_GET)
+      set({
+        monitorHealth,
+        monitorHealthLoading: false,
+        monitorHealthError: ''
+      })
+      return monitorHealth
+    } catch (error) {
+      set({
+        monitorHealthLoading: false,
+        monitorHealthError: error.message || 'Could not load monitor health'
+      })
+      return null
+    }
+  },
+  loadCheckoutAnalytics: async (filters = {}) => {
+    set({ checkoutAnalyticsLoading: true, checkoutAnalyticsError: '' })
+    try {
+      const checkoutAnalytics = await invoke(IPC.CHECKOUT_ANALYTICS_GET, filters)
+      set({ checkoutAnalytics, checkoutAnalyticsLoading: false })
+      return checkoutAnalytics
+    } catch (error) {
+      set({
+        checkoutAnalyticsLoading: false,
+        checkoutAnalyticsError: error.message || 'Could not load checkout analytics'
+      })
+      throw error
+    }
   },
   createTask: async (data) => {
     const id = await invoke(IPC.TASKS_CREATE, data)

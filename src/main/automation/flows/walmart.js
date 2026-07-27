@@ -33,7 +33,9 @@ export async function runWalmartFlow(
     buyLimit = 1,
     maxPrice = null,
     requireRetailerSeller = true,
-    onStep = () => {}
+    onStep = () => {},
+    onBeforeSubmit = () => {},
+    onMilestone = () => {}
   }
 ) {
   const page = await context.newPage()
@@ -54,6 +56,7 @@ export async function runWalmartFlow(
   })
   const isTestMode = mode === 'test-checkout'
   let requiresManual = false
+  let orderSubmissionAttempted = false
   try {
     onStep('Opening product page')
     await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
@@ -149,6 +152,9 @@ export async function runWalmartFlow(
 
     await humanDelay(300, 800)
     onStep('Clicking Place order')
+    await onBeforeSubmit()
+    orderSubmissionAttempted = true
+    onMilestone('order_submitted', 'Walmart Place order action initiated')
     // Use native OS mouse click — avoids CDP Input.dispatchMouseEvent detection
     await input.click(PLACE_ORDER_SELECTOR)
 
@@ -166,17 +172,31 @@ export async function runWalmartFlow(
     await trace.stop()
     return { success: true, orderId: orderId?.trim() || 'unknown', tracePath: trace.tracePath }
   } catch (err) {
-    const diagnosticsPath = await diagnostics.capture(err)
-    await trace.capture(page)
-    await trace.stop()
-    if (isTestMode) {
+    const submissionUncertain = orderSubmissionAttempted && !isTestMode
+    const diagnosticsPath = await diagnostics.capture(err).catch(() => null)
+    await Promise.resolve()
+      .then(() => trace.capture(page))
+      .catch(() => {})
+    await Promise.resolve()
+      .then(() => trace.stop())
+      .catch(() => {})
+    if (submissionUncertain) {
+      onStep('Walmart order status is uncertain; leaving checkout open for manual verification')
+      requiresManual = true
+    } else if (isTestMode) {
       onStep('Test checkout failed; leaving browser open for inspection')
       requiresManual = true
     }
+    const submissionMessage =
+      'Walmart order submission status is uncertain. Do not retry; verify the order history and cart manually.'
     return {
       success: false,
-      error: err.message,
-      requiresManualCheckout: isTestMode,
+      error: submissionUncertain ? submissionMessage : err.message,
+      cause: submissionUncertain ? err.message : undefined,
+      terminal: submissionUncertain,
+      orderSubmissionAttempted,
+      submissionUncertain,
+      requiresManualCheckout: isTestMode || submissionUncertain,
       tracePath: trace.tracePath,
       screenshotPath: trace.screenshotPath,
       diagnosticsPath

@@ -293,6 +293,11 @@ export default function Accounts() {
                       verified
                     </span>
                   )}
+                  {account.status === 'manual_review' && (
+                    <span className="text-amber-400 border border-amber-700 rounded px-1 py-0.5 text-sm uppercase tracking-wider">
+                      checkout paused
+                    </span>
+                  )}
                 </div>
                 <div className="text-gray-500">
                   {account.retailer} - {account.username}
@@ -360,6 +365,15 @@ export default function Accounts() {
                   className="text-green-600 hover:text-green-400 shrink-0 text-sm"
                 >
                   mark verified
+                </button>
+              )}
+              {account.status === 'manual_review' && (
+                <button
+                  onClick={() => setAccountStatus(account.id, 'verified')}
+                  className="text-amber-400 hover:text-amber-200 shrink-0 text-sm"
+                  title="Only clear this after checking retailer order history and the cart"
+                >
+                  order reviewed - resume
                 </button>
               )}
               <button

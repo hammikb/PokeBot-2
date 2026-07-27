@@ -67,7 +67,7 @@ export class ProfileWarmup {
     try {
       for (const url of urls) {
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 })
-        if (settleMs) await page.waitForTimeout(settleMs)
+        if (settleMs) await delay(settleMs)
 
         const title = await page.title().catch(() => '')
         const bodyText = await page
@@ -110,4 +110,8 @@ export class ProfileWarmup {
   async warmupWalmartProfile(account, options = {}) {
     return this.prepareProfile({ ...account, retailer: 'walmart' }, options)
   }
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }

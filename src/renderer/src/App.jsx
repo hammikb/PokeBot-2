@@ -9,6 +9,7 @@ import Settings from './pages/Settings'
 import PaymentMethods from './pages/PaymentMethods'
 import ShippingAddresses from './pages/ShippingAddresses'
 import Login from './pages/Login'
+import CheckoutAnalytics from './pages/CheckoutAnalytics'
 import { IPC } from '../../shared/constants'
 
 export default function App() {
@@ -103,6 +104,7 @@ export default function App() {
             ['/payments', 'Payments'],
             ['/shipping', 'Shipping'],
             ['/proxies', 'Proxies'],
+            ['/analytics', 'Analytics'],
             ['/settings', 'Settings']
           ].map(([path, label]) => (
             <NavLink
@@ -134,6 +136,7 @@ export default function App() {
             <Route path="/payments" element={<PaymentMethods />} />
             <Route path="/shipping" element={<ShippingAddresses />} />
             <Route path="/proxies" element={<Proxies />} />
+            <Route path="/analytics" element={<CheckoutAnalytics />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
         </main>

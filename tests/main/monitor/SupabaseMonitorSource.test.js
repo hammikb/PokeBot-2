@@ -7,9 +7,22 @@ function makeFakeClient({
   product,
   refetchResult = product,
   userId = 'user-1',
-  insertResult = { data: { id: 'prod-new' }, error: null }
+  userError = null,
+  subscriptionError = null,
+  productLookupError = null,
+  deleteError = null,
+  insertResult = { data: { id: 'prod-new' }, error: null },
+  dropRows = [],
+  dropQueryError = null
 }) {
-  const calls = { upserts: [], insertCalls: [], deletes: [], channels: [], removed: 0 }
+  const calls = {
+    upserts: [],
+    insertCalls: [],
+    deletes: [],
+    channels: [],
+    dropQueries: [],
+    removed: 0
+  }
   let dropHandler = null
   let selectCallCount = 0
   const client = {
@@ -22,7 +35,10 @@ function makeFakeClient({
                 selectCallCount += 1
                 // First lookup returns `product`; a second lookup (the race-recovery
                 // re-fetch after a 23505) returns `refetchResult`.
-                return { data: selectCallCount === 1 ? product : refetchResult, error: null }
+                return {
+                  data: selectCallCount === 1 ? product : refetchResult,
+                  error: productLookupError
+                }
               }
             })
           }),
@@ -32,20 +48,59 @@ function makeFakeClient({
           }
         }
       }
+      if (table === 'drops') {
+        return {
+          select: (columns) => {
+            const filters = {}
+            const orders = []
+            const query = {
+              eq: (column, value) => {
+                filters[column] = value
+                return query
+              },
+              gte: (column, value) => {
+                filters[`${column}_gte`] = value
+                return query
+              },
+              order: (column, options) => {
+                orders.push({ column, options })
+                return query
+              },
+              limit: async (limit) => {
+                calls.dropQueries.push({ columns, filters, orders, limit })
+                const rows = dropRows
+                  .filter(
+                    (row) =>
+                      (!filters.product_id || row.product_id === filters.product_id) &&
+                      (!filters.created_at_gte || row.created_at >= filters.created_at_gte)
+                  )
+                  .slice(0, limit)
+                return { data: rows, error: dropQueryError }
+              }
+            }
+            return query
+          }
+        }
+      }
       return {
         upsert: async (row, opts) => {
           calls.upserts.push({ table, row, opts })
-          return { error: null }
+          return { error: subscriptionError }
         },
         delete: () => ({
           eq: async (column, value) => {
             calls.deletes.push({ table, column, value })
-            return { error: null }
+            return { error: deleteError }
           }
         })
       }
     },
-    auth: { getUser: async () => ({ data: { user: { id: userId } }, error: null }) },
+    auth: {
+      getUser: async () => ({
+        data: { user: userId ? { id: userId } : null },
+        error: userError
+      })
+    },
     channel: (name, opts) => {
       const ch = {
         name,
@@ -101,6 +156,35 @@ describe('SupabaseMonitorSource', () => {
     expect(calls.channels[0].opts).toEqual({ config: { private: true } })
   })
 
+  it('fails startup when the authenticated subscription cannot be proven', async () => {
+    const identityFailure = makeFakeClient({
+      product: SEED,
+      userId: null,
+      userError: { message: 'session expired' }
+    })
+    const subscriptionFailure = makeFakeClient({
+      product: SEED,
+      subscriptionError: { message: 'permission denied' }
+    })
+
+    await expect(
+      new SupabaseMonitorSource({ client: identityFailure.client }).addProduct({
+        productUrl: 'https://www.target.com/p/A-94336414',
+        retailer: 'target',
+        productKey: '94336414'
+      })
+    ).rejects.toThrow('subscription identity is unavailable')
+    await expect(
+      new SupabaseMonitorSource({ client: subscriptionFailure.client }).addProduct({
+        productUrl: 'https://www.target.com/p/A-94336414',
+        retailer: 'target',
+        productKey: '94336414'
+      })
+    ).rejects.toThrow('Supabase subscription failed: permission denied')
+    expect(identityFailure.calls.channels).toHaveLength(0)
+    expect(subscriptionFailure.calls.channels).toHaveLength(0)
+  })
+
   it('emits a drop event (mapped to the local productUrl) when a broadcast arrives', async () => {
     const { client, fireDrop } = makeFakeClient({ product: SEED })
     const source = new SupabaseMonitorSource({ client })
@@ -114,11 +198,13 @@ describe('SupabaseMonitorSource', () => {
       maxPrice: null
     })
     fireDrop({
+      id: 'drop-live-1',
       product_id: 'prod-1',
       retailer: 'target',
       name: 'Pokemon ETB',
       price: 49.99,
-      drop_type: 'in_stock'
+      drop_type: 'in_stock',
+      created_at: '2026-07-27T02:00:00.000Z'
     })
 
     expect(drops).toEqual([
@@ -127,7 +213,11 @@ describe('SupabaseMonitorSource', () => {
         productName: 'Pokemon ETB',
         productUrl: 'https://www.target.com/p/A-94336414',
         price: 49.99,
-        dropType: 'in_stock'
+        dropType: 'in_stock',
+        productId: 'prod-1',
+        eventId: 'drop-live-1',
+        dropCycleId: 'drop-live-1',
+        observedAt: '2026-07-27T02:00:00.000Z'
       }
     ])
   })
@@ -155,6 +245,136 @@ describe('SupabaseMonitorSource', () => {
     expect(drops).toEqual([])
   })
 
+  it('replays recent durable drops oldest-first when the channel subscribes', async () => {
+    const now = Date.parse('2026-07-27T02:05:00.000Z')
+    const dropRows = [
+      {
+        id: 'drop-2',
+        product_id: 'prod-1',
+        retailer: 'target',
+        name: 'Pokemon ETB',
+        price: 49.99,
+        drop_type: 'restock',
+        created_at: '2026-07-27T02:04:00.000Z'
+      },
+      {
+        id: 'drop-1',
+        product_id: 'prod-1',
+        retailer: 'target',
+        name: 'Pokemon ETB',
+        price: 49.99,
+        drop_type: 'in_stock',
+        created_at: '2026-07-27T02:02:00.000Z'
+      },
+      {
+        id: 'other-product',
+        product_id: 'prod-2',
+        retailer: 'target',
+        name: 'Other item',
+        price: 10,
+        drop_type: 'in_stock',
+        created_at: '2026-07-27T02:03:00.000Z'
+      }
+    ]
+    const { client, calls } = makeFakeClient({ product: SEED, dropRows })
+    const source = new SupabaseMonitorSource({ client, now: () => now })
+    const drops = []
+    source.on('drop', (event) => drops.push(event))
+
+    await source.addProduct({
+      productUrl: 'https://www.target.com/p/A-94336414',
+      retailer: 'target',
+      productKey: '94336414',
+      maxPrice: null
+    })
+
+    await vi.waitFor(() => expect(drops).toHaveLength(2))
+    expect(drops.map((event) => event.eventId)).toEqual(['drop-1', 'drop-2'])
+    expect(drops.map((event) => event.dropCycleId)).toEqual(['drop-1', 'drop-2'])
+    expect(calls.dropQueries[0]).toMatchObject({
+      filters: {
+        product_id: 'prod-1',
+        created_at_gte: '2026-07-27T02:00:00.000Z'
+      },
+      limit: 501
+    })
+    expect(source.getHealth()['https://www.target.com/p/A-94336414']).toMatchObject({
+      status: 'SUBSCRIBED',
+      catchingUp: false,
+      lastEventId: 'drop-2',
+      lastObservedAt: '2026-07-27T02:04:00.000Z',
+      lastDelivery: 'catch_up',
+      lastCatchUpRecovered: 2,
+      catchUpError: null
+    })
+  })
+
+  it('deduplicates a durable drop delivered by both catch-up and Realtime', async () => {
+    const row = {
+      id: 'drop-shared',
+      product_id: 'prod-1',
+      retailer: 'target',
+      name: 'Pokemon ETB',
+      price: 49.99,
+      drop_type: 'in_stock',
+      created_at: '2026-07-27T02:04:00.000Z'
+    }
+    const { client, fireDrop } = makeFakeClient({ product: SEED, dropRows: [row] })
+    const source = new SupabaseMonitorSource({
+      client,
+      now: () => Date.parse('2026-07-27T02:05:00.000Z')
+    })
+    const drops = []
+    source.on('drop', (event) => drops.push(event))
+
+    await source.addProduct({
+      productUrl: 'https://www.target.com/p/A-94336414',
+      retailer: 'target',
+      productKey: '94336414',
+      maxPrice: null
+    })
+    fireDrop(row)
+    fireDrop(row)
+
+    await vi.waitFor(() => {
+      expect(source.getHealth()['https://www.target.com/p/A-94336414'].catchingUp).toBe(false)
+    })
+    expect(drops).toHaveLength(1)
+    expect(drops[0].eventId).toBe('drop-shared')
+  })
+
+  it('reports catch-up query failures without interrupting the live channel', async () => {
+    const { client } = makeFakeClient({
+      product: SEED,
+      dropQueryError: { message: 'temporary database outage' }
+    })
+    const source = new SupabaseMonitorSource({ client })
+    const healthEvents = []
+    source.on('health', (health) => healthEvents.push(health))
+
+    await source.addProduct({
+      productUrl: 'https://www.target.com/p/A-94336414',
+      retailer: 'target',
+      productKey: '94336414',
+      maxPrice: null
+    })
+
+    await vi.waitFor(() => {
+      expect(source.getHealth()['https://www.target.com/p/A-94336414'].catchingUp).toBe(false)
+    })
+    expect(source.getHealth()['https://www.target.com/p/A-94336414']).toMatchObject({
+      status: 'SUBSCRIBED',
+      catchUpError: 'Supabase drop catch-up failed: temporary database outage'
+    })
+    expect(healthEvents).toContainEqual(
+      expect.objectContaining({
+        status: 'CATCH_UP_ERROR',
+        channelStatus: 'SUBSCRIBED',
+        catchUpError: 'Supabase drop catch-up failed: temporary database outage'
+      })
+    )
+  })
+
   it('self-registers the product in Supabase when not already tracked centrally, then subscribes', async () => {
     const { client, calls } = makeFakeClient({ product: null })
     const source = new SupabaseMonitorSource({ client })
@@ -174,7 +394,7 @@ describe('SupabaseMonitorSource', () => {
         product_key: '99999999',
         product_url: 'https://www.target.com/p/A-99999999',
         name: 'Some New Item',
-        active: true
+        active: false
       }
     })
     expect(calls.channels[0].name).toBe('drops:product:prod-new')
@@ -265,6 +485,38 @@ describe('SupabaseMonitorSource', () => {
     expect(calls.removed).toBe(0)
   })
 
+  it('surfaces subscription delete failures instead of reporting a false stop', async () => {
+    const { client } = makeFakeClient({
+      product: SEED,
+      deleteError: { message: 'network unavailable' }
+    })
+    const source = new SupabaseMonitorSource({ client })
+
+    await expect(
+      source.unsubscribe({
+        productUrl: 'https://www.target.com/p/A-94336414',
+        retailer: 'target',
+        productKey: '94336414'
+      })
+    ).rejects.toThrow('Supabase unsubscribe failed: network unavailable')
+  })
+
+  it('surfaces fallback product lookup failures instead of silently skipping unsubscribe', async () => {
+    const { client } = makeFakeClient({
+      product: null,
+      productLookupError: { message: 'permission denied' }
+    })
+    const source = new SupabaseMonitorSource({ client })
+
+    await expect(
+      source.unsubscribe({
+        productUrl: 'https://www.target.com/p/A-94336414',
+        retailer: 'target',
+        productKey: '94336414'
+      })
+    ).rejects.toThrow('unsubscribe product lookup failed: permission denied')
+  })
+
   it('stop() releases channels but keeps subscriptions (app quit is not "stop watching")', async () => {
     const { client, calls } = makeFakeClient({ product: SEED })
     const source = new SupabaseMonitorSource({ client })
@@ -302,6 +554,59 @@ describe('SupabaseMonitorSource', () => {
     expect(calls.removed).toBe(1)
     expect(calls.channels).toHaveLength(2)
     expect(source.getHealth()['https://www.target.com/p/A-94336414'].status).toBe('SUBSCRIBED')
+    await source.stop()
+  })
+
+  it('catches up a row missed during a channel interruption and deduplicates cursor overlap', async () => {
+    vi.useFakeTimers()
+    const now = Date.parse('2026-07-27T02:05:00.000Z')
+    const dropRows = []
+    const { client, calls, fireDrop, emitStatus } = makeFakeClient({ product: SEED, dropRows })
+    const source = new SupabaseMonitorSource({ client, now: () => now })
+    const drops = []
+    source.on('drop', (event) => drops.push(event))
+
+    await source.addProduct({
+      productUrl: 'https://www.target.com/p/A-94336414',
+      retailer: 'target',
+      productKey: '94336414',
+      maxPrice: null
+    })
+    await vi.advanceTimersByTimeAsync(0)
+
+    const deliveredBeforeDisconnect = {
+      id: 'drop-before-disconnect',
+      product_id: 'prod-1',
+      retailer: 'target',
+      name: 'Pokemon ETB',
+      price: 49.99,
+      drop_type: 'in_stock',
+      created_at: '2026-07-27T02:02:00.000Z'
+    }
+    fireDrop(deliveredBeforeDisconnect)
+    dropRows.push(deliveredBeforeDisconnect, {
+      id: 'drop-missed',
+      product_id: 'prod-1',
+      retailer: 'target',
+      name: 'Pokemon ETB',
+      price: 49.99,
+      drop_type: 'restock',
+      created_at: '2026-07-27T02:03:00.000Z'
+    })
+
+    emitStatus('CHANNEL_ERROR', new Error('socket lost'))
+    await vi.advanceTimersByTimeAsync(1500)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(drops.map((event) => event.eventId)).toEqual(['drop-before-disconnect', 'drop-missed'])
+    expect(calls.dropQueries).toHaveLength(2)
+    expect(calls.dropQueries[1].filters.created_at_gte).toBe('2026-07-27T02:01:59.000Z')
+    expect(source.getHealth()['https://www.target.com/p/A-94336414']).toMatchObject({
+      status: 'SUBSCRIBED',
+      lastEventId: 'drop-missed',
+      lastDelivery: 'catch_up',
+      lastCatchUpRecovered: 1
+    })
     await source.stop()
   })
 })

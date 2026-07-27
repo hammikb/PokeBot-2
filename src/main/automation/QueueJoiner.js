@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events'
+import { createHash } from 'crypto'
 import { parseQp, extractQpdataFromText, secondsUntilTurn } from './walmartQueue.js'
 import { createModuleLogger } from '../utils/logger.js'
 
@@ -39,30 +40,26 @@ export class QueueJoiner extends EventEmitter {
       page: null,
       ownsContext: false,
       accountId: account?.id || null,
-      stopped: false
+      stopped: false,
+      handedOff: false,
+      queueStatus: null,
+      queueCycleId: null
     }
     this._jobs.set(id, job)
-    this._run(id, job, { productUrl, label: label || id, account }).catch((err) => {
-      log.error('Queue join crashed', { id, error: err.message })
-      this.emit('progress', { id, label, phase: 'error', message: err.message })
-      this._jobs.delete(id)
-    })
+    job.runPromise = this._run(id, job, { productUrl, label: label || id, account })
+      .catch((err) => {
+        log.error('Queue join crashed', { id, error: err.message })
+        this.emit('progress', { id, label, phase: 'error', message: err.message })
+      })
+      .finally(() => this._finishJob(id, job))
   }
 
   async stop(id) {
     const job = this._jobs.get(id)
     if (!job) return
     job.stopped = true
-    try {
-      // Only close throwaway contexts. An account's persistent context is shared
-      // (the pool owns it) — closing it would kill the logged-in session, so just
-      // close our page.
-      if (job.ownsContext) await job.context?.close()
-      else await job.page?.close()
-    } catch {
-      /* best-effort */
-    }
-    this._jobs.delete(id)
+    await this._closeJobResources(job)
+    if (this._jobs.get(id) === job) this._jobs.delete(id)
     this.emit('progress', { id, phase: 'stopped' })
   }
 
@@ -99,8 +96,16 @@ export class QueueJoiner extends EventEmitter {
       job.ownsContext = true
     }
     job.context = context
+    if (job.stopped) {
+      await this._closeJobResources(job)
+      return
+    }
     const page = await context.newPage()
     job.page = page
+    if (job.stopped) {
+      await this._closeJobResources(job)
+      return
+    }
 
     // Paste a normal /ip/ product URL — no /qp needed. A real browser hitting a
     // gated item IS the probe: Walmart bounces it to /qp on its own. Re-load the
@@ -113,7 +118,7 @@ export class QueueJoiner extends EventEmitter {
       await page
         .goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 })
         .catch(() => {})
-      qpUrl = await this._waitForQueue(page, 8_000)
+      qpUrl = await this._waitForQueue(page, 8_000, job)
       if (qpUrl || job.stopped) break
       this.emit('progress', {
         id,
@@ -134,6 +139,7 @@ export class QueueJoiner extends EventEmitter {
       return
     }
 
+    this._captureQueueStatus(job, qpUrl)
     await this._holdQueueSpot(page, id, label)
     this.emit('progress', { id, label, phase: 'in-queue', message: 'In line. Holding spot.' })
     const startedAt = Date.now()
@@ -142,38 +148,19 @@ export class QueueJoiner extends EventEmitter {
     while (!job.stopped && Date.now() < deadline) {
       const url = page.url()
       if (await this._pageSaysCheckoutReady(page)) {
-        this.emit('progress', {
-          id,
-          label,
-          phase: 'turn',
-          message: 'READY FOR CHECKOUT — starting checkout.',
-          status: { yourTurn: true }
-        })
-        this.emit('turn', {
-          id,
-          label,
+        this._emitTurn(id, job, label, {
           status: { yourTurn: true },
-          context: job.context,
-          page: job.page
+          message: 'READY FOR CHECKOUT — starting checkout.'
         })
         return
       }
       if (url.includes('qpdata=')) {
-        let st = null
-        try {
-          st = parseQp(url)
-        } catch {
-          /* token not ready this tick */
-        }
+        const st = this._captureQueueStatus(job, url)
         if (st?.yourTurn) {
-          this.emit('progress', {
-            id,
-            label,
-            phase: 'turn',
+          this._emitTurn(id, job, label, {
             status: st,
             message: 'YOUR TURN — buy now!'
           })
-          this.emit('turn', { id, label, status: st, context: job.context, page: job.page })
           return
         }
         if (st) {
@@ -182,6 +169,7 @@ export class QueueJoiner extends EventEmitter {
             label,
             phase: 'in-queue',
             ticket: st.ticket,
+            queueCycleId: job.queueCycleId,
             etaSec: secondsUntilTurn(st),
             percent: this._percent(startedAt, st),
             admissionLikelihood: st.admissionLikelihood,
@@ -196,8 +184,10 @@ export class QueueJoiner extends EventEmitter {
         // "You're in line" side panel. Only explicit checkout-ready copy is
         // authoritative; a URL change alone is not admission.
         if (await this._pageSaysCheckoutReady(page)) {
-          this.emit('progress', { id, label, phase: 'turn', message: 'Admitted — checkout open!' })
-          this.emit('turn', { id, label, context: job.context, page: job.page })
+          this._emitTurn(id, job, label, {
+            status: { yourTurn: true },
+            message: 'Admitted — checkout open!'
+          })
           return
         }
         this.emit('progress', {
@@ -223,20 +213,90 @@ export class QueueJoiner extends EventEmitter {
   }
 
   /** Poll briefly after load for a /qp URL or an embedded qpdata token. */
-  async _waitForQueue(page, ms) {
+  async _waitForQueue(page, ms, job = null) {
     const deadline = Date.now() + ms
     while (Date.now() < deadline) {
       const url = page.url()
       if (url.includes('qpdata=') || url.includes('/qp')) {
+        if (job) this._captureQueueStatus(job, url)
         await this._waitForHoldButton(page, Math.min(3000, Math.max(0, deadline - Date.now())))
         return url
       }
       const body = await page.content().catch(() => '')
       const tok = extractQpdataFromText(body)
-      if (tok) return `https://www.walmart.com/qp?qpdata=${tok}`
+      if (tok) {
+        const queueUrl = `https://www.walmart.com/qp?qpdata=${tok}`
+        if (job) this._captureQueueStatus(job, queueUrl)
+        return queueUrl
+      }
       await page.waitForTimeout(1000).catch(() => {})
     }
     return null
+  }
+
+  _captureQueueStatus(job, urlOrToken) {
+    let parsed
+    try {
+      parsed = parseQp(urlOrToken)
+    } catch {
+      return job.queueStatus
+    }
+
+    job.queueCycleId ||= queueCycleIdFor(parsed, urlOrToken)
+    const status = { ...(job.queueStatus || {}) }
+    for (const [key, value] of Object.entries(toSafeQueueStatus(parsed))) {
+      if (value !== undefined && value !== null) status[key] = value
+    }
+    if (job.queueCycleId) status.queueCycleId = job.queueCycleId
+    job.queueStatus = status
+    return status
+  }
+
+  _emitTurn(id, job, label, { status = {}, message }) {
+    if (job.stopped || job.handedOff) return false
+    const mergedStatus = { ...(job.queueStatus || {}), ...status, yourTurn: true }
+    if (job.queueCycleId) mergedStatus.queueCycleId = job.queueCycleId
+    job.handedOff = true
+
+    const payload = {
+      id,
+      label,
+      phase: 'turn',
+      message,
+      ticket: mergedStatus.ticket,
+      queueCycleId: job.queueCycleId,
+      status: mergedStatus
+    }
+    this.emit('progress', payload)
+    this.emit('turn', {
+      ...payload,
+      context: job.context,
+      page: job.page
+    })
+    return true
+  }
+
+  async _finishJob(id, job) {
+    // An admitted page is deliberately handed to TaskManager for checkout. It
+    // remains owned by that handoff until TaskManager calls stop(id).
+    if (job.handedOff || job.stopped) return
+    await this._closeJobResources(job)
+    if (this._jobs.get(id) === job) this._jobs.delete(id)
+  }
+
+  async _closeJobResources(job) {
+    const context = job.context
+    const page = job.page
+    job.context = null
+    job.page = null
+    try {
+      // Only close throwaway contexts. An account's persistent context is shared
+      // with BrowserPool, so normal completion owns only this queue page.
+      if (job.ownsContext) await context?.close()
+      else await page?.close()
+    } catch {
+      // Best-effort cleanup.
+    }
   }
 
   async _pageSaysCheckoutReady(page) {
@@ -311,5 +371,52 @@ export class QueueJoiner extends EventEmitter {
     const elapsed = (Date.now() - startedAt) / 1000
     const total = elapsed + remaining
     return total <= 0 ? 0 : Math.min(99, Math.round((elapsed / total) * 100))
+  }
+}
+
+function toSafeQueueStatus(status = {}) {
+  const safe = {}
+  for (const key of [
+    'state',
+    'queued',
+    'inQueue',
+    'yourTurn',
+    'ticket',
+    'queueId',
+    'itemId',
+    'itemUrl',
+    'itemName',
+    'price',
+    'admissionLikelihood',
+    'refreshSec',
+    'expectedTurnMs',
+    'expiresMs'
+  ]) {
+    if (status[key] !== undefined && status[key] !== null) safe[key] = status[key]
+  }
+  return safe
+}
+
+function queueCycleIdFor(status, urlOrToken) {
+  if (status?.ticket !== undefined && status?.ticket !== null) {
+    return `walmart-queue:${status.ticket}`
+  }
+  if (status?.queueId) {
+    return `walmart-queue:${status.queueId}:${status.itemId || 'unknown-item'}`
+  }
+  const token = qpdataToken(urlOrToken)
+  if (!token) return null
+  const digest = createHash('sha256').update(token).digest('hex').slice(0, 24)
+  return `walmart-queue:token:${digest}`
+}
+
+function qpdataToken(urlOrToken) {
+  const value = String(urlOrToken || '')
+  if (!value) return null
+  if (!value.includes('qpdata=')) return value
+  try {
+    return new URL(value, 'https://www.walmart.com').searchParams.get('qpdata')
+  } catch {
+    return value.slice(value.indexOf('qpdata=') + 'qpdata='.length)
   }
 }

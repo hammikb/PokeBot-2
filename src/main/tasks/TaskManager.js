@@ -12,6 +12,7 @@ import { DROP_TYPES } from '../../shared/constants.js'
 import { createModuleLogger } from '../utils/logger.js'
 import { RetailerCircuitBreaker } from './RetailerCircuitBreaker.js'
 import { OrderSubmissionGate } from './OrderSubmissionGate.js'
+import { DropEventLedger } from './DropEventLedger.js'
 
 const log = createModuleLogger('TaskManager')
 const POKEMON_CENTER_AUTO_JOIN_ID = 'pokemon-center-auto-join'
@@ -40,7 +41,9 @@ export class TaskManager extends EventEmitter {
     pokemonCenterQueueJoiner = null,
     checkoutTelemetry = null,
     paymentManager = null,
-    retailerCircuit = new RetailerCircuitBreaker()
+    retailerCircuit = new RetailerCircuitBreaker(),
+    dropEventLedger = null,
+    queueCheckoutTimeoutMs = QUEUE_CHECKOUT_TIMEOUT_MS
   }) {
     super()
     this._accountManager = accountManager
@@ -52,6 +55,11 @@ export class TaskManager extends EventEmitter {
     this._paymentManager = paymentManager
     this._retailerCircuit = retailerCircuit
     this._getDb = getDb
+    this._dropEventLedger = dropEventLedger || new DropEventLedger({ db: getDb() })
+    this._queueCheckoutTimeoutMs = Math.max(
+      1,
+      Number(queueCheckoutTimeoutMs) || QUEUE_CHECKOUT_TIMEOUT_MS
+    )
     this._getSettings = getSettings
     this._authSessionManager = authSessionManager
     this._tasks = new Map()
@@ -59,11 +67,20 @@ export class TaskManager extends EventEmitter {
     this._warmAccountRefs = new Map()
     this._activeCheckoutRuns = new Set()
     this._activeAccountCheckoutRuns = new Set()
+    this._manualReviewAccounts = new Set()
+    this._productOperations = new Map()
+    this._taskStartPromises = new Map()
+    this._unsubscribeRetryTimer = null
+    this._unsubscribeRetryAttempt = 0
     this._pokemonCenterAutoJoinEnabled = false
     this._pokemonCenterQueueAlertedAt = 0
+    this._recoverUncertainAccountHolds()
 
     this._supabaseSource = null
     this._supabaseSourcePromise = null
+    this._supabaseSourceUserId = null
+    this._lastSupabaseUserId = this._currentSupabaseUserId()
+    this._supabaseSourceGeneration = 0
     this._createSupabaseSource = createSupabaseSource || (() => this._buildSupabaseSource())
     this._queueJoiner?.on('turn', (payload) => {
       this._onQueueTurn(payload).catch((err) => {
@@ -84,11 +101,44 @@ export class TaskManager extends EventEmitter {
   }
 
   async _getSupabaseSource() {
-    if (this._supabaseSource) return this._supabaseSource
+    const userId = this._currentSupabaseUserId()
+    if (!userId) throw new Error('Sign in before using central monitoring')
+    if (this._supabaseSource && this._supabaseSourceUserId === userId) {
+      return this._supabaseSource
+    }
+    if (this._supabaseSource && this._supabaseSourceUserId !== userId) {
+      await this._supabaseSource.stop?.().catch(() => {})
+      this._supabaseSource = null
+      this._supabaseSourcePromise = null
+      this._supabaseSourceUserId = null
+      this._supabaseSourceGeneration += 1
+    }
     if (!this._supabaseSourcePromise) {
-      this._supabaseSourcePromise = Promise.resolve(this._createSupabaseSource())
-        .then((source) => {
-          source.on('drop', (event) => this._onDrop(event))
+      const generation = this._supabaseSourceGeneration
+      const sourcePromise = Promise.resolve(this._createSupabaseSource())
+        .then(async (source) => {
+          if (
+            generation !== this._supabaseSourceGeneration ||
+            userId !== this._currentSupabaseUserId()
+          ) {
+            await source.stop?.().catch(() => {})
+            throw new Error('Supabase account changed while the monitor was connecting')
+          }
+          source.on('drop', (event) => {
+            this._onDrop(event).catch((error) => {
+              log.error('Could not process Supabase drop event', {
+                eventId: event?.eventId || null,
+                productId: event?.productId || null,
+                error: error.message
+              })
+              this.emit('drop', {
+                retailer: event?.retailer || 'catalog',
+                productName: `Drop processing error: ${error.message}`,
+                productUrl: event?.productUrl,
+                dropType: 'supabase_notice'
+              })
+            })
+          })
           source.on('notice', (notice) =>
             this.emit('drop', {
               retailer: 'catalog',
@@ -109,12 +159,23 @@ export class TaskManager extends EventEmitter {
             }
           })
           this._supabaseSource = source
+          this._supabaseSourceUserId = userId
+          this._lastSupabaseUserId = userId
+          await this._flushPendingUnsubscribes(source, userId).catch((error) => {
+            log.warn('Some pending central monitor stops still need retrying', {
+              error: error.message
+            })
+            this._schedulePendingUnsubscribeRetry()
+          })
           return source
         })
         .catch((error) => {
-          this._supabaseSourcePromise = null
+          if (this._supabaseSourcePromise === sourcePromise) {
+            this._supabaseSourcePromise = null
+          }
           throw error
         })
+      this._supabaseSourcePromise = sourcePromise
     }
     return this._supabaseSourcePromise
   }
@@ -122,78 +183,317 @@ export class TaskManager extends EventEmitter {
   startTask(taskRow) {
     if (this._tasks.has(taskRow.id)) {
       this._emitStatus(taskRow.id, 'monitoring')
-      return
+      return this._taskStartPromises.get(taskRow.id) || Promise.resolve(true)
     }
-    this._tasks.set(taskRow.id, { ...taskRow, source: 'supabase' })
+    const taskProductKey = taskProductIdentity(taskRow)
+    const duplicate = [...this._tasks.values()].find(
+      (entry) => entry.id !== taskRow.id && taskProductIdentity(entry) === taskProductKey
+    )
+    if (duplicate) {
+      const error = new Error(
+        `This ${taskRow.retailer} product is already monitored by task ${duplicate.id}`
+      )
+      this._emitStatus(taskRow.id, 'error')
+      return Promise.reject(error)
+    }
+    const activeTask = { ...taskRow, source: 'supabase' }
+    this._tasks.set(taskRow.id, activeTask)
     this._emitStatus(taskRow.id, 'monitoring')
     // Pre-warm proxy accounts — the Pi handles monitoring but checkout runs
     // locally, and proxy browser launch is slow.
     this._retainTaskAccounts(taskRow)
-    this._startSupabaseTask(taskRow).catch((err) => {
-      log.error('Failed to start Supabase monitor task', {
-        taskId: taskRow.id,
-        retailer: taskRow.retailer,
-        productUrl: taskRow.product_url,
-        error: err.message
+    const startPromise = this._enqueueProductOperation(taskRow, () =>
+      this._startSupabaseTask(taskRow)
+    )
+      .then(() => true)
+      .catch((err) => {
+        log.error('Failed to start Supabase monitor task', {
+          taskId: taskRow.id,
+          retailer: taskRow.retailer,
+          productUrl: taskRow.product_url,
+          error: err.message
+        })
+        if (this._tasks.get(taskRow.id) === activeTask) {
+          this._tasks.delete(taskRow.id)
+          this._releaseTaskAccounts(taskRow.id)
+          this._emitStatus(taskRow.id, 'error')
+        }
+        this.emit('drop', {
+          retailer: taskRow.retailer,
+          productName: `Supabase monitor error: ${err.message}`,
+          productUrl: taskRow.product_url,
+          dropType: 'supabase_notice'
+        })
+        throw err
       })
-      this._emitStatus(taskRow.id, 'error')
-      this.emit('drop', {
-        retailer: taskRow.retailer,
-        productName: `Supabase monitor error: ${err.message}`,
-        productUrl: taskRow.product_url,
-        dropType: 'supabase_notice'
+      .finally(() => {
+        if (this._taskStartPromises.get(taskRow.id) === startPromise) {
+          this._taskStartPromises.delete(taskRow.id)
+        }
       })
-    })
+    this._taskStartPromises.set(taskRow.id, startPromise)
+    return startPromise
   }
 
   async _startSupabaseTask(taskRow) {
     const source = await this._getSupabaseSource()
-    await source.addProduct({
+    const userId = this._supabaseSourceUserId
+    const pendingStop = this._getDb()
+      .prepare('SELECT * FROM monitor_unsubscribe_outbox WHERE id = ? AND user_id = ?')
+      .get(pendingUnsubscribeIdentity(taskRow, userId), userId)
+    if (pendingStop) {
+      throw new Error(
+        'A previous central monitor stop is still pending; retry Stop before starting this task'
+      )
+    }
+    const result = await source.addProduct({
       productUrl: taskRow.product_url,
       retailer: taskRow.retailer,
       productKey: extractProductKey(taskRow.retailer, taskRow.product_url),
       productName: taskRow.product_name || null,
       maxPrice: taskRow.max_price ?? null
     })
+    if (result?.subscribed !== true) {
+      throw new Error('The central monitor did not create a product subscription')
+    }
+    return result
   }
 
   stopTask(id, { unsubscribe = true } = {}) {
     const entry = this._tasks.get(id)
-    if (!entry) return
-    if (unsubscribe) {
-      this._supabaseSource
-        ?.unsubscribe({
-          productUrl: entry.product_url,
-          retailer: entry.retailer,
-          productKey: extractProductKey(entry.retailer, entry.product_url)
-        })
-        .catch(() => {})
-    } else {
-      this._supabaseSource?.releaseChannel(entry.product_url).catch(() => {})
-    }
+    if (!entry) return Promise.resolve(false)
     this._releaseTaskAccounts(id)
     this._tasks.delete(id)
     this._emitStatus(id, 'idle')
+    return this._enqueueProductOperation(entry, async () => {
+      if (unsubscribe) {
+        this._queuePendingUnsubscribe(entry)
+        try {
+          const source = this._supabaseSource || (await this._getSupabaseSource())
+          await source.unsubscribe(buildMonitorIdentity(entry))
+          this._clearPendingUnsubscribe(entry)
+          return true
+        } catch (error) {
+          this._markPendingUnsubscribeFailure(entry, error)
+          this._schedulePendingUnsubscribeRetry()
+          this._emitStatus(id, 'error')
+          throw error
+        }
+      } else {
+        await this._supabaseSource?.releaseChannel(entry.product_url)
+      }
+      return true
+    })
   }
 
-  stopAll({ unsubscribe = true } = {}) {
-    for (const id of [...this._tasks.keys()]) this.stopTask(id, { unsubscribe })
+  async stopAll({ unsubscribe = true } = {}) {
+    await Promise.allSettled(
+      [...this._tasks.keys()].map((id) => this.stopTask(id, { unsubscribe }))
+    )
   }
 
   async shutdown() {
-    this.stopAll({ unsubscribe: false })
+    if (this._unsubscribeRetryTimer) clearTimeout(this._unsubscribeRetryTimer)
+    this._unsubscribeRetryTimer = null
+    await this.stopAll({ unsubscribe: false })
     await this._supabaseSource?.stop?.().catch(() => {})
+    this._checkoutTelemetry?.flushLocal?.()
     this._supabaseSource = null
     this._supabaseSourcePromise = null
+    this._supabaseSourceUserId = null
+  }
+
+  async handleAuthChange(state) {
+    const nextUserId = state?.authenticated ? state.user?.id || null : null
+    this._supabaseSourceGeneration += 1
+    const source = this._supabaseSource
+    this._supabaseSource = null
+    this._supabaseSourcePromise = null
+    this._supabaseSourceUserId = null
+    await source?.stop?.().catch((error) => {
+      log.warn('Could not close the previous Supabase monitor source', {
+        error: error.message
+      })
+    })
+
+    if (!nextUserId) return { authenticated: false, rebound: 0 }
+    this._lastSupabaseUserId = nextUserId
+
+    const tasks = [...this._tasks.values()]
+    const results = await Promise.allSettled(
+      tasks.map((taskRow) =>
+        this._enqueueProductOperation(taskRow, () => this._startSupabaseTask(taskRow))
+      )
+    )
+    results.forEach((result, index) => {
+      const task = tasks[index]
+      if (!task) return
+      this._emitStatus(task.id, result.status === 'fulfilled' ? 'monitoring' : 'error')
+      if (result.status === 'rejected') {
+        log.warn('Could not rebind monitor task after account change', {
+          taskId: task.id,
+          error: result.reason?.message
+        })
+      }
+    })
+    await this.retryPendingUnsubscribes().catch((error) => {
+      log.warn('Could not drain this user’s pending central monitor stops', {
+        error: error.message
+      })
+    })
+    return {
+      authenticated: true,
+      rebound: results.filter((result) => result.status === 'fulfilled').length
+    }
   }
 
   async unsubscribeCentral(taskRow) {
-    const source = await this._getSupabaseSource()
-    await source.unsubscribe({
-      productUrl: taskRow.product_url,
-      retailer: taskRow.retailer,
-      productKey: extractProductKey(taskRow.retailer, taskRow.product_url)
+    return this._enqueueProductOperation(taskRow, async () => {
+      this._queuePendingUnsubscribe(taskRow)
+      try {
+        const source = await this._getSupabaseSource()
+        await source.unsubscribe(buildMonitorIdentity(taskRow))
+        this._clearPendingUnsubscribe(taskRow)
+        return true
+      } catch (error) {
+        this._markPendingUnsubscribeFailure(taskRow, error)
+        this._schedulePendingUnsubscribeRetry()
+        throw error
+      }
     })
+  }
+
+  async _flushPendingUnsubscribes(source, userId = this._supabaseSourceUserId) {
+    if (!userId) return 0
+    const rows = this._getDb()
+      .prepare('SELECT * FROM monitor_unsubscribe_outbox WHERE user_id = ?')
+      .all(userId)
+    const failures = []
+    for (const row of rows) {
+      try {
+        await source.unsubscribe(buildMonitorIdentity(row))
+        this._clearPendingUnsubscribe(row)
+      } catch (error) {
+        failures.push(error)
+        this._markPendingUnsubscribeFailure(row, error)
+      }
+    }
+    if (failures.length) {
+      this._schedulePendingUnsubscribeRetry()
+      throw new Error(`${failures.length} central monitor stop request(s) could not be confirmed`)
+    }
+    this._unsubscribeRetryAttempt = 0
+    if (this._unsubscribeRetryTimer) clearTimeout(this._unsubscribeRetryTimer)
+    this._unsubscribeRetryTimer = null
+    return rows.length
+  }
+
+  async retryPendingUnsubscribes() {
+    const userId = this._currentSupabaseUserId()
+    if (!userId) return { pending: 0, cleared: 0 }
+    const rows = this._getDb()
+      .prepare('SELECT * FROM monitor_unsubscribe_outbox WHERE user_id = ?')
+      .all(userId)
+    if (!rows.length) return { pending: 0, cleared: 0 }
+    try {
+      const source = await this._getSupabaseSource()
+      const cleared = await this._flushPendingUnsubscribes(source, userId)
+      return { pending: 0, cleared }
+    } catch (error) {
+      this._schedulePendingUnsubscribeRetry()
+      throw error
+    }
+  }
+
+  _schedulePendingUnsubscribeRetry() {
+    if (this._unsubscribeRetryTimer) return
+    this._unsubscribeRetryAttempt += 1
+    const delayMs = Math.min(5000 * 2 ** (this._unsubscribeRetryAttempt - 1), 5 * 60_000)
+    this._unsubscribeRetryTimer = setTimeout(() => {
+      this._unsubscribeRetryTimer = null
+      this.retryPendingUnsubscribes().catch((error) => {
+        log.warn('Pending central monitor stop retry failed', { error: error.message })
+      })
+    }, delayMs)
+    this._unsubscribeRetryTimer.unref?.()
+  }
+
+  _queuePendingUnsubscribe(taskRow) {
+    const userId =
+      this._currentSupabaseUserId() || this._supabaseSourceUserId || this._lastSupabaseUserId
+    if (!userId) {
+      throw new Error('Sign in with the account that owns this central monitor before stopping it')
+    }
+    this._getDb()
+      .prepare(
+        `INSERT INTO monitor_unsubscribe_outbox
+          (id, user_id, retailer, product_url, product_key, created_at, attempts, last_error)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+          user_id = excluded.user_id,
+          retailer = excluded.retailer,
+          product_url = excluded.product_url,
+          product_key = excluded.product_key`
+      )
+      .run(
+        pendingUnsubscribeIdentity(taskRow, userId),
+        userId,
+        taskRow.retailer,
+        taskRow.product_url,
+        extractProductKey(taskRow.retailer, taskRow.product_url),
+        Date.now(),
+        0,
+        null
+      )
+  }
+
+  _clearPendingUnsubscribe(taskRow) {
+    const id =
+      taskRow.id && taskRow.user_id
+        ? taskRow.id
+        : pendingUnsubscribeIdentity(
+            taskRow,
+            this._currentSupabaseUserId() || this._supabaseSourceUserId || this._lastSupabaseUserId
+          )
+    this._getDb().prepare('DELETE FROM monitor_unsubscribe_outbox WHERE id = ?').run(id)
+  }
+
+  _markPendingUnsubscribeFailure(taskRow, error) {
+    const id =
+      taskRow.id && taskRow.user_id
+        ? taskRow.id
+        : pendingUnsubscribeIdentity(
+            taskRow,
+            this._currentSupabaseUserId() || this._supabaseSourceUserId || this._lastSupabaseUserId
+          )
+    this._getDb()
+      .prepare(
+        `UPDATE monitor_unsubscribe_outbox
+         SET attempts = attempts + 1, last_error = ?
+         WHERE id = ?`
+      )
+      .run(String(error?.message || error || 'unknown error').slice(0, 500), id)
+  }
+
+  _currentSupabaseUserId() {
+    const status = this._authSessionManager?.getStatus?.()
+    if (!this._authSessionManager) return 'local-source'
+    return status?.authenticated ? status.user?.id || null : null
+  }
+
+  _enqueueProductOperation(taskRow, operation) {
+    const productKey = taskProductIdentity(taskRow)
+    const previous = this._productOperations.get(productKey) || Promise.resolve()
+    const current = previous
+      .catch(() => {})
+      .then(operation)
+      .finally(() => {
+        if (this._productOperations.get(productKey) === current) {
+          this._productOperations.delete(productKey)
+        }
+      })
+    this._productOperations.set(productKey, current)
+    return current
   }
 
   async setPokemonCenterAutoJoin(enabled) {
@@ -201,13 +501,13 @@ export class TaskManager extends EventEmitter {
     this._pokemonCenterAutoJoinEnabled = next
     if (!next) {
       await this._pokemonCenterQueueJoiner?.stop(POKEMON_CENTER_AUTO_JOIN_ID)
-      await this._supabaseSource
-        ?.unsubscribe({
-          productUrl: POKEMON_CENTER_QUEUE_URL,
-          retailer: 'pokemon-center',
-          productKey: 'site-queue'
-        })
-        .catch(() => {})
+      const queueIdentity = {
+        id: POKEMON_CENTER_AUTO_JOIN_ID,
+        product_url: POKEMON_CENTER_QUEUE_URL,
+        retailer: 'pokemon-center',
+        product_key: 'site-queue'
+      }
+      await this.unsubscribeCentral(queueIdentity)
       return { enabled: false, connected: false }
     }
 
@@ -240,6 +540,10 @@ export class TaskManager extends EventEmitter {
 
   isPokemonCenterAutoJoinEnabled() {
     return this._pokemonCenterAutoJoinEnabled
+  }
+
+  clearAccountManualReview(accountId) {
+    this._manualReviewAccounts.delete(accountId)
   }
 
   _getPokemonCenterAccount() {
@@ -279,8 +583,59 @@ export class TaskManager extends EventEmitter {
     return [...this._tasks.keys()]
   }
 
+  getMonitorHealthSnapshot() {
+    const channelHealth = this._supabaseSource?.getHealth?.() || {}
+    const channels = Object.values(channelHealth)
+    const interruptedStatuses = new Set(['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'])
+
+    return {
+      activeTaskCount: this._tasks.size,
+      sourceState: this._supabaseSource
+        ? 'connected'
+        : this._supabaseSourcePromise
+          ? 'connecting'
+          : 'idle',
+      channels: {
+        total: channels.length,
+        subscribed: channels.filter((channel) => channel.status === 'SUBSCRIBED').length,
+        connecting: channels.filter((channel) =>
+          ['CONNECTING', 'CATCH_UP_COMPLETE'].includes(channel.status)
+        ).length,
+        interrupted: channels.filter((channel) => interruptedStatuses.has(channel.status)).length,
+        catchingUp: channels.filter((channel) => channel.catchingUp === true).length,
+        catchUpErrors: channels.filter((channel) => Boolean(channel.catchUpError)).length
+      },
+      openCircuits: Object.values(this._retailerCircuit?.snapshot?.() || {}).filter(
+        (state) => state?.open === true || (state?.open === undefined && Boolean(state?.openedAt))
+      ).length
+    }
+  }
+
   async _onDrop(dropEvent) {
     const task = [...this._tasks.values()].find((t) => t.product_url === dropEvent.productUrl)
+    const receipt =
+      task && dropEvent.dropType !== DROP_TYPES.QUEUE_OPEN
+        ? this._dropEventLedger.claim({
+            taskId: task.id,
+            eventId: dropEvent.eventId,
+            dropCycleId: dropEvent.dropCycleId,
+            retailer: dropEvent.retailer,
+            productId: dropEvent.productId
+          })
+        : { claimed: true, receiptId: null }
+
+    if (!receipt.claimed) {
+      log.info('Ignoring a previously handled durable drop event', {
+        taskId: task.id,
+        eventId: dropEvent.eventId || null,
+        dropCycleId: dropEvent.dropCycleId || null,
+        receiptStatus: receipt.status || null
+      })
+      return
+    }
+    if (receipt.receiptId) {
+      dropEvent = { ...dropEvent, receiptId: receipt.receiptId }
+    }
 
     // Queue went live: auto-join with the task's account (joiner dedupes on its
     // own). No checkout — the joiner gets you to the front, you finish the buy.
@@ -320,6 +675,7 @@ export class TaskManager extends EventEmitter {
           browserMode: this._getSettings().pokemonCenterQueueBrowser || 'managed'
         })
       }
+      this._dropEventLedger.complete(receipt.receiptId, { status: 'queue_joined' })
       return
     }
 
@@ -331,6 +687,7 @@ export class TaskManager extends EventEmitter {
       }
       this.emit('drop', alertEvent)
       await this._notify.fire(alertEvent)
+      this._dropEventLedger.complete(receipt.receiptId, { status: 'alerted' })
       return
     }
 
@@ -341,83 +698,232 @@ export class TaskManager extends EventEmitter {
     if (!task) return
 
     const flow = FLOWS[dropEvent.retailer]
-    if (!flow) return
-
-    if (task.mode === 'test-checkout') {
-      await this._runFlowsForTask({ ...task, mode: 'test-checkout' }, dropEvent)
-    } else {
-      await this._runFlowsForTask(task, dropEvent)
+    if (!flow) {
+      this._dropEventLedger.complete(receipt.receiptId, {
+        status: 'ignored',
+        detail: `No checkout flow for ${dropEvent.retailer}`
+      })
+      return
     }
+
+    let result
+    if (task.mode === 'test-checkout') {
+      result = await this._runFlowsForTask({ ...task, mode: 'test-checkout' }, dropEvent)
+    } else {
+      result = await this._runFlowsForTask(task, dropEvent)
+    }
+    const receiptResult = classifyDropReceiptResult(result)
+    this._dropEventLedger.complete(receipt.receiptId, {
+      status: receiptResult.status,
+      detail: receiptResult.detail
+    })
   }
 
   async _onQueueTurn({ id, label, status, context }) {
     const task =
       this._tasks.get(id) || this._getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(id)
     if (!task || !context || task.retailer !== 'walmart') return
-    if (!['auto-checkout', 'test-checkout'].includes(task.mode)) return
+    if (!['auto-checkout', 'monitor-and-buy', 'test-checkout'].includes(task.mode)) return
 
     const accountIds = parseAccountIds(task.account_ids)
     const account = accountIds.length ? this._accountManager.getDecrypted(accountIds[0]) : null
     if (!account) return
-
-    const dropEvent = {
-      retailer: 'walmart',
-      productName: status?.itemName || task.product_name || label || 'Walmart product',
-      productUrl: task.product_url,
-      dropType: DROP_TYPES.IN_STOCK,
-      price: status?.price || task.max_price || null
+    if (account.status === 'manual_review' || this._manualReviewAccounts.has(account.id)) {
+      this._emitStatus(id, 'manual_required')
+      await this._notify.fire({
+        retailer: 'walmart',
+        productName: `QUEUE READY - MANUAL CHECKOUT NEEDED [${account.name}]: clear the account's previous uncertain-order hold first`,
+        productUrl: task.product_url,
+        dropType: DROP_TYPES.PRICE_DROP
+      })
+      return
     }
-    this._emitStatus(id, 'checkout')
-    this.emit('drop', dropEvent)
-    await this._notify.fire(dropEvent)
 
-    const attemptId = this._checkoutTelemetry?.beginAttempt({
-      task,
-      dropEvent,
-      accountId: account.id
-    })
-    this._checkoutTelemetry?.record(attemptId, 'queue_waiting', 'Walmart queue admitted')
-    let timeout
-    const checkout = runWalmartFlow(context, {
-      productUrl: dropEvent.productUrl,
-      cvv: account.cvv,
-      account,
-      notificationEngine: this._notify,
-      dropEvent,
-      mode: task.mode,
-      buyLimit: task.buy_limit,
-      maxPrice: task.max_price,
-      requireRetailerSeller: this._getSettings().walmartRequireRetailerSeller !== false,
-      onStep: (message) => {
-        this._emitCheckoutStep(dropEvent, account, message)
-        this._checkoutTelemetry?.record(attemptId, message)
+    if (this._activeAccountCheckoutRuns.has(account.id)) {
+      this._emitStatus(id, 'manual_required')
+      await this._notify.fire({
+        retailer: 'walmart',
+        productName: `QUEUE READY - MANUAL CHECKOUT NEEDED [${account.name}]: account is already checking out another item`,
+        productUrl: task.product_url,
+        dropType: DROP_TYPES.PRICE_DROP
+      })
+      return
+    }
+
+    const stableQueueCycle = status?.queueCycleId || status?.ticket || null
+    if (!stableQueueCycle) {
+      this._emitStatus(id, 'manual_required')
+      await this._notify.fire({
+        retailer: 'walmart',
+        productName: `QUEUE READY - MANUAL CHECKOUT NEEDED [${account.name}]: the queue ticket could not be verified safely`,
+        productUrl: task.product_url,
+        dropType: DROP_TYPES.PRICE_DROP
+      })
+      return
+    }
+
+    this._activeAccountCheckoutRuns.add(account.id)
+    try {
+      const queueCycleId = String(stableQueueCycle).startsWith('walmart-queue:')
+        ? String(stableQueueCycle)
+        : `walmart-queue:${stableQueueCycle}`
+      const receipt = this._dropEventLedger.claim({
+        taskId: task.id,
+        dropCycleId: queueCycleId,
+        retailer: 'walmart'
+      })
+      if (!receipt.claimed) {
+        log.info('Skipping a Walmart queue checkout already handled for this queue cycle', {
+          taskId: task.id,
+          queueCycleId,
+          receiptStatus: receipt.status || null
+        })
+        if (receipt.status === 'submission_started') {
+          await this._notify.fire({
+            retailer: 'walmart',
+            productName: `ORDER STATUS UNCERTAIN - MANUAL REVIEW [${account.name}]: ${task.product_name || label || 'Walmart product'}`,
+            productUrl: task.product_url,
+            dropType: DROP_TYPES.PRICE_DROP
+          })
+        }
+        return
       }
-    })
-    const deadline = new Promise((resolve) => {
-      timeout = setTimeout(
-        () =>
-          resolve({
-            success: false,
-            error: 'Walmart queue checkout exceeded the 10-minute safety deadline'
-          }),
-        QUEUE_CHECKOUT_TIMEOUT_MS
-      )
-    })
-    const result = await Promise.race([checkout, deadline])
-    clearTimeout(timeout)
-    if (/safety deadline/.test(result.error || '')) {
+
+      const dropEvent = {
+        retailer: 'walmart',
+        productName: status?.itemName || task.product_name || label || 'Walmart product',
+        productUrl: task.product_url,
+        dropType: DROP_TYPES.IN_STOCK,
+        price: status?.price || task.max_price || null,
+        receiptId: receipt.receiptId,
+        dropCycleId: queueCycleId
+      }
+      this._emitStatus(id, 'checkout')
+      this.emit('drop', dropEvent)
+      await this._notify.fire(dropEvent)
+
+      const attemptId = this._checkoutTelemetry?.beginAttempt({
+        task,
+        dropEvent,
+        accountId: account.id
+      })
+      this._checkoutTelemetry?.record(attemptId, 'queue_waiting', 'Walmart queue admitted')
+      let timeout
+      let deadlineExpired = false
+      let orderSubmissionAttempted = false
+      const checkout = runWalmartFlow(context, {
+        productUrl: dropEvent.productUrl,
+        cvv: account.cvv,
+        account,
+        notificationEngine: this._notify,
+        dropEvent,
+        mode: task.mode,
+        buyLimit: task.buy_limit,
+        maxPrice: task.max_price,
+        requireRetailerSeller: this._getSettings().walmartRequireRetailerSeller !== false,
+        onBeforeSubmit: () => {
+          if (deadlineExpired) {
+            throw new Error('Walmart queue checkout deadline expired before order submission')
+          }
+          this._dropEventLedger.markSubmissionStarted(receipt.receiptId, {
+            accountId: account.id,
+            orderSequence: 1
+          })
+          orderSubmissionAttempted = true
+        },
+        onStep: (message) => {
+          this._emitCheckoutStep(dropEvent, account, message)
+          this._checkoutTelemetry?.record(attemptId, message)
+        },
+        onMilestone: (stage, detail) => {
+          this._checkoutTelemetry?.record(attemptId, stage, `milestone:${detail}`)
+        }
+      })
+      const deadline = new Promise((resolve) => {
+        timeout = setTimeout(() => {
+          deadlineExpired = true
+          resolve(
+            orderSubmissionAttempted
+              ? {
+                  success: false,
+                  terminal: true,
+                  orderSubmissionAttempted: true,
+                  submissionUncertain: true,
+                  requiresManualCheckout: true,
+                  error:
+                    'Walmart order submission exceeded the safety deadline. Do not retry; verify the order history and cart manually.'
+                }
+              : {
+                  success: false,
+                  deadlineExpired: true,
+                  error: 'Walmart queue checkout exceeded the 10-minute safety deadline'
+                }
+          )
+        }, this._queueCheckoutTimeoutMs)
+      })
+      let result
+      try {
+        result = await Promise.race([checkout, deadline])
+      } catch (error) {
+        result = orderSubmissionAttempted
+          ? {
+              success: false,
+              terminal: true,
+              orderSubmissionAttempted: true,
+              submissionUncertain: true,
+              requiresManualCheckout: true,
+              error:
+                'Walmart checkout failed after order submission started. Do not retry; verify the order history and cart manually.',
+              cause: error.message
+            }
+          : { success: false, error: error.message }
+      }
+      clearTimeout(timeout)
+      if (result.deadlineExpired) {
+        // Promise.race does not cancel the flow. The shared flag makes any later
+        // onBeforeSubmit fail closed, while this observer prevents a detached
+        // rejection after the page is stopped below.
+        checkout.catch((error) => {
+          log.info('Walmart queue checkout stopped after its safety deadline', {
+            taskId: id,
+            error: error.message
+          })
+        })
+      }
+      if (result.submissionUncertain) {
+        this._holdAccountForManualReview(account, result.error)
+      }
+      if (/safety deadline/.test(result.error || '') && !result.submissionUncertain) {
+        await this._queueJoiner?.stop(id)
+        await Promise.resolve(this._pool.close(account.id)).catch(() => {})
+      }
+      this._checkoutTelemetry?.completeAttempt(attemptId, result)
+      this._logHistory(dropEvent, result, account.id)
+      this._dropEventLedger.complete(receipt.receiptId, {
+        status: result.requiresManualCheckout
+          ? 'manual_required'
+          : result.success
+            ? 'completed'
+            : 'failed',
+        detail: result.error || result.message
+      })
+      this._emitStatus(id, result.success ? 'idle' : 'error')
+      const queueResultLabel = result.testMode
+        ? 'TEST CHECKOUT READY'
+        : result.submissionUncertain
+          ? 'ORDER STATUS UNCERTAIN - MANUAL REVIEW'
+          : result.success
+            ? 'ORDER CONFIRMED'
+            : 'ORDER FAILED'
+      await this._notify.fire({
+        ...dropEvent,
+        productName: `${queueResultLabel} [${account.name}]: ${dropEvent.productName}`,
+        dropType: result.success ? DROP_TYPES.IN_STOCK : DROP_TYPES.PRICE_DROP
+      })
       await this._queueJoiner?.stop(id)
-      await this._pool.close(account.id).catch(() => {})
+    } finally {
+      this._activeAccountCheckoutRuns.delete(account.id)
     }
-    this._checkoutTelemetry?.completeAttempt(attemptId, result)
-    this._logHistory(dropEvent, result, account.id)
-    this._emitStatus(id, result.success ? 'idle' : 'error')
-    await this._notify.fire({
-      ...dropEvent,
-      productName: `${result.testMode ? 'TEST CHECKOUT READY' : result.success ? 'ORDER CONFIRMED' : 'ORDER FAILED'} [${account.name}]: ${dropEvent.productName}`,
-      dropType: result.success ? DROP_TYPES.IN_STOCK : DROP_TYPES.PRICE_DROP
-    })
-    await this._queueJoiner?.stop(id)
   }
 
   async _runFlowsForTask(task, dropEvent) {
@@ -430,10 +936,9 @@ export class TaskManager extends EventEmitter {
         remainingMs: circuit.remainingMs,
         reason: circuit.reason
       })
-      const retryMinutes = Math.max(1, Math.ceil(circuit.remainingMs / 60_000))
       await this._notify.fire({
         ...dropEvent,
-        productName: `CHECKOUT PAUSED (${dropEvent.retailer}): repeated ${circuit.reason || 'systemic'} failures; automatic probe in about ${retryMinutes} minute${retryMinutes === 1 ? '' : 's'}`,
+        productName: `CHECKOUT PAUSED (${dropEvent.retailer}): repeated ${circuit.reason || 'systemic'} failures; waiting for a fresh stock signal after cooldown`,
         dropType: 'price_drop'
       })
       return {
@@ -497,6 +1002,19 @@ export class TaskManager extends EventEmitter {
   }
 
   async _runOrdersForAccount(flow, task, dropEvent, accountId, orderSubmissionGate = null) {
+    const account = this._accountManager.getDecrypted(accountId)
+    if (account?.status === 'manual_review' || this._manualReviewAccounts.has(accountId)) {
+      return {
+        accountId,
+        success: false,
+        manualReviewRequired: true,
+        requiresManualCheckout: true,
+        error: 'Account is paused until the previous uncertain order is reviewed',
+        ordersRequested: 0,
+        ordersCompleted: 0,
+        orderResults: []
+      }
+    }
     if (this._activeAccountCheckoutRuns.has(accountId)) {
       log.info('Skipping checkout because the account is already handling another product', {
         accountId,
@@ -575,7 +1093,17 @@ export class TaskManager extends EventEmitter {
   async _runFlowForAccount(flow, task, dropEvent, accountId, orderSubmissionGate = null) {
     const account = this._accountManager.getDecrypted(accountId)
     if (!account) return { accountId, success: false, error: 'Account not found' }
+    if (account.status === 'manual_review' || this._manualReviewAccounts.has(accountId)) {
+      return {
+        accountId,
+        success: false,
+        requiresManualCheckout: true,
+        manualReviewRequired: true,
+        error: 'Account is paused until the previous uncertain order is reviewed'
+      }
+    }
     const attemptId = this._checkoutTelemetry?.beginAttempt({ task, dropEvent, accountId })
+    let submissionStarted = false
 
     const retryManager = new RetryManager({
       maxRetries: 3,
@@ -618,7 +1146,7 @@ export class TaskManager extends EventEmitter {
             const assignedPayment = assignedPaymentMethodId
               ? this._paymentManager?.get(assignedPaymentMethodId)
               : null
-            const flowResult = await flow(context, {
+            let flowResult = await flow(context, {
               productUrl: dropEvent.productUrl,
               payment: assignedPayment,
               cvv: assignedPayment?.cvv || account.cvv || '',
@@ -640,6 +1168,13 @@ export class TaskManager extends EventEmitter {
                 checkoutSettings.targetCommitNavigationEnabled === true,
               orderSubmissionGate,
               orderSubmissionKey: `${accountId}:${task.order_sequence || 1}`,
+              onBeforeSubmit: () => {
+                this._dropEventLedger.markSubmissionStarted(dropEvent.receiptId, {
+                  accountId,
+                  orderSequence: task.order_sequence || 1
+                })
+                submissionStarted = true
+              },
               onStep: (message) => {
                 this._emitCheckoutStep(dropEvent, account, message)
                 this._checkoutTelemetry?.record(attemptId, message)
@@ -651,14 +1186,40 @@ export class TaskManager extends EventEmitter {
               accountId: accountId
             })
             if (
+              submissionStarted &&
               !flowResult?.success &&
-              !flowResult?.requiresManualCheckout &&
-              isRetryableCheckoutError(flowResult?.error || flowResult?.message)
+              !flowResult?.testMode &&
+              !flowResult?.submissionUncertain
             ) {
+              flowResult = {
+                ...flowResult,
+                success: false,
+                terminal: true,
+                orderSubmissionAttempted: true,
+                submissionUncertain: true,
+                requiresManualCheckout: true,
+                error:
+                  flowResult?.error ||
+                  'Checkout ended after order submission started. Do not retry; verify order history manually.'
+              }
+            }
+            if (isRetryableCheckoutResult(flowResult)) {
               throw new Error(flowResult.error || flowResult.message)
             }
             return flowResult
           } catch (err) {
+            if (submissionStarted) {
+              return {
+                success: false,
+                terminal: true,
+                orderSubmissionAttempted: true,
+                submissionUncertain: true,
+                requiresManualCheckout: true,
+                error:
+                  'Checkout failed after order submission started. Do not retry; verify retailer order history manually.',
+                cause: err.message
+              }
+            }
             await this._closeAccountContext(accountId)
             throw err
           }
@@ -678,9 +1239,11 @@ export class TaskManager extends EventEmitter {
       )
       const resultLabel = result.testMode
         ? 'TEST CHECKOUT READY'
-        : result.success
-          ? 'ORDER CONFIRMED'
-          : 'ORDER FAILED'
+        : result.submissionUncertain
+          ? 'ORDER STATUS UNCERTAIN - MANUAL REVIEW'
+          : result.success
+            ? 'ORDER CONFIRMED'
+            : 'ORDER FAILED'
       const orderLabel =
         task.orders_per_drop > 1 ? ` ${task.order_sequence || 1}/${task.orders_per_drop}` : ''
       if (result.tracePath) {
@@ -691,6 +1254,9 @@ export class TaskManager extends EventEmitter {
       }
       if (result.diagnosticsPath) {
         this._emitCheckoutStep(dropEvent, account, `Diagnostics saved: ${result.diagnosticsPath}`)
+      }
+      if (result.submissionUncertain) {
+        this._holdAccountForManualReview(account, result.error)
       }
       await this._notify.fire({
         ...dropEvent,
@@ -716,6 +1282,47 @@ export class TaskManager extends EventEmitter {
         error: err.message
       })
       return { accountId, success: false, error: err.message }
+    }
+  }
+
+  _holdAccountForManualReview(account, reason) {
+    if (!account?.id) return
+    this._manualReviewAccounts.add(account.id)
+    try {
+      this._accountManager.setStatus?.(account.id, 'manual_review')
+      this._getDb().flushNow?.()
+    } catch (error) {
+      log.error('Could not durably persist the account checkout hold', {
+        accountId: account.id,
+        error: error.message
+      })
+    }
+    log.warn('Account paused after uncertain order submission', {
+      accountId: account.id,
+      retailer: account.retailer,
+      reason: String(reason || 'unknown').slice(0, 200)
+    })
+  }
+
+  _recoverUncertainAccountHolds() {
+    try {
+      const rows = this._getDb()
+        .prepare('SELECT * FROM drop_event_receipts WHERE status = ?')
+        .all('submission_started')
+      let recovered = 0
+      for (const row of rows) {
+        const accountId = row.account_id || String(row.detail || '').match(/account=([^\s]+)/)?.[1]
+        if (!accountId) continue
+        this._manualReviewAccounts.add(accountId)
+        this._accountManager.setStatus?.(accountId, 'manual_review')
+        recovered += 1
+      }
+      if (recovered) {
+        this._getDb().flushNow?.()
+        log.warn('Recovered account holds from uncertain order submissions', { count: recovered })
+      }
+    } catch (error) {
+      log.error('Could not recover uncertain-order account holds', { error: error.message })
     }
   }
 
@@ -837,6 +1444,28 @@ function parseAccountIds(value) {
   }
 }
 
+function taskProductIdentity(taskRow) {
+  return [
+    taskRow?.retailer || 'unknown',
+    extractProductKey(taskRow?.retailer, taskRow?.product_url) ||
+      String(taskRow?.product_url || 'unknown')
+        .trim()
+        .toLowerCase()
+  ].join(':')
+}
+
+function pendingUnsubscribeIdentity(taskRow, userId) {
+  return `${userId || 'unbound'}:${taskProductIdentity(taskRow)}`
+}
+
+function buildMonitorIdentity(taskRow) {
+  return {
+    productUrl: taskRow?.product_url,
+    retailer: taskRow?.retailer,
+    productKey: taskRow?.product_key || extractProductKey(taskRow?.retailer, taskRow?.product_url)
+  }
+}
+
 export function isRetryableCheckoutError(message = '', code = '') {
   const value = `${message || ''} ${code || ''}`.toLowerCase()
   return [
@@ -860,4 +1489,36 @@ export function isRetryableCheckoutError(message = '', code = '') {
     "sam's club checkout request failed temporarily",
     "sam's club checkout did not reach order review"
   ].some((keyword) => value.includes(keyword))
+}
+
+export function isRetryableCheckoutResult(result) {
+  if (!result || result.success) return false
+  if (
+    result.requiresManualCheckout ||
+    result.submissionUncertain ||
+    result.orderSubmissionAttempted ||
+    result.terminal
+  ) {
+    return false
+  }
+  return isRetryableCheckoutError(result.error || result.message, result.code)
+}
+
+function classifyDropReceiptResult(result) {
+  const accountResults = Array.isArray(result?.results) ? result.results : []
+  const manual = accountResults.find(
+    (entry) => entry?.requiresManualCheckout || entry?.submissionUncertain
+  )
+  const failed = accountResults.find((entry) => entry?.error || entry?.message)
+  if (manual) {
+    return {
+      status: 'manual_required',
+      detail: manual.error || manual.message || 'Manual checkout review required'
+    }
+  }
+  if (result?.success) return { status: 'completed', detail: null }
+  return {
+    status: 'failed',
+    detail: result?.error || result?.message || failed?.error || failed?.message || null
+  }
 }

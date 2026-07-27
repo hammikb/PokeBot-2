@@ -531,7 +531,7 @@ function makeContext(page) {
 }
 
 const baseArgs = {
-  email: 'test@example.com',
+  email: 'redacted@example.invalid',
   password: 'SecurePass1!',
   firstName: 'Ash',
   lastName: 'Ketchum',
@@ -548,7 +548,7 @@ describe('runTargetRegistration', () => {
   it('fills email, password, first and last name', async () => {
     const page = makePage()
     await runTargetRegistration(makeContext(page), baseArgs)
-    expect(page.fills.some((f) => f.value === 'test@example.com')).toBe(true)
+    expect(page.fills.some((f) => f.value === 'redacted@example.invalid')).toBe(true)
     expect(page.fills.some((f) => f.value === 'SecurePass1!')).toBe(true)
     expect(page.fills.some((f) => f.value === 'Ash')).toBe(true)
     expect(page.fills.some((f) => f.value === 'Ketchum')).toBe(true)
@@ -645,7 +645,7 @@ function makeContext(page) {
 }
 
 const baseArgs = {
-  email: 'test@example.com',
+  email: 'redacted@example.invalid',
   password: 'SecurePass1!',
   firstName: 'Ash',
   lastName: 'Ketchum',
@@ -663,7 +663,7 @@ describe('runWalmartRegistration', () => {
   it('fills all fields including phone', async () => {
     const page = makePage()
     await runWalmartRegistration(makeContext(page), baseArgs)
-    expect(page.fills.some((f) => f.value === 'test@example.com')).toBe(true)
+    expect(page.fills.some((f) => f.value === 'redacted@example.invalid')).toBe(true)
     expect(page.fills.some((f) => f.value === 'SecurePass1!')).toBe(true)
     expect(page.fills.some((f) => f.value === 'Ash')).toBe(true)
     expect(page.fills.some((f) => f.value === 'Ketchum')).toBe(true)
@@ -1084,7 +1084,7 @@ Add a new section after the existing bulk-import section (before the accounts li
     value={bulkCreateRows}
     onChange={(e) => setBulkCreateRows(e.target.value)}
     rows={4}
-    placeholder="target,user@email.com,password,Ash,Ketchum,1 Pallet Town,,Pallet,CA,90210,5551234567"
+    placeholder="target,redacted@example.invalid,password,Ash,Ketchum,1 Pallet Town,,Pallet,CA,90210,5551234567"
     className="w-full bg-[#0f0f0f] border border-gray-700 rounded px-2 py-1.5 text-gray-200"
   />
   <div className="flex items-center gap-3">

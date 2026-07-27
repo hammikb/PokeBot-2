@@ -1,4 +1,9 @@
-import { launch } from 'cloakbrowser'
+import { launchPersistentContext } from 'cloakbrowser'
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { buildProxyUrl } from '../automation/BrowserPool.js'
+import { buildCloakBrowserOptions } from '../automation/cloakBrowserConfig.js'
 
 const BLOCK_PATTERNS = [
   /captcha/i,
@@ -8,14 +13,31 @@ const BLOCK_PATTERNS = [
   /sorry, this request/i
 ]
 
-export async function lookupProductFromPage(productUrl) {
-  const browser = await launch({ headless: true, humanize: true, geoip: true })
+export async function lookupProductFromPage(productUrl, options = {}) {
+  const retailer = detectRetailer(productUrl)
+  if (!retailer)
+    throw new Error('Product page lookup is currently supported for Target and Walmart URLs')
+
+  const proxyUrl = buildProxyUrl(options.proxy)
+  if (!proxyUrl) {
+    throw new Error(
+      'A proxy is required for retailer page lookup; direct home-IP lookup is disabled'
+    )
+  }
+
+  const profilePath = options.profilePath || join(tmpdir(), 'pokebot-product-lookups', retailer)
+  mkdirSync(profilePath, { recursive: true })
+  const context = await launchPersistentContext({
+    ...buildCloakBrowserOptions({
+      identity: `product-lookup:${retailer}:${profilePath}`,
+      proxyUrl,
+      headless: false
+    }),
+    userDataDir: profilePath
+  })
 
   try {
-    const page = await browser.newPage({
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
-    })
+    const page = await context.newPage()
     await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {})
 
@@ -56,7 +78,7 @@ export async function lookupProductFromPage(productUrl) {
 
     return normalizePageSnapshot(productUrl, snapshot)
   } finally {
-    await browser.close().catch(() => {})
+    await context.close().catch(() => {})
   }
 }
 

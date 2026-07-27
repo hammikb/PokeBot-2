@@ -1,6 +1,7 @@
 import { launchPersistentContext } from 'cloakbrowser'
 import { mkdirSync } from 'fs'
 import { createModuleLogger } from '../utils/logger.js'
+import { buildCloakBrowserOptions, redactProxyUrl } from './cloakBrowserConfig.js'
 
 const log = createModuleLogger('BrowserPool')
 const DEFAULT_TIMEOUT = 60 * 60 * 1000 // 60 minutes
@@ -13,34 +14,6 @@ const RETAILER_HOME = {
   samsclub: 'https://www.samsclub.com/',
   'pokemon-center': 'https://www.pokemoncenter.com/'
 }
-
-// Shared browser launch arguments used by all contexts
-const DEFAULT_BROWSER_ARGS = [
-  '--no-sandbox',
-  '--disable-dev-shm-usage',
-  '--disable-setuid-sandbox',
-  '--no-first-run',
-  '--no-default-browser-check',
-  '--password-store=basic',
-  '--disable-background-networking',
-  '--disable-background-timer-throttling',
-  '--disable-backgrounding-occluded-windows',
-  '--disable-breakpad',
-  '--disable-component-extensions-with-background-pages',
-  '--disable-features=TranslateUI',
-  '--disable-ipc-flooding-protection',
-  '--disable-renderer-backgrounding',
-  '--force-color-profile=srgb',
-  '--metrics-recording-only',
-  '--mute-audio',
-  '--disable-hang-monitor',
-  '--disable-prompt-on-repost',
-  '--disable-sync',
-  '--enable-features=NetworkService,NetworkServiceInProcess',
-  '--disable-blink-features=AutomationControlled',
-  // CRITICAL: Use a realistic user agent
-  '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-]
 
 export class BrowserPool {
   constructor({
@@ -169,24 +142,23 @@ export class BrowserPool {
       throw err
     }
 
-    const argsCopy = [...DEFAULT_BROWSER_ARGS]
-    // _launchNew uses a different features set than launchContext
-    const mfIndex = argsCopy.findIndex((a) => a.startsWith('--disable-features='))
-    if (mfIndex >= 0)
-      argsCopy[mfIndex] = '--disable-features=TranslateUI,ChromeWhatsNewUI,MediaRouter'
-
+    const proxyUrl = buildProxyUrl(proxy)
     const contextOptions = {
-      userDataDir: profilePath,
-      headless: false,
-      humanize: true,
-      geoip: true,
-      args: argsCopy
+      ...buildCloakBrowserOptions({
+        identity: `account:${accountId}:${profilePath}`,
+        proxyUrl,
+        headless: false
+      }),
+      userDataDir: profilePath
+      // Persistent profiles preserve the retailer session and the fixed
+      // fingerprint seed preserves device identity across app restarts.
     }
 
-    const proxyUrl = buildProxyUrl(proxy)
     if (proxyUrl) {
-      contextOptions.proxy = proxyUrl
-      log.info('Using proxy for browser', { accountId, proxy: proxyUrl })
+      log.info('Using proxy for browser', {
+        accountId,
+        proxy: redactProxyUrl(proxyUrl)
+      })
     } else {
       log.warn('No proxy configured for browser session', { accountId, retailer })
     }
@@ -254,16 +226,15 @@ export class BrowserPool {
       // ignore
     }
 
-    const contextOptions = {
-      userDataDir: profilePath,
-      headless: false,
-      humanize: true,
-      geoip: true,
-      args: DEFAULT_BROWSER_ARGS
-    }
-
     const proxyUrl = buildProxyUrl(proxy)
-    if (proxyUrl) contextOptions.proxy = proxyUrl
+    const contextOptions = {
+      ...buildCloakBrowserOptions({
+        identity: `monitor:${accountId}:${profilePath}`,
+        proxyUrl,
+        headless: false
+      }),
+      userDataDir: profilePath
+    }
 
     log.info('Launching ephemeral monitor context', { accountId, proxy: Boolean(proxyUrl) })
     const context = await launchPersistentContext(contextOptions)

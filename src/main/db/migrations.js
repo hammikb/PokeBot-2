@@ -366,6 +366,77 @@ const migrations = [
         if (source.task_id) markMonitoring.run('monitoring', source.task_id)
       }
     }
+  },
+  {
+    version: 14,
+    name: 'add_drop_event_receipts',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS drop_event_receipts (
+          id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL,
+          event_id TEXT,
+          drop_cycle_id TEXT,
+          retailer TEXT,
+          product_id TEXT,
+          status TEXT NOT NULL DEFAULT 'claimed',
+          claimed_at INTEGER NOT NULL,
+          completed_at INTEGER,
+          detail TEXT,
+          FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_drop_receipts_task_event
+          ON drop_event_receipts(task_id, event_id)
+          WHERE event_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_drop_receipts_task_claimed
+          ON drop_event_receipts(task_id, claimed_at DESC);
+      `)
+    }
+  },
+  {
+    version: 15,
+    name: 'add_monitor_unsubscribe_outbox',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS monitor_unsubscribe_outbox (
+          id TEXT PRIMARY KEY,
+          retailer TEXT NOT NULL,
+          product_url TEXT NOT NULL,
+          product_key TEXT,
+          created_at INTEGER NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          last_error TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_monitor_unsubscribe_created
+          ON monitor_unsubscribe_outbox(created_at);
+      `)
+    }
+  },
+  {
+    version: 16,
+    name: 'add_drop_receipt_account_boundary',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE drop_event_receipts ADD COLUMN account_id TEXT;
+        ALTER TABLE drop_event_receipts ADD COLUMN order_sequence INTEGER;
+        CREATE INDEX IF NOT EXISTS idx_drop_receipts_submission_account
+          ON drop_event_receipts(status, account_id)
+          WHERE status = 'submission_started';
+      `)
+    }
+  },
+  {
+    version: 17,
+    name: 'bind_monitor_unsubscribe_outbox_to_user',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE monitor_unsubscribe_outbox ADD COLUMN user_id TEXT;
+        CREATE INDEX IF NOT EXISTS idx_monitor_unsubscribe_user_created
+          ON monitor_unsubscribe_outbox(user_id, created_at);
+      `)
+    }
   }
 ]
 

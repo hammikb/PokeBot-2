@@ -132,7 +132,7 @@ product, sets `active = false` only if zero rows remain → Pi's next poll cycle
 - The RLS policy and trigger are database-side SQL, outside the JS test suite. Verified manually
   after migration: insert a `subscriptions` row as a real authenticated test user and confirm
   `products.active` flips to `true`; delete it and confirm `active` flips back to `false`.
-  (`test@gmail.com` / `123456`, created in the prior session, is available for this manual check.)
+  (`redacted@example.invalid` / `123456`, created in the prior session, is available for this manual check.)
 
 ## Explicitly out of scope
 

@@ -5,6 +5,7 @@ import { tmpdir } from 'os'
 import {
   CheckoutTelemetry,
   applyActualCartExecution,
+  buildCheckoutAnalyticsReport,
   buildExperimentProfile,
   classifyCheckoutFailure,
   classifyCheckoutStage,
@@ -21,6 +22,32 @@ afterEach(() => {
 })
 
 describe('CheckoutTelemetry', () => {
+  it('never lets local telemetry storage failures abort checkout', () => {
+    const telemetry = new CheckoutTelemetry({
+      getDb: () => ({
+        prepare: () => {
+          throw new Error('disk unavailable')
+        }
+      })
+    })
+
+    expect(
+      telemetry.beginAttempt({
+        task: { id: 'task-1', retailer: 'target' },
+        dropEvent: { retailer: 'target', productName: 'Pokemon item' },
+        accountId: 'account-1'
+      })
+    ).toBeNull()
+
+    telemetry._active.set('attempt-1', {
+      startedAt: Date.now(),
+      sequence: 0,
+      lastStage: 'drop_detected'
+    })
+    expect(telemetry.record('attempt-1', 'cart_ready', 'Cart ready')).toBe(true)
+    expect(telemetry.completeAttempt('attempt-1', { success: true })).toBe(false)
+  })
+
   it('builds a controlled Target experiment profile', () => {
     expect(
       buildExperimentProfile({
@@ -133,11 +160,58 @@ describe('CheckoutTelemetry', () => {
     })
   })
 
-  it('redacts URLs, email addresses, paths, and long numbers', () => {
-    const value = sanitizeDetail(
-      'user@example.com https://target.com/item C:\\Users\\person\\trace.zip 123456789012'
+  it('finalizes crash-interrupted attempts and quarantines post-submit uncertainty in analytics', () => {
+    const dbPath = join(tmpdir(), `pokebot-telemetry-recovery-${Date.now()}-${Math.random()}.json`)
+    tempPaths.push(dbPath)
+    const db = new JsonDb(dbPath)
+    const insertAttempt = db.prepare(
+      `INSERT INTO checkout_attempts
+       (id, started_at, outcome, final_stage, upload_status)
+       VALUES (?, ?, ?, ?, ?)`
     )
-    expect(value).toBe('[email] [url] [path] [number]')
+    const insertEvent = db.prepare(
+      `INSERT INTO checkout_attempt_events
+       (id, attempt_id, sequence, stage, detail, elapsed_ms, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    insertAttempt.run('before-submit', 1000, 'running', 'cart_ready', 'pending')
+    insertEvent.run('event-before', 'before-submit', 1, 'cart_ready', 'Cart ready', 100, 1100)
+    insertAttempt.run('after-submit', 2000, 'running', 'order_submitted', 'pending')
+    insertEvent.run(
+      'event-after',
+      'after-submit',
+      1,
+      'order_submitted',
+      'Waiting for confirmation',
+      100,
+      2100
+    )
+
+    new CheckoutTelemetry({ getDb: () => db })
+
+    expect(
+      db.prepare('SELECT * FROM checkout_attempts WHERE id = ?').get('before-submit')
+    ).toMatchObject({
+      outcome: 'failed',
+      final_stage: 'failed',
+      failure_code: 'app_interrupted',
+      failure_stage: 'cart_ready'
+    })
+    expect(
+      db.prepare('SELECT * FROM checkout_attempts WHERE id = ?').get('after-submit')
+    ).toMatchObject({
+      outcome: 'manual_required',
+      final_stage: 'manual_required',
+      failure_code: 'submission_uncertain',
+      failure_stage: 'order_submitted'
+    })
+  })
+
+  it('redacts URLs, paths, email, card, last-four, and CVV details', () => {
+    const value = sanitizeDetail(
+      'user@example.com https://target.com/item C:\\Users\\person\\trace.zip 4111 1111 1111 1111 card ending in 4242 CVV 123'
+    )
+    expect(value).toBe('[email] [url] [path] [card] card ending [redacted] CVV [redacted]')
   })
 
   it('keeps telemetry local when checkout analytics is disabled', async () => {
@@ -157,5 +231,132 @@ describe('CheckoutTelemetry', () => {
 
     await expect(telemetry.flushPending()).resolves.toEqual({ uploaded: 0, optedOut: true })
     await expect(telemetry.uploadAttempt('attempt-1')).resolves.toBe(false)
+  })
+
+  it('builds a safe local analytics report with breakdowns and stage timings', () => {
+    const now = Date.now()
+    const attempts = [
+      {
+        id: 'confirmed-attempt',
+        account_ref: 'must-not-leak',
+        device_ref: 'must-not-leak',
+        retailer: 'target',
+        product_name: 'Pokemon Day Collection',
+        mode: 'auto-checkout',
+        experiment_json: JSON.stringify({
+          cart_strategy: 'api_preferred',
+          cart_strategy_actual: 'browser_fallback',
+          lite_mode: true,
+          commit_navigation: false,
+          monitor_latency_ms: 240,
+          secret: 'must-not-leak',
+          _local_artifacts: [
+            { type: 'trace', path: 'debug-traces/target-checkout.zip' },
+            { type: 'unknown', path: 'C:/Users/private/secret.txt' }
+          ]
+        }),
+        started_at: now - 10_000,
+        completed_at: now - 5_000,
+        duration_ms: 5_000,
+        outcome: 'confirmed',
+        final_stage: 'confirmed',
+        event_count: 3
+      },
+      {
+        id: 'failed-attempt',
+        retailer: 'target',
+        product_name: 'Booster Bundle',
+        mode: 'auto-checkout',
+        experiment_json: JSON.stringify({
+          cart_strategy: 'browser',
+          lite_mode: false,
+          commit_navigation: false,
+          monitor_latency_ms: 360
+        }),
+        started_at: now - 20_000,
+        completed_at: now - 17_000,
+        duration_ms: 3_000,
+        outcome: 'failed',
+        final_stage: 'failed',
+        failure_stage: 'cart_attempted',
+        failure_code: 'inventory',
+        error_summary: 'Item is out of stock',
+        event_count: 2
+      }
+    ]
+    const events = [
+      {
+        attempt_id: 'confirmed-attempt',
+        sequence: 1,
+        stage: 'drop_detected',
+        detail: 'milestone:in_stock',
+        elapsed_ms: 0,
+        created_at: now - 10_000
+      },
+      {
+        attempt_id: 'confirmed-attempt',
+        sequence: 2,
+        stage: 'cart_ready',
+        detail: 'Cart ready',
+        elapsed_ms: 1_500,
+        created_at: now - 8_500
+      },
+      {
+        attempt_id: 'confirmed-attempt',
+        sequence: 3,
+        stage: 'confirmed',
+        detail: 'Order confirmed',
+        elapsed_ms: 5_000,
+        created_at: now - 5_000
+      },
+      {
+        attempt_id: 'failed-attempt',
+        sequence: 1,
+        stage: 'drop_detected',
+        detail: 'milestone:in_stock',
+        elapsed_ms: 0,
+        created_at: now - 20_000
+      },
+      {
+        attempt_id: 'failed-attempt',
+        sequence: 2,
+        stage: 'failed',
+        detail: 'Item is out of stock',
+        elapsed_ms: 3_000,
+        created_at: now - 17_000
+      }
+    ]
+
+    const report = buildCheckoutAnalyticsReport(attempts, events, {
+      retailer: 'target',
+      days: 7
+    })
+
+    expect(report.summary).toMatchObject({
+      total: 2,
+      completed: 2,
+      confirmed: 1,
+      successRate: 50,
+      averageDurationMs: 4000,
+      averageMonitorLatencyMs: 300
+    })
+    expect(report.summary.failures).toEqual([{ key: 'inventory', count: 1, percent: 100 }])
+    expect(report.stages.find((stage) => stage.stage === 'cart_ready')).toMatchObject({
+      attemptsReached: 1,
+      averageReachedMs: 1500,
+      averageDurationMs: 3500
+    })
+    expect(
+      report.experiments
+        .find((experiment) => experiment.key === 'lite_mode')
+        .values.map((value) => value.value)
+    ).toEqual(['on', 'off'])
+    expect(report.attempts[0].artifacts).toEqual([
+      { type: 'trace', path: 'debug-traces/target-checkout.zip' }
+    ])
+    expect(report.attempts[0].experiment).not.toHaveProperty('secret')
+    expect(report.attempts[0].monitorLatencyMs).toBe(240)
+    expect(report.attempts[0]).not.toHaveProperty('account_ref')
+    expect(report.attempts[0]).not.toHaveProperty('device_ref')
   })
 })

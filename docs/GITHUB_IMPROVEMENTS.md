@@ -194,7 +194,7 @@ export class CookieManager {
   "accounts": [
     {
       "retailer": "walmart",
-      "email": "user@example.com",
+      "email": "redacted@example.invalid",
       "password": "encrypted",
       "proxy": "1.2.3.4:8080"
     }
@@ -202,7 +202,7 @@ export class CookieManager {
   "tasks": [
     {
       "productUrl": "https://walmart.com/ip/...",
-      "accounts": ["walmart-user@example.com"],
+      "accounts": ["redacted@example.invalid"],
       "mode": "auto-checkout"
     }
   ]

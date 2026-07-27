@@ -20,6 +20,8 @@ beforeEach(() => {
 afterEach(() => {
   db.close()
   if (existsSync(dbPath)) rmSync(dbPath)
+  if (existsSync(`${dbPath}.bak`)) rmSync(`${dbPath}.bak`)
+  if (existsSync(`${dbPath}.tmp`)) rmSync(`${dbPath}.tmp`)
 })
 
 describe('JsonDb ON CONFLICT upserts', () => {
@@ -108,7 +110,9 @@ describe('JsonDb SELECT with AND-chained WHERE', () => {
     insert.run('uploaded', 'uploaded', 456)
 
     const rows = db
-      .prepare("SELECT * FROM checkout_attempts WHERE upload_status = 'pending' AND completed_at IS NOT NULL")
+      .prepare(
+        "SELECT * FROM checkout_attempts WHERE upload_status = 'pending' AND completed_at IS NOT NULL"
+      )
       .all()
 
     expect(rows.map((row) => row.id)).toEqual(['pending'])
@@ -143,7 +147,12 @@ describe('JsonDb UPDATE statements', () => {
     insert.run('two', 1)
 
     expect(db.prepare('UPDATE shipping_addresses SET is_default = 0').run().changes).toBe(2)
-    expect(db.prepare('SELECT * FROM shipping_addresses').all().every((row) => row.is_default === 0)).toBe(true)
+    expect(
+      db
+        .prepare('SELECT * FROM shipping_addresses')
+        .all()
+        .every((row) => row.is_default === 0)
+    ).toBe(true)
   })
 })
 
@@ -177,5 +186,34 @@ describe('JsonDb load-time repair', () => {
     const rows = db.prepare('SELECT * FROM tasks').all()
     expect(rows).toHaveLength(2)
     expect(rows.find((row) => row.id === 't1').product_name).toBe('Newest copy')
+  })
+
+  it('recovers from the last atomic backup when the primary file is corrupt', () => {
+    db.prepare('INSERT INTO tasks (id, retailer) VALUES (?, ?)').run('safe-task', 'target')
+    db.flushNow()
+    db.prepare('INSERT INTO tasks (id, retailer) VALUES (?, ?)').run('new-task', 'walmart')
+    db.flushNow()
+
+    expect(existsSync(`${dbPath}.bak`)).toBe(true)
+    writeFileSync(dbPath, '{"tasks":')
+
+    db = new JsonDb(dbPath)
+    expect(db.prepare('SELECT * FROM tasks').all()).toEqual([
+      expect.objectContaining({ id: 'safe-task', retailer: 'target' })
+    ])
+  })
+
+  it('recovers a valid first-write temp file when no primary or backup exists', () => {
+    db.close()
+    const tables = JSON.parse(readFileSync(dbPath, 'utf8'))
+    tables.tasks.push({ id: 'temp-task', retailer: 'walmart' })
+    rmSync(dbPath)
+    writeFileSync(`${dbPath}.tmp`, JSON.stringify(tables))
+
+    db = new JsonDb(dbPath)
+
+    expect(db.prepare('SELECT * FROM tasks').all()).toEqual([
+      expect.objectContaining({ id: 'temp-task', retailer: 'walmart' })
+    ])
   })
 })

@@ -5,7 +5,17 @@ import { startCheckoutDiagnostics } from '../CheckoutDiagnostics.js'
 
 export async function runPokemonCenterFlow(
   context,
-  { productUrl, account, payment, notificationEngine, dropEvent, mode, onStep = () => {} }
+  {
+    productUrl,
+    account,
+    payment,
+    notificationEngine,
+    dropEvent,
+    mode,
+    onStep = () => {},
+    onBeforeSubmit = () => {},
+    onMilestone = () => {}
+  }
 ) {
   const page = await context.newPage()
   const trace = await startTrace(context, {
@@ -21,6 +31,7 @@ export async function runPokemonCenterFlow(
   })
   const isTestMode = mode === 'test-checkout'
   let requiresManual = false
+  let orderSubmissionAttempted = false
 
   try {
     onStep('Opening Pokémon Center product')
@@ -95,6 +106,9 @@ export async function runPokemonCenterFlow(
       throw new Error('Pokémon Center Place Order is disabled; verify checkout details')
     }
     onStep('Placing Pokémon Center order')
+    await onBeforeSubmit()
+    orderSubmissionAttempted = true
+    onMilestone('order_submitted', 'Pokémon Center Place Order action initiated')
     await placeOrder.click({ timeout: 10000 })
     await page
       .locator('text=/thank you|order (confirmed|number)|order has been placed/i')
@@ -103,14 +117,30 @@ export async function runPokemonCenterFlow(
     await trace.stop()
     return { success: true, tracePath: trace.tracePath }
   } catch (error) {
-    const diagnosticsPath = await diagnostics.capture(error)
-    await trace.capture(page)
-    await trace.stop()
-    requiresManual = isTestMode
+    const submissionUncertain = orderSubmissionAttempted && !isTestMode
+    const diagnosticsPath = await diagnostics.capture(error).catch(() => null)
+    await Promise.resolve()
+      .then(() => trace.capture(page))
+      .catch(() => {})
+    await Promise.resolve()
+      .then(() => trace.stop())
+      .catch(() => {})
+    requiresManual = isTestMode || submissionUncertain
+    if (submissionUncertain) {
+      onStep(
+        'Pokémon Center order status is uncertain; leaving checkout open for manual verification'
+      )
+    }
+    const submissionMessage =
+      'Pokémon Center order submission status is uncertain. Do not retry; verify the order history and cart manually.'
     return {
       success: false,
-      error: error.message,
-      requiresManualCheckout: isTestMode,
+      error: submissionUncertain ? submissionMessage : error.message,
+      cause: submissionUncertain ? error.message : undefined,
+      terminal: submissionUncertain,
+      orderSubmissionAttempted,
+      submissionUncertain,
+      requiresManualCheckout: isTestMode || submissionUncertain,
       tracePath: trace.tracePath,
       screenshotPath: trace.screenshotPath,
       diagnosticsPath

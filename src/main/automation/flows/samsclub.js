@@ -23,6 +23,7 @@ export async function runSamsClubFlow(
     buyLimit = 1,
     maxPrice = null,
     onStep = () => {},
+    onBeforeSubmit = () => {},
     onMilestone = () => {}
   }
 ) {
@@ -41,6 +42,7 @@ export async function runSamsClubFlow(
   const isTestMode = mode === 'test-checkout'
   const itemId = extractSamsItemId(productUrl)
   let requiresManual = false
+  let orderSubmissionAttempted = false
 
   try {
     if (!itemId) throw new Error(`Cannot extract item ID from Sam's Club URL: ${productUrl}`)
@@ -150,20 +152,37 @@ export async function runSamsClubFlow(
     }
 
     onStep('Placing order')
+    await onBeforeSubmit()
+    orderSubmissionAttempted = true
+    onMilestone('order_submitted', "Sam's Club Place order action initiated")
     await placeOrder.click({ timeout: 10000 })
     await waitForOrderConfirmation(page)
     onMilestone('confirmed', "Sam's Club order confirmation detected")
     await trace.stop()
     return { success: true, tracePath: trace.tracePath }
   } catch (error) {
-    const diagnosticsPath = await diagnostics.capture(error)
-    await trace.capture(page)
-    await trace.stop()
-    requiresManual = isTestMode
+    const submissionUncertain = orderSubmissionAttempted && !isTestMode
+    const diagnosticsPath = await diagnostics.capture(error).catch(() => null)
+    await Promise.resolve()
+      .then(() => trace.capture(page))
+      .catch(() => {})
+    await Promise.resolve()
+      .then(() => trace.stop())
+      .catch(() => {})
+    requiresManual = isTestMode || submissionUncertain
+    if (submissionUncertain) {
+      onStep("Sam's Club order status is uncertain; leaving checkout open for manual verification")
+    }
+    const submissionMessage =
+      "Sam's Club order submission status is uncertain. Do not retry; verify the order history and cart manually."
     return {
       success: false,
-      error: error.message,
-      requiresManualCheckout: isTestMode,
+      error: submissionUncertain ? submissionMessage : error.message,
+      cause: submissionUncertain ? error.message : undefined,
+      terminal: submissionUncertain,
+      orderSubmissionAttempted,
+      submissionUncertain,
+      requiresManualCheckout: isTestMode || submissionUncertain,
       tracePath: trace.tracePath,
       screenshotPath: trace.screenshotPath,
       diagnosticsPath

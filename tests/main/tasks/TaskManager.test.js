@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { existsSync, rmSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
 
 vi.mock('../../../src/main/automation/flows/walmart.js', () => ({
   runWalmartFlow: vi.fn(async () => ({
@@ -24,9 +27,14 @@ vi.mock('../../../src/main/automation/flows/costco.js', () => ({
   runCostcoFlow: vi.fn()
 }))
 
-import { TaskManager, isRetryableCheckoutError } from '../../../src/main/tasks/TaskManager.js'
+import {
+  TaskManager,
+  isRetryableCheckoutError,
+  isRetryableCheckoutResult
+} from '../../../src/main/tasks/TaskManager.js'
 import { runWalmartFlow } from '../../../src/main/automation/flows/walmart.js'
 import { runTargetFlow } from '../../../src/main/automation/flows/target.js'
+import { JsonDb } from '../../../src/main/db.js'
 
 describe('Target checkout retry classification', () => {
   it('retries temporary Target states but not settled inventory failures', () => {
@@ -48,6 +56,24 @@ describe('Target checkout retry classification', () => {
       false
     )
   })
+
+  it('never retries an uncertain result after an order submission attempt', () => {
+    expect(
+      isRetryableCheckoutResult({
+        success: false,
+        error: 'Network timeout waiting for confirmation',
+        orderSubmissionAttempted: true,
+        submissionUncertain: true,
+        requiresManualCheckout: true
+      })
+    ).toBe(false)
+    expect(
+      isRetryableCheckoutResult({
+        success: false,
+        error: 'Network timeout before checkout'
+      })
+    ).toBe(true)
+  })
 })
 
 function makeTaskManager(settings = {}, accountOverrides = {}) {
@@ -62,7 +88,8 @@ function makeTaskManager(settings = {}, accountOverrides = {}) {
     ...accountOverrides
   }
   const accountManager = {
-    getDecrypted: vi.fn((id) => (id === account.id ? account : null))
+    getDecrypted: vi.fn((id) => (id === account.id ? account : null)),
+    setStatus: vi.fn()
   }
   const browserContext = { id: 'context-1' }
   const browserPool = {
@@ -94,6 +121,297 @@ function makeTaskManager(settings = {}, accountOverrides = {}) {
 describe('TaskManager test checkout', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it('does not retry or close the browser after an uncertain order submission', async () => {
+    const { manager, browserPool, accountManager } = makeTaskManager()
+    runWalmartFlow.mockResolvedValueOnce({
+      success: false,
+      error: 'Walmart order submission status is uncertain. Do not retry.',
+      cause: 'Network timeout waiting for confirmation',
+      terminal: true,
+      orderSubmissionAttempted: true,
+      submissionUncertain: true,
+      requiresManualCheckout: true
+    })
+
+    const result = await manager._runFlowForAccount(
+      runWalmartFlow,
+      {
+        id: 'walmart-task',
+        retailer: 'walmart',
+        product_name: 'Pokemon Cards',
+        product_url: 'https://www.walmart.com/ip/example/123456',
+        buy_limit: 1,
+        orders_per_drop: 1,
+        mode: 'monitor-and-buy'
+      },
+      {
+        retailer: 'walmart',
+        productName: 'Pokemon Cards',
+        productUrl: 'https://www.walmart.com/ip/example/123456',
+        dropType: 'in_stock'
+      },
+      'account-1'
+    )
+
+    expect(runWalmartFlow).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({
+      success: false,
+      submissionUncertain: true,
+      requiresManualCheckout: true
+    })
+    expect(browserPool.launch).toHaveBeenCalledTimes(1)
+    expect(browserPool.close).not.toHaveBeenCalled()
+    expect(accountManager.setStatus).toHaveBeenCalledWith('account-1', 'manual_review')
+  })
+
+  it('blocks an account until the user clears a prior uncertain-order hold', async () => {
+    const { manager, browserPool } = makeTaskManager({}, { status: 'manual_review' })
+
+    const result = await manager._runOrdersForAccount(
+      runTargetFlow,
+      {
+        id: 'task-held',
+        retailer: 'target',
+        product_url: 'https://www.target.com/p/example/A-123',
+        mode: 'auto-checkout'
+      },
+      {
+        retailer: 'target',
+        productName: 'Pokemon Cards',
+        productUrl: 'https://www.target.com/p/example/A-123',
+        dropType: 'in_stock'
+      },
+      'account-1'
+    )
+
+    expect(result).toMatchObject({
+      success: false,
+      manualReviewRequired: true,
+      requiresManualCheckout: true
+    })
+    expect(browserPool.launch).not.toHaveBeenCalled()
+  })
+
+  it('flushes an uncertain-order account hold before returning', () => {
+    const dbPath = join(tmpdir(), `pokebot-account-hold-${Date.now()}-${Math.random()}.json`)
+    const db = new JsonDb(dbPath)
+    db.prepare('INSERT INTO accounts (id, name, retailer, status) VALUES (?, ?, ?, ?)').run(
+      'account-hold',
+      'Held Account',
+      'target',
+      'verified'
+    )
+    const manager = new TaskManager({
+      accountManager: {
+        setStatus: (id, status) =>
+          db.prepare('UPDATE accounts SET status = ? WHERE id = ?').run(status, id)
+      },
+      notificationEngine: {},
+      browserPool: {},
+      getDb: () => db
+    })
+
+    manager._holdAccountForManualReview(
+      { id: 'account-hold', retailer: 'target' },
+      'confirmation timed out'
+    )
+    const reloaded = new JsonDb(dbPath)
+
+    expect(reloaded.prepare('SELECT * FROM accounts WHERE id = ?').get('account-hold').status).toBe(
+      'manual_review'
+    )
+    db.close()
+    reloaded.close()
+    for (const path of [dbPath, `${dbPath}.bak`, `${dbPath}.tmp`]) {
+      if (existsSync(path)) rmSync(path)
+    }
+  })
+
+  it('recovers a durable account hold after a crash at the submission boundary', () => {
+    const dbPath = join(tmpdir(), `pokebot-account-recovery-${Date.now()}-${Math.random()}.json`)
+    const db = new JsonDb(dbPath)
+    db.prepare('INSERT INTO accounts (id, name, retailer, status) VALUES (?, ?, ?, ?)').run(
+      'account-recovery',
+      'Recovery Account',
+      'target',
+      'verified'
+    )
+    db.prepare(
+      `INSERT INTO drop_event_receipts
+       (id, task_id, status, claimed_at, completed_at, account_id, order_sequence)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      'receipt-recovery',
+      'task-recovery',
+      'submission_started',
+      1000,
+      1100,
+      'account-recovery',
+      1
+    )
+    const accountManager = {
+      setStatus: (id, status) =>
+        db.prepare('UPDATE accounts SET status = ? WHERE id = ?').run(status, id)
+    }
+
+    new TaskManager({
+      accountManager,
+      notificationEngine: {},
+      browserPool: {},
+      getDb: () => db
+    })
+    const reloaded = new JsonDb(dbPath)
+
+    expect(
+      reloaded.prepare('SELECT * FROM accounts WHERE id = ?').get('account-recovery').status
+    ).toBe('manual_review')
+    db.close()
+    reloaded.close()
+    for (const path of [dbPath, `${dbPath}.bak`, `${dbPath}.tmp`]) {
+      if (existsSync(path)) rmSync(path)
+    }
+  })
+
+  it('keeps the Walmart checkout context open when a queue deadline follows submission', async () => {
+    const notify = { fire: vi.fn() }
+    const browserPool = { launch: vi.fn(), close: vi.fn() }
+    const queueJoiner = { on: vi.fn(), stop: vi.fn(async () => {}) }
+    const telemetry = {
+      beginAttempt: vi.fn(() => 'attempt-1'),
+      record: vi.fn(),
+      completeAttempt: vi.fn()
+    }
+    const dropEventLedger = {
+      claim: vi.fn(() => ({ claimed: true, receiptId: 'queue-receipt' })),
+      markSubmissionStarted: vi.fn(),
+      complete: vi.fn()
+    }
+    const db = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => null),
+        run: vi.fn()
+      }))
+    }
+    const account = {
+      id: 'account-1',
+      name: 'Walmart Account',
+      cvv: '123'
+    }
+    const manager = new TaskManager({
+      accountManager: { getDecrypted: vi.fn(() => account) },
+      notificationEngine: notify,
+      browserPool,
+      queueJoiner,
+      checkoutTelemetry: telemetry,
+      dropEventLedger,
+      getDb: () => db,
+      getSettings: () => ({}),
+      queueCheckoutTimeoutMs: 5
+    })
+    manager._tasks.set('queue-task', {
+      id: 'queue-task',
+      retailer: 'walmart',
+      product_url: 'https://www.walmart.com/ip/example/123456',
+      product_name: 'Pokemon Cards',
+      account_ids: JSON.stringify(['account-1']),
+      mode: 'monitor-and-buy',
+      buy_limit: 1
+    })
+    runWalmartFlow.mockImplementationOnce(async (_context, options) => {
+      await options.onBeforeSubmit()
+      return new Promise(() => {})
+    })
+
+    await manager._onQueueTurn({
+      id: 'queue-task',
+      label: 'Pokemon Cards',
+      status: { itemName: 'Pokemon Cards', queueCycleId: 'walmart-queue:ticket-123' },
+      context: {}
+    })
+
+    expect(dropEventLedger.claim).toHaveBeenCalledWith({
+      taskId: 'queue-task',
+      dropCycleId: 'walmart-queue:ticket-123',
+      retailer: 'walmart'
+    })
+    expect(browserPool.close).not.toHaveBeenCalled()
+    expect(dropEventLedger.markSubmissionStarted).toHaveBeenCalledWith('queue-receipt', {
+      accountId: 'account-1',
+      orderSequence: 1
+    })
+    expect(telemetry.completeAttempt).toHaveBeenCalledWith(
+      'attempt-1',
+      expect.objectContaining({
+        terminal: true,
+        submissionUncertain: true,
+        requiresManualCheckout: true
+      })
+    )
+    expect(notify.fire).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        productName: expect.stringContaining('ORDER STATUS UNCERTAIN - MANUAL REVIEW')
+      })
+    )
+  })
+
+  it('prevents a detached Walmart queue flow from submitting after its deadline', async () => {
+    const notify = { fire: vi.fn() }
+    const queueJoiner = { on: vi.fn(), stop: vi.fn(async () => {}) }
+    const dropEventLedger = {
+      claim: vi.fn(() => ({ claimed: true, receiptId: 'queue-receipt' })),
+      markSubmissionStarted: vi.fn(),
+      complete: vi.fn()
+    }
+    const manager = new TaskManager({
+      accountManager: {
+        getDecrypted: vi.fn(() => ({
+          id: 'account-1',
+          name: 'Walmart Account',
+          status: 'verified'
+        }))
+      },
+      notificationEngine: notify,
+      browserPool: { close: vi.fn() },
+      queueJoiner,
+      dropEventLedger,
+      getDb: () => ({
+        prepare: vi.fn(() => ({
+          get: vi.fn(() => null),
+          all: vi.fn(() => []),
+          run: vi.fn()
+        }))
+      }),
+      queueCheckoutTimeoutMs: 5
+    })
+    manager._tasks.set('queue-task', {
+      id: 'queue-task',
+      retailer: 'walmart',
+      product_url: 'https://www.walmart.com/ip/example/123456',
+      product_name: 'Pokemon Cards',
+      account_ids: JSON.stringify(['account-1']),
+      mode: 'monitor-and-buy'
+    })
+    runWalmartFlow.mockImplementationOnce(async (_context, options) => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      await options.onBeforeSubmit()
+      return { success: true }
+    })
+
+    await manager._onQueueTurn({
+      id: 'queue-task',
+      status: { queueCycleId: 'walmart-queue:late-ticket' },
+      context: {}
+    })
+    await new Promise((resolve) => setTimeout(resolve, 30))
+
+    expect(dropEventLedger.markSubmissionStarted).not.toHaveBeenCalled()
+    expect(dropEventLedger.complete).toHaveBeenCalledWith(
+      'queue-receipt',
+      expect.objectContaining({ status: 'failed' })
+    )
+    expect(queueJoiner.stop).toHaveBeenCalledWith('queue-task')
   })
 
   it('does not run two products through the same account context concurrently', async () => {

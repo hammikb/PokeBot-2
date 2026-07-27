@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { launch } from 'cloakbrowser'
+import { launchPersistentContext } from 'cloakbrowser'
 import { lookupProductFromPage } from '../../../src/main/products/ProductPageLookup.js'
 
 vi.mock('cloakbrowser', () => ({
-  launch: vi.fn()
+  launchPersistentContext: vi.fn()
 }))
 
 function mockBrowserSnapshot(snapshot) {
@@ -12,13 +12,13 @@ function mockBrowserSnapshot(snapshot) {
     waitForLoadState: vi.fn(async () => {}),
     evaluate: vi.fn(async () => snapshot)
   }
-  const browser = {
+  const context = {
     newPage: vi.fn(async () => page),
     close: vi.fn(async () => {})
   }
-  launch.mockResolvedValue(browser)
+  launchPersistentContext.mockResolvedValue(context)
 
-  return { page, browser }
+  return { page, context }
 }
 
 describe('lookupProductFromPage', () => {
@@ -27,7 +27,7 @@ describe('lookupProductFromPage', () => {
   })
 
   it('extracts public product details from rendered page metadata', async () => {
-    const { browser } = mockBrowserSnapshot({
+    const { context } = mockBrowserSnapshot({
       url: 'https://www.target.com/p/example/-/A-123',
       title: 'Pokemon Example Box : Target',
       bodyText: 'Add to cart',
@@ -48,7 +48,9 @@ describe('lookupProductFromPage', () => {
       prices: ['$29.99']
     })
 
-    const product = await lookupProductFromPage('https://www.target.com/p/guppy/A-123')
+    const product = await lookupProductFromPage('https://www.target.com/p/guppy/A-123', {
+      proxy: 'proxy.example:80:user:password'
+    })
 
     expect(product).toMatchObject({
       retailer: 'target',
@@ -61,7 +63,7 @@ describe('lookupProductFromPage', () => {
       brand: 'Pokemon',
       source: 'page'
     })
-    expect(browser.close).toHaveBeenCalled()
+    expect(context.close).toHaveBeenCalled()
   })
 
   it('throws a retailer block error when the rendered page is a captcha', async () => {
@@ -75,9 +77,18 @@ describe('lookupProductFromPage', () => {
     })
 
     await expect(
-      lookupProductFromPage('https://www.target.com/p/guppy/A-123')
+      lookupProductFromPage('https://www.target.com/p/guppy/A-123', {
+        proxy: 'proxy.example:80:user:password'
+      })
     ).rejects.toMatchObject({
       status: 403
     })
+  })
+
+  it('refuses to expose the home IP when a retailer lookup has no proxy', async () => {
+    await expect(lookupProductFromPage('https://www.target.com/p/guppy/A-123')).rejects.toThrow(
+      'direct home-IP lookup is disabled'
+    )
+    expect(launchPersistentContext).not.toHaveBeenCalled()
   })
 })

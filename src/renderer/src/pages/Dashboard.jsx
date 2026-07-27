@@ -17,6 +17,12 @@ const STATUS_COLOR = {
   running: 'text-yellow-400',
   error: 'text-red-400'
 }
+const MONITOR_STATUS_STYLE = {
+  ready: 'border-emerald-900/70 text-emerald-400 bg-emerald-950/20',
+  degraded: 'border-amber-900/70 text-amber-400 bg-amber-950/20',
+  stale: 'border-red-900/70 text-red-400 bg-red-950/20',
+  unavailable: 'border-gray-800 text-gray-500 bg-gray-950/20'
+}
 
 export default function Dashboard() {
   const {
@@ -29,7 +35,11 @@ export default function Dashboard() {
     startTask,
     stopTask,
     queueJobs,
-    joinQueue
+    joinQueue,
+    monitorHealth,
+    monitorHealthLoading,
+    monitorHealthError,
+    loadMonitorHealth
   } = useAppStore()
   const [now, setNow] = useState(() => Date.now())
   const [queueToggleBusy, setQueueToggleBusy] = useState(false)
@@ -37,9 +47,15 @@ export default function Dashboard() {
   const [queueToggleNotice, setQueueToggleNotice] = useState('')
 
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 60000)
+    const timer = setInterval(() => setNow(Date.now()), 30000)
     return () => clearInterval(timer)
   }, [])
+
+  useEffect(() => {
+    loadMonitorHealth()
+    const timer = setInterval(loadMonitorHealth, 30000)
+    return () => clearInterval(timer)
+  }, [loadMonitorHealth])
 
   const last24h = feedEvents.filter((e) => now - e.timestamp < 86400000)
   const wins = last24h.filter((e) => e.productName?.includes('ORDER CONFIRMED'))
@@ -68,6 +84,50 @@ export default function Dashboard() {
 
   return (
     <div className="flex flex-col h-full p-3 gap-3 overflow-hidden">
+      <section
+        className={`border rounded px-4 py-3 shrink-0 ${MONITOR_STATUS_STYLE[monitorHealth?.status] || MONITOR_STATUS_STYLE.unavailable}`}
+        aria-live="polite"
+      >
+        <div className="flex items-center gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-gray-200 font-semibold">Central monitor health</span>
+              <span className="text-xs uppercase tracking-wider">
+                {monitorHealthLoading && !monitorHealth
+                  ? 'checking'
+                  : monitorHealth?.status || 'unavailable'}
+              </span>
+            </div>
+            <div className="mt-1 truncate text-xs text-gray-400">
+              {monitorHealthError ||
+                monitorHealth?.message ||
+                (monitorHealthLoading
+                  ? 'Checking the Pi and Electron channels...'
+                  : 'No monitor health data yet.')}
+            </div>
+          </div>
+          {monitorHealth?.worker && (
+            <div className="flex shrink-0 flex-wrap justify-end gap-x-5 gap-y-1 text-xs">
+              <HealthMetric
+                label="heartbeat"
+                value={formatHeartbeatAge(monitorHealth.worker.capturedAt, now)}
+              />
+              <HealthMetric
+                label="products"
+                value={formatCount(monitorHealth.worker.totalProducts)}
+              />
+              <HealthMetric label="checks" value={formatCount(monitorHealth.worker.checks)} />
+              <HealthMetric label="data" value={formatBytes(monitorHealth.worker.bytesUsed)} />
+              <HealthMetric label="blocked" value={formatRate(monitorHealth.worker.blockedRate)} />
+              <HealthMetric
+                label="channels"
+                value={`${monitorHealth.realtime.channels.subscribed}/${monitorHealth.realtime.channels.total}`}
+              />
+            </div>
+          )}
+        </div>
+      </section>
+
       <div className="bg-[#111] border border-gray-800 rounded p-4 flex items-center gap-4">
         <div className="flex-1 min-w-0">
           <div className="text-sm text-gray-200 font-semibold">Auto-join Pokémon Center queue</div>
@@ -253,4 +313,38 @@ export default function Dashboard() {
       </div>
     </div>
   )
+}
+
+// eslint-disable-next-line react/prop-types
+function HealthMetric({ label, value }) {
+  return (
+    <span className="text-gray-500">
+      {label}: <span className="text-gray-200">{value}</span>
+    </span>
+  )
+}
+
+function formatHeartbeatAge(capturedAt, now) {
+  const ageMs = Math.max(0, now - Date.parse(capturedAt))
+  if (!Number.isFinite(ageMs)) return 'unknown'
+  if (ageMs < 60_000) return `${Math.max(1, Math.round(ageMs / 1000))}s ago`
+  return `${Math.round(ageMs / 60_000)}m ago`
+}
+
+function formatCount(value) {
+  return Number.isFinite(value) ? value.toLocaleString() : 'n/a'
+}
+
+function formatBytes(value) {
+  if (!Number.isFinite(value)) return 'n/a'
+  if (value < 1024) return `${value} B`
+  if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KB`
+  if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MB`
+  return `${(value / 1024 ** 3).toFixed(2)} GB`
+}
+
+function formatRate(value) {
+  if (!Number.isFinite(value)) return 'n/a'
+  const percent = value <= 1 ? value * 100 : value
+  return `${percent.toFixed(1)}%`
 }

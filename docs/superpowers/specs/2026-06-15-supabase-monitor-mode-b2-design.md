@@ -59,7 +59,7 @@ The serverside worker **drops the per-product `maxPrice` gate** and publishes **
 
 ## Prerequisites already completed (2026-06-14, via MCP)
 
-- Bot Supabase Auth user created + verified: `kaib1121@gmail.com` / `1234` (email-confirmed, password hash verified). **Weak password — rotate before real use.**
+- Bot Supabase Auth user created + verified: `redacted@example.invalid` / `<REDACTED_PASSWORD>` (email-confirmed, password hash verified). **Weak password — rotate before real use.**
 - A `subscriptions` row linking the bot user to the seed product (`51c9450b-…`, target `94336414`) — proves the read/authorize path end to end (verified: an authenticated read of `drops` under RLS returned the row).
 - **Cleanup owed:** an earlier `alter publication supabase_realtime add table public.drops` (postgres_changes) was added on a wrong assumption. The real path is Broadcast; this is harmless but unused. **Revert during implementation** (`alter publication supabase_realtime drop table public.drops;`) to keep PokeAlert matching repo A's migrations.
 

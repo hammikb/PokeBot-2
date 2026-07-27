@@ -416,14 +416,14 @@ describe('SupabaseClient', () => {
     })
     const sc = new SupabaseClient({ url: 'https://x.supabase.co', key: 'sb_publishable_abc' })
 
-    await sc.signIn('bot@example.com', '1234')
+    await sc.signIn('redacted@example.invalid', '<REDACTED_PASSWORD>')
 
     expect(createClient).toHaveBeenCalledWith(
       'https://x.supabase.co',
       'sb_publishable_abc',
       expect.objectContaining({ auth: expect.objectContaining({ persistSession: false }) })
     )
-    expect(signInWithPassword).toHaveBeenCalledWith({ email: 'bot@example.com', password: '1234' })
+    expect(signInWithPassword).toHaveBeenCalledWith({ email: 'redacted@example.invalid', password: '<REDACTED_PASSWORD>' })
     expect(setAuth).toHaveBeenCalledWith('jwt-123')
   })
 
@@ -974,8 +974,8 @@ function setup() {
     getSettings: () => ({
       supabaseUrl: 'https://x.supabase.co',
       supabaseKey: 'k',
-      supabaseEmail: 'bot@example.com',
-      supabasePasswordEnc: encrypt('1234', key)
+      supabaseEmail: 'redacted@example.invalid',
+      supabasePasswordEnc: encrypt('<REDACTED_PASSWORD>', key)
     }),
     mainWindow: { webContents: { send: vi.fn() } },
     browserPool: {},
@@ -1153,7 +1153,7 @@ const FIELDS = [
     key: 'discordWebhook',
     label: 'Discord Webhook URL',
     type: 'text',
-    placeholder: 'https://discord.com/api/webhooks/...'
+    placeholder: 'https://discord.com/api/webhooks/REDACTED'
   },
   { key: 'twilioSid', label: 'Twilio Account SID', type: 'text', placeholder: 'ACxxxxxxxx' },
   { key: 'twilioToken', label: 'Twilio Auth Token', type: 'password', placeholder: '••••••••' },
@@ -1175,7 +1175,7 @@ const SUPABASE_FIELDS = [
     type: 'text',
     placeholder: 'sb_publishable_...'
   },
-  { key: 'supabaseEmail', label: 'Bot Email', type: 'text', placeholder: 'bot@example.com' }
+  { key: 'supabaseEmail', label: 'Bot Email', type: 'text', placeholder: 'redacted@example.invalid' }
 ]
 
 export default function Settings() {
@@ -1402,7 +1402,7 @@ Expected: no new errors in the changed files.
 
 - [ ] **Step 3: Live end-to-end (manual, with the running app + bot user)**
 
-1. In PokeBot Settings, switch Monitoring Source to **Supabase** (fields prefilled: URL + publishable key + `kaib1121@gmail.com`; enter password `1234`).
+1. In PokeBot Settings, switch Monitoring Source to **Supabase** (fields prefilled: URL + publishable key + `redacted@example.invalid`; enter password `<REDACTED_PASSWORD>`).
 2. In Catalog, add the Target seed URL `https://www.target.com/p/A-94336414`, then click **publish to PokeAlert**. Expect a success status (it upserts the existing seed `products` row).
 3. Create a task for that catalog item and Start it (Supabase mode → subscribes, no local browser opens).
 4. Simulate a drop via Supabase MCP `execute_sql` (project `jbnnouwhesexfllninwb`):

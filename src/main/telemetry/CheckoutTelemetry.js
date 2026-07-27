@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'crypto'
+import { basename } from 'path'
 import { extractProductKey } from '../products/productKey.js'
 import { createModuleLogger } from '../utils/logger.js'
 
@@ -21,6 +22,21 @@ const CART_FALLBACK_REASONS = new Set([
   'purchase_limit_cart_present',
   'purchase_limit_item_missing'
 ])
+const ANALYTICS_EXPERIMENT_KEYS = [
+  'cart_strategy',
+  'cart_strategy_actual',
+  'lite_mode',
+  'commit_navigation',
+  'monitor_source',
+  'app_version'
+]
+const LOCAL_ARTIFACT_KEY = '_local_artifacts'
+const MAX_BUFFERED_EVENTS = 2000
+const ARTIFACT_FIELDS = [
+  ['trace', 'tracePath'],
+  ['screenshot', 'screenshotPath'],
+  ['diagnostics', 'diagnosticsPath']
+]
 
 export const CHECKOUT_STAGES = [
   'drop_detected',
@@ -51,10 +67,21 @@ export class CheckoutTelemetry {
     this._getSettings = getSettings
     this._appVersion = appVersion
     this._active = new Map()
+    this._eventBuffer = []
+    this._didWarnAboutDroppedEvents = false
     this._recoverTerminalAttempts()
   }
 
-  beginAttempt({ task, dropEvent, accountId }) {
+  beginAttempt(input) {
+    try {
+      return this._beginAttempt(input)
+    } catch (error) {
+      log.warn('Could not begin checkout telemetry', { error: error.message })
+      return null
+    }
+  }
+
+  _beginAttempt({ task, dropEvent, accountId }) {
     const db = this._getDb()
     const id = randomUUID()
     const startedAt = Date.now()
@@ -62,6 +89,10 @@ export class CheckoutTelemetry {
     const userId = this._auth?.getStatus?.().user?.id || null
     const settings = this._getSettings()
     const experiment = buildExperimentProfile({ task, settings, appVersion: this._appVersion })
+    const observedAt = Date.parse(dropEvent?.observedAt)
+    if (Number.isFinite(observedAt)) {
+      experiment.monitor_latency_ms = Math.max(0, startedAt - observedAt)
+    }
     const productKey = safeProductKey(dropEvent?.retailer, dropEvent?.productUrl)
     const accountRef = hashRef(`${deviceId}:${accountId || 'unknown'}`)
 
@@ -92,8 +123,17 @@ export class CheckoutTelemetry {
   }
 
   record(attemptId, stageOrMessage, detail = null) {
+    try {
+      return this._record(attemptId, stageOrMessage, detail)
+    } catch (error) {
+      log.warn('Could not record checkout telemetry', { error: error.message })
+      return false
+    }
+  }
+
+  _record(attemptId, stageOrMessage, detail = null) {
     const active = this._active.get(attemptId)
-    if (!active) return
+    if (!active) return false
     const stage = CHECKOUT_STAGES.includes(stageOrMessage)
       ? stageOrMessage
       : classifyCheckoutStage(stageOrMessage)
@@ -106,28 +146,37 @@ export class CheckoutTelemetry {
       active.lastStage = stage
     }
 
-    this._getDb()
-      .prepare(
-        `
-      INSERT INTO checkout_attempt_events
-        (id, attempt_id, sequence, stage, detail, elapsed_ms, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `
-      )
-      .run(
-        randomUUID(),
-        attemptId,
-        sequence,
-        stage,
-        sanitizeDetail(message),
-        Math.max(0, now - active.startedAt),
-        now
-      )
+    if (this._eventBuffer.length >= MAX_BUFFERED_EVENTS && !this._flushEventBuffer()) {
+      this._eventBuffer.shift()
+      if (!this._didWarnAboutDroppedEvents) {
+        this._didWarnAboutDroppedEvents = true
+        log.warn('Checkout telemetry event buffer reached its safety limit')
+      }
+    }
+    this._eventBuffer.push({
+      id: randomUUID(),
+      attemptId,
+      sequence,
+      stage,
+      detail: sanitizeDetail(message),
+      elapsedMs: Math.max(0, now - active.startedAt),
+      createdAt: now
+    })
+    return true
   }
 
   completeAttempt(attemptId, result = {}) {
+    try {
+      return this._completeAttempt(attemptId, result)
+    } catch (error) {
+      log.warn('Could not complete checkout telemetry', { error: error.message })
+      return false
+    }
+  }
+
+  _completeAttempt(attemptId, result = {}) {
     const active = this._active.get(attemptId)
-    if (!active) return
+    if (!active) return false
     const db = this._getDb()
     const completedAt = Date.now()
     const outcome = result.testMode
@@ -150,9 +199,13 @@ export class CheckoutTelemetry {
     const existingAttempt = db
       .prepare('SELECT experiment_json FROM checkout_attempts WHERE id = ?')
       .get(attemptId)
-    const experiment = applyActualCartExecution(parseJson(existingAttempt?.experiment_json), result)
+    const experiment = applyLocalArtifacts(
+      applyActualCartExecution(parseJson(existingAttempt?.experiment_json), result),
+      result
+    )
 
     this.record(attemptId, finalStage, result.error || result.message || outcome)
+    this._flushEventBuffer(attemptId)
     db.prepare(
       `
       UPDATE checkout_attempts
@@ -177,6 +230,15 @@ export class CheckoutTelemetry {
     this.uploadAttempt(attemptId).catch((error) => {
       log.warn('Checkout telemetry upload deferred', { attemptId, error: error.message })
     })
+    return true
+  }
+
+  getAnalytics(filters = {}) {
+    this._flushEventBuffer()
+    const db = this._getDb()
+    const attempts = db.prepare('SELECT * FROM checkout_attempts').all()
+    const events = db.prepare('SELECT * FROM checkout_attempt_events').all()
+    return buildCheckoutAnalyticsReport(attempts, events, filters)
   }
 
   async flushPending({ limit = 25 } = {}) {
@@ -206,6 +268,7 @@ export class CheckoutTelemetry {
     const userId = this._auth.getStatus().user?.id
     if (!client || !userId) return false
 
+    if (!this._flushEventBuffer(attemptId)) return false
     const db = this._getDb()
     const attempt = db.prepare('SELECT * FROM checkout_attempts WHERE id = ?').get(attemptId)
     if (!attempt?.completed_at) return false
@@ -222,7 +285,7 @@ export class CheckoutTelemetry {
       product_key: attempt.product_key,
       product_name: attempt.product_name,
       mode: attempt.mode,
-      experiment: parseJson(attempt.experiment_json),
+      experiment: toRemoteExperiment(parseJson(attempt.experiment_json)),
       account_ref: attempt.account_ref,
       started_at: new Date(attempt.started_at).toISOString(),
       completed_at: new Date(attempt.completed_at).toISOString(),
@@ -275,10 +338,22 @@ export class CheckoutTelemetry {
         const events = db
           .prepare('SELECT * FROM checkout_attempt_events WHERE attempt_id = ? ORDER BY sequence')
           .all(attempt.id)
-        const terminal = [...events]
+        let terminal = [...events]
           .reverse()
           .find((event) => ['confirmed', 'manual_required', 'failed'].includes(event.stage))
-        if (!terminal) continue
+        if (!terminal) {
+          const lastEvent = events.at(-1)
+          const submitted =
+            lastEvent?.stage === 'order_submitted' || attempt.final_stage === 'order_submitted'
+          terminal = {
+            stage: submitted ? 'manual_required' : 'failed',
+            detail: submitted
+              ? 'App closed after order submission; verify retailer order history before retrying'
+              : 'App closed before checkout completed',
+            created_at: lastEvent?.created_at || Date.now(),
+            recoveryCode: submitted ? 'submission_uncertain' : 'app_interrupted'
+          }
+        }
 
         const priorStage = [...events]
           .reverse()
@@ -286,7 +361,12 @@ export class CheckoutTelemetry {
         const outcome = terminal.stage === 'confirmed' ? 'confirmed' : terminal.stage
         const failure =
           outcome === 'failed' || outcome === 'manual_required'
-            ? classifyCheckoutFailure(terminal.detail, priorStage || terminal.stage)
+            ? terminal.recoveryCode
+              ? {
+                  code: terminal.recoveryCode,
+                  stage: priorStage || attempt.final_stage || terminal.stage
+                }
+              : classifyCheckoutFailure(terminal.detail, priorStage || terminal.stage)
             : { code: null, stage: null }
         const completedAt = Number(terminal.created_at) || Number(attempt.started_at) || Date.now()
         const startedAt = Number(attempt.started_at) || completedAt
@@ -338,6 +418,50 @@ export class CheckoutTelemetry {
   _isUploadEnabled() {
     return this._getSettings().checkoutTelemetryEnabled !== false
   }
+
+  flushLocal() {
+    return this._flushEventBuffer()
+  }
+
+  _flushEventBuffer(attemptId = null) {
+    if (!this._eventBuffer.length) return true
+    const selected = attemptId
+      ? this._eventBuffer.filter((event) => event.attemptId === attemptId)
+      : this._eventBuffer.slice()
+    if (!selected.length) return true
+    const selectedIds = new Set(selected.map((event) => event.id))
+    this._eventBuffer = this._eventBuffer.filter((event) => !selectedIds.has(event.id))
+
+    try {
+      const db = this._getDb()
+      const insert = db.prepare(
+        `INSERT INTO checkout_attempt_events
+          (id, attempt_id, sequence, stage, detail, elapsed_ms, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      const writeRows = () => {
+        for (const event of selected) {
+          insert.run(
+            event.id,
+            event.attemptId,
+            event.sequence,
+            event.stage,
+            event.detail,
+            event.elapsedMs,
+            event.createdAt
+          )
+        }
+      }
+      if (typeof db.transaction === 'function') db.transaction(writeRows)()
+      else writeRows()
+      this._didWarnAboutDroppedEvents = false
+      return true
+    } catch (error) {
+      this._eventBuffer = [...selected, ...this._eventBuffer].slice(-MAX_BUFFERED_EVENTS)
+      log.warn('Could not flush checkout telemetry events', { error: error.message })
+      return false
+    }
+  }
 }
 
 export function buildExperimentProfile({ task, settings = {}, appVersion = 'unknown' }) {
@@ -373,6 +497,67 @@ export function applyActualCartExecution(experiment = {}, result = {}) {
     next.cart_quantity_actual = actualQuantity
   }
   return next
+}
+
+export function buildCheckoutAnalyticsReport(attemptRows = [], eventRows = [], filters = {}) {
+  const limit = clampInteger(filters.limit, 1, 500, 100)
+  const days = filters.days == null ? null : clampInteger(filters.days, 1, 3650, 30)
+  const retailer = safeFilter(filters.retailer)
+  const outcome = safeFilter(filters.outcome)
+  const since = days == null ? null : Date.now() - days * 86_400_000
+
+  const filtered = attemptRows
+    .filter((attempt) => !retailer || attempt.retailer === retailer)
+    .filter((attempt) => !outcome || attempt.outcome === outcome)
+    .filter((attempt) => since == null || Number(attempt.started_at) >= since)
+    .sort((left, right) => Number(right.started_at || 0) - Number(left.started_at || 0))
+    .slice(0, limit)
+  const selectedIds = new Set(filtered.map((attempt) => attempt.id))
+  const eventsByAttempt = new Map()
+
+  for (const event of eventRows) {
+    if (!selectedIds.has(event.attempt_id)) continue
+    const list = eventsByAttempt.get(event.attempt_id) || []
+    list.push(event)
+    eventsByAttempt.set(event.attempt_id, list)
+  }
+
+  const attempts = filtered.map((attempt) =>
+    buildAnalyticsAttempt(attempt, eventsByAttempt.get(attempt.id) || [])
+  )
+  const completed = attempts.filter((attempt) => attempt.outcome !== 'running')
+  const confirmed = completed.filter((attempt) => attempt.outcome === 'confirmed')
+  const durations = completed.map((attempt) => attempt.durationMs).filter(Number.isFinite)
+
+  return {
+    generatedAt: Date.now(),
+    filters: {
+      limit,
+      days,
+      retailer: retailer || 'all',
+      outcome: outcome || 'all'
+    },
+    summary: {
+      total: attempts.length,
+      completed: completed.length,
+      running: attempts.length - completed.length,
+      confirmed: confirmed.length,
+      successRate: percentage(confirmed.length, completed.length),
+      averageDurationMs: average(durations),
+      averageMonitorLatencyMs: average(
+        attempts.map((attempt) => attempt.monitorLatencyMs).filter(Number.isFinite)
+      ),
+      outcomes: buildCountBreakdown(attempts, (attempt) => attempt.outcome),
+      failures: buildCountBreakdown(
+        attempts.filter((attempt) => ['failed', 'manual_required'].includes(attempt.outcome)),
+        (attempt) => attempt.failureCode || 'unknown'
+      ),
+      retailers: buildCountBreakdown(attempts, (attempt) => attempt.retailer)
+    },
+    stages: buildStageTimings(attempts),
+    experiments: buildExperimentBreakdown(attempts),
+    attempts
+  }
 }
 
 export function classifyCheckoutStage(message = '') {
@@ -417,6 +602,12 @@ export function sanitizeDetail(value, maxLength = 180) {
       .replace(/https?:\/\/\S+/gi, '[url]')
       .replace(/[A-Z]:\\[^\s]+/gi, '[path]')
       .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, '[email]')
+      .replace(
+        /\b(?:card\s+)?(?:ending\s+(?:in\s+)?|last\s*4(?:\s+digits)?\s*[:=]?\s*)\d{4}\b/gi,
+        'card ending [redacted]'
+      )
+      .replace(/\b(cvv|cvc|security\s+code)\s*[:=]?\s*\d{3,4}\b/gi, '$1 [redacted]')
+      .replace(/\b(?:\d[ -]?){12,19}\b/g, '[card] ')
       .replace(/\b\d{8,}\b/g, '[number]')
       .replace(/\s+/g, ' ')
       .trim()
@@ -447,4 +638,229 @@ function parseJson(value) {
   } catch {
     return {}
   }
+}
+
+function applyLocalArtifacts(experiment, result) {
+  const artifacts = ARTIFACT_FIELDS.flatMap(([type, field]) => {
+    const path = normalizeArtifactPath(result?.[field])
+    return path ? [{ type, path }] : []
+  })
+  if (!artifacts.length) return experiment
+  return { ...experiment, [LOCAL_ARTIFACT_KEY]: artifacts }
+}
+
+function normalizeArtifactPath(value) {
+  if (!value) return null
+  const name = basename(String(value))
+    .replace(/[^a-z0-9_.-]+/gi, '_')
+    .slice(0, 180)
+  return name ? `debug-traces/${name}` : null
+}
+
+function toRemoteExperiment(experiment) {
+  const remote = { ...experiment }
+  delete remote[LOCAL_ARTIFACT_KEY]
+  return remote
+}
+
+function buildAnalyticsAttempt(row, rawEvents) {
+  const experimentJson = parseJson(row.experiment_json)
+  const events = rawEvents
+    .slice()
+    .sort(
+      (left, right) =>
+        Number(left.sequence || 0) - Number(right.sequence || 0) ||
+        Number(left.created_at || 0) - Number(right.created_at || 0)
+    )
+    .map((event, index, sorted) => {
+      const elapsedMs = Math.max(0, Number(event.elapsed_ms) || 0)
+      const previousElapsed = index > 0 ? Math.max(0, Number(sorted[index - 1].elapsed_ms) || 0) : 0
+      return {
+        sequence: Number(event.sequence) || index + 1,
+        stage: CHECKOUT_STAGES.includes(event.stage) ? event.stage : 'failed',
+        detail: sanitizeDetail(event.detail),
+        elapsedMs,
+        deltaMs: Math.max(0, elapsedMs - previousElapsed),
+        createdAt: Number(event.created_at) || null
+      }
+    })
+  const firstStageEvents = firstEventsByStage(events)
+
+  return {
+    id: String(row.id || ''),
+    retailer: sanitizeKey(row.retailer, 'unknown'),
+    productName: sanitizeDetail(row.product_name, 140) || 'Unknown product',
+    mode: sanitizeKey(row.mode, 'unknown'),
+    startedAt: Number(row.started_at) || null,
+    completedAt: Number(row.completed_at) || null,
+    durationMs: nullableNumber(row.duration_ms),
+    outcome: sanitizeKey(row.outcome, 'running'),
+    finalStage: sanitizeKey(row.final_stage, 'drop_detected'),
+    failureStage: row.failure_stage ? sanitizeKey(row.failure_stage, 'failed') : null,
+    failureCode: row.failure_code ? sanitizeKey(row.failure_code, 'unknown') : null,
+    errorSummary: sanitizeDetail(row.error_summary),
+    eventCount: events.length,
+    monitorLatencyMs: nullableNumber(experimentJson.monitor_latency_ms),
+    experiment: sanitizeAnalyticsExperiment(experimentJson),
+    artifacts: sanitizeArtifacts(experimentJson[LOCAL_ARTIFACT_KEY]),
+    stageTimings: [...firstStageEvents.entries()].map(([stage, event]) => ({
+      stage,
+      reachedMs: event.elapsedMs,
+      durationMs: nextStageDuration(stage, event.elapsedMs, firstStageEvents)
+    })),
+    events
+  }
+}
+
+function firstEventsByStage(events) {
+  const byStage = new Map()
+  for (const event of events) {
+    if (!byStage.has(event.stage)) byStage.set(event.stage, event)
+  }
+  return byStage
+}
+
+function nextStageDuration(stage, elapsedMs, firstStageEvents) {
+  const stageIndex = CHECKOUT_STAGES.indexOf(stage)
+  let nextElapsed = null
+  for (let index = stageIndex + 1; index < CHECKOUT_STAGES.length; index += 1) {
+    const candidate = firstStageEvents.get(CHECKOUT_STAGES[index])
+    if (candidate && candidate.elapsedMs >= elapsedMs) {
+      nextElapsed = candidate.elapsedMs
+      break
+    }
+  }
+  return nextElapsed == null ? null : nextElapsed - elapsedMs
+}
+
+function buildStageTimings(attempts) {
+  return CHECKOUT_STAGES.map((stage) => {
+    const samples = attempts
+      .flatMap((attempt) => attempt.stageTimings)
+      .filter((timing) => timing.stage === stage)
+    const reached = samples.map((sample) => sample.reachedMs).filter(Number.isFinite)
+    const durations = samples.map((sample) => sample.durationMs).filter(Number.isFinite)
+    return {
+      stage,
+      attemptsReached: samples.length,
+      averageReachedMs: average(reached),
+      medianReachedMs: median(reached),
+      averageDurationMs: average(durations)
+    }
+  }).filter((stage) => stage.attemptsReached > 0)
+}
+
+function buildExperimentBreakdown(attempts) {
+  return ANALYTICS_EXPERIMENT_KEYS.map((key) => {
+    const groups = new Map()
+    for (const attempt of attempts) {
+      const value = experimentValue(attempt.experiment[key])
+      const current = groups.get(value) || { value, attempts: 0, confirmed: 0, durations: [] }
+      current.attempts += 1
+      if (attempt.outcome === 'confirmed') current.confirmed += 1
+      if (Number.isFinite(attempt.durationMs)) current.durations.push(attempt.durationMs)
+      groups.set(value, current)
+    }
+    return {
+      key,
+      values: [...groups.values()]
+        .map((group) => ({
+          value: group.value,
+          attempts: group.attempts,
+          confirmed: group.confirmed,
+          successRate: percentage(group.confirmed, group.attempts),
+          averageDurationMs: average(group.durations)
+        }))
+        .sort((left, right) => right.attempts - left.attempts)
+    }
+  }).filter((experiment) => experiment.values.length > 0)
+}
+
+function buildCountBreakdown(items, keyFor) {
+  const counts = new Map()
+  for (const item of items) {
+    const key = sanitizeKey(keyFor(item), 'unknown')
+    counts.set(key, (counts.get(key) || 0) + 1)
+  }
+  return [...counts.entries()]
+    .map(([key, count]) => ({ key, count, percent: percentage(count, items.length) }))
+    .sort((left, right) => right.count - left.count || left.key.localeCompare(right.key))
+}
+
+function sanitizeAnalyticsExperiment(value) {
+  return Object.fromEntries(
+    ANALYTICS_EXPERIMENT_KEYS.flatMap((key) => {
+      const item = value?.[key]
+      if (!['string', 'number', 'boolean'].includes(typeof item)) return []
+      return [[key, typeof item === 'string' ? item.slice(0, 64) : item]]
+    })
+  )
+}
+
+function sanitizeArtifacts(value) {
+  if (!Array.isArray(value)) return []
+  return value.slice(0, 6).flatMap((artifact) => {
+    const type = ['trace', 'screenshot', 'diagnostics'].includes(artifact?.type)
+      ? artifact.type
+      : null
+    const path = String(artifact?.path || '')
+      .replace(/\\/g, '/')
+      .replace(/\.\.+/g, '')
+      .replace(/[^a-z0-9_./-]+/gi, '_')
+      .slice(0, 220)
+    return type && path.startsWith('debug-traces/') ? [{ type, path }] : []
+  })
+}
+
+function safeFilter(value) {
+  const normalized = String(value || '').toLowerCase()
+  if (!normalized || normalized === 'all') return null
+  return normalized.replace(/[^a-z0-9_-]/g, '').slice(0, 40) || null
+}
+
+function sanitizeKey(value, fallback) {
+  return (
+    String(value || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, '')
+      .slice(0, 48) || fallback
+  )
+}
+
+function experimentValue(value) {
+  if (value === true) return 'on'
+  if (value === false) return 'off'
+  if (value == null || value === '') return 'unknown'
+  return String(value).slice(0, 64)
+}
+
+function nullableNumber(value) {
+  if (value == null || value === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) ? Math.max(0, number) : null
+}
+
+function clampInteger(value, minimum, maximum, fallback) {
+  const number = Number(value)
+  return Number.isFinite(number)
+    ? Math.min(maximum, Math.max(minimum, Math.round(number)))
+    : fallback
+}
+
+function percentage(value, total) {
+  return total > 0 ? Math.round((value / total) * 1000) / 10 : 0
+}
+
+function average(values) {
+  if (!values.length) return null
+  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length)
+}
+
+function median(values) {
+  if (!values.length) return null
+  const sorted = values.slice().sort((left, right) => left - right)
+  const middle = Math.floor(sorted.length / 2)
+  return sorted.length % 2
+    ? Math.round(sorted[middle])
+    : Math.round((sorted[middle - 1] + sorted[middle]) / 2)
 }

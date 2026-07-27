@@ -1,4 +1,14 @@
-import { existsSync, readFileSync, writeFileSync } from 'fs'
+import {
+  closeSync,
+  copyFileSync,
+  existsSync,
+  fsyncSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync
+} from 'fs'
 import { createRequire } from 'module'
 import { runMigrations } from './db/migrations.js'
 import { createModuleLogger } from './utils/logger.js'
@@ -173,6 +183,30 @@ const TABLE_COLUMNS = {
     'detail',
     'elapsed_ms',
     'created_at'
+  ],
+  drop_event_receipts: [
+    'id',
+    'task_id',
+    'event_id',
+    'drop_cycle_id',
+    'retailer',
+    'product_id',
+    'status',
+    'claimed_at',
+    'completed_at',
+    'account_id',
+    'order_sequence',
+    'detail'
+  ],
+  monitor_unsubscribe_outbox: [
+    'id',
+    'user_id',
+    'retailer',
+    'product_url',
+    'product_key',
+    'created_at',
+    'attempts',
+    'last_error'
   ]
 }
 
@@ -344,6 +378,14 @@ export class JsonDb {
     this._flushImmediate()
   }
 
+  flushNow() {
+    if (this._flushTimer) {
+      clearTimeout(this._flushTimer)
+      this._flushTimer = null
+    }
+    this._flushImmediate({ throwOnError: true })
+  }
+
   prepare(sql) {
     return new JsonStatement(this, sql)
   }
@@ -359,11 +401,33 @@ export class JsonDb {
     }, this._flushDelay)
   }
 
-  _flushImmediate() {
+  _flushImmediate({ throwOnError = false } = {}) {
+    const tempPath = `${this.path}.tmp`
+    const backupPath = `${this.path}.bak`
+    let descriptor = null
     try {
-      writeFileSync(this.path, JSON.stringify(this.tables, null, 2))
+      descriptor = openSync(tempPath, 'w')
+      writeFileSync(descriptor, JSON.stringify(this.tables, null, 2), 'utf8')
+      fsyncSync(descriptor)
+      closeSync(descriptor)
+      descriptor = null
+      if (isJsonDbFile(this.path)) copyFileSync(this.path, backupPath)
+      renameSync(tempPath, this.path)
     } catch (err) {
+      if (descriptor !== null) {
+        try {
+          closeSync(descriptor)
+        } catch {
+          // The descriptor may already be closed after a failed fsync.
+        }
+      }
+      try {
+        if (existsSync(tempPath)) unlinkSync(tempPath)
+      } catch {
+        // Best-effort cleanup; the primary database remains untouched.
+      }
       log.error('Failed to write JSON database', { path: this.path, error: err.message })
+      if (throwOnError) throw err
     }
   }
 }
@@ -573,7 +637,22 @@ function tablePrimaryKey(table) {
 }
 
 function loadTables(path) {
-  const tables = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {}
+  let tables = {}
+  const candidates = [path, `${path}.bak`, `${path}.tmp`]
+  let firstError = null
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) continue
+    try {
+      tables = JSON.parse(readFileSync(candidate, 'utf8'))
+      if (candidate !== path) {
+        log.warn('Recovered JSON database from atomic recovery file', { path: candidate })
+      }
+      break
+    } catch (error) {
+      firstError ||= error
+    }
+  }
+  if (!Object.keys(tables).length && firstError) throw firstError
   for (const table of Object.keys(TABLE_COLUMNS)) {
     tables[table] ||= []
   }
@@ -592,6 +671,8 @@ function loadTables(path) {
 
 function getJsonDbPath(dbPath) {
   if (!existsSync(dbPath) || isJsonDbFile(dbPath)) return dbPath
+  if (existsSync(`${dbPath}.bak`) && isJsonDbFile(`${dbPath}.bak`)) return dbPath
+  if (existsSync(`${dbPath}.tmp`) && isJsonDbFile(`${dbPath}.tmp`)) return dbPath
   return `${dbPath}.json`
 }
 

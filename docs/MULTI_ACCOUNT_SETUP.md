@@ -43,7 +43,7 @@ Each account needs its own:
    ```
    Name: Walmart-Account1
    Retailer: Walmart
-   Email: your-email-1@gmail.com
+   Email: redacted@example.invalid
    Password: your-password
    CVV: 123
    Profile Path: (leave default or customize)
@@ -176,19 +176,19 @@ Each account needs its own:
 
 **Account 1**:
 
-- Email: john.doe1@gmail.com
+- Email: redacted@example.invalid
 - Profile: Real Chrome Profile 1
 - Proxy: None (home IP)
 
 **Account 2**:
 
-- Email: john.doe2@gmail.com
+- Email: redacted@example.invalid
 - Profile: Real Chrome Profile 2
 - Proxy: None (home IP)
 
 **Account 3**:
 
-- Email: jane.smith@gmail.com
+- Email: redacted@example.invalid
 - Profile: Real Chrome Profile 3
 - Proxy: Residential proxy (optional)
 

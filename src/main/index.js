@@ -22,6 +22,7 @@ import { CheckoutTelemetry } from './telemetry/CheckoutTelemetry.js'
 import { logger } from './utils/logger.js'
 import { IPC } from '../shared/constants.js'
 import { runStartupDiagnostics } from './health/StartupDiagnostics.js'
+import { MonitorHealth } from './health/MonitorHealth.js'
 
 let mainWindow
 let taskManager
@@ -80,12 +81,19 @@ async function createMainWindow(encryptionKey) {
   ])
   authSessionManager.on('change', (state) => {
     mainWindow?.webContents?.send(IPC.AUTH_STATE_CHANGED, state)
-    if (state.authenticated && getSettings().pokemonCenterAutoJoin === true) {
-      taskManager?.setPokemonCenterAutoJoin(true).catch((err) => {
-        logger.warn('TaskManager', 'Could not reconnect Pokemon Center auto-join', {
-          error: err.message
-        })
+    taskManager?.handleAuthChange?.(state).catch((err) => {
+      logger.warn('TaskManager', 'Could not switch central monitoring account cleanly', {
+        error: err.message
       })
+    })
+    if (state.authenticated) {
+      if (getSettings().pokemonCenterAutoJoin === true) {
+        taskManager?.setPokemonCenterAutoJoin(true).catch((err) => {
+          logger.warn('TaskManager', 'Could not reconnect Pokemon Center auto-join', {
+            error: err.message
+          })
+        })
+      }
     }
   })
 
@@ -113,6 +121,15 @@ async function createMainWindow(encryptionKey) {
     checkoutTelemetry,
     paymentManager
   })
+  const monitorHealth = new MonitorHealth({
+    authSessionManager,
+    taskManager
+  })
+  taskManager.retryPendingUnsubscribes().catch((error) => {
+    logger.warn('TaskManager', 'Could not clear pending central monitor stops yet', {
+      error: error.message
+    })
+  })
 
   if (settings.pokemonCenterAutoJoin === true) {
     taskManager.setPokemonCenterAutoJoin(true).catch((err) => {
@@ -130,8 +147,14 @@ async function createMainWindow(encryptionKey) {
     // whose intentionally small SQL parser does not implement JOINs.
     const db = getDb()
     const enabledTasks = listTasksToResume(db)
-    for (const task of enabledTasks) taskManager.startTask(task)
-    logger.info('TaskManager', 'Resumed enabled monitor tasks', { count: enabledTasks.length })
+    const resumeResults = await Promise.allSettled(
+      enabledTasks.map((task) => taskManager.startTask(task))
+    )
+    const resumedCount = resumeResults.filter((result) => result.status === 'fulfilled').length
+    logger.info('TaskManager', 'Resumed enabled monitor tasks', {
+      count: resumedCount,
+      failed: enabledTasks.length - resumedCount
+    })
   } catch (err) {
     logger.warn('TaskManager', 'Could not resume enabled monitor tasks', { error: err.message })
   }
@@ -211,6 +234,8 @@ async function createMainWindow(encryptionKey) {
     notificationEngine,
     queueJoiner,
     pokemonCenterQueueJoiner,
+    checkoutTelemetry,
+    monitorHealth,
     getStartupDiagnostics: () => startupDiagnostics
   })
 
@@ -237,9 +262,24 @@ async function createMainWindow(encryptionKey) {
   }
 }
 
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+if (!hasSingleInstanceLock) {
+  // Two processes could replay the same durable drop and race through checkout,
+  // especially when the JSON database fallback is active.
+  app.exit(0)
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  })
+}
+
 app
   .whenReady()
   .then(async () => {
+    if (!hasSingleInstanceLock) return
     electronApp.setAppUserModelId('com.pokebot2.app')
 
     // Configure logger

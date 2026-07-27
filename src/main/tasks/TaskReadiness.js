@@ -78,16 +78,19 @@ function checkAccount(task, accountManager, paymentManager, settings, accountId)
       : task.retailer !== 'walmart'
         ? `${account.name} needs${task.retailer === 'target' ? ' a Target' : ' a'} payment method`
         : `${account.name} is missing CVV`
+  const sessionBlocked = ['unverified', 'manual_review'].includes(account.status)
 
   return {
     session: check(
       account.name,
-      account.retailer === task.retailer && account.status !== 'unverified',
+      account.retailer === task.retailer && !sessionBlocked,
       account.retailer !== task.retailer
         ? `${account.name} is a ${account.retailer} account`
         : account.status === 'unverified'
           ? `${account.name} needs email/login verification`
-          : `${account.name} marked ready`
+          : account.status === 'manual_review'
+            ? `${account.name} is paused until its uncertain order is reviewed`
+            : `${account.name} marked ready`
     ),
     cvv: check(account.name, hasCheckoutCvv, paymentMessage),
     proxy: checkProxy(account, task.retailer, settings.proxyTestResults || {})
