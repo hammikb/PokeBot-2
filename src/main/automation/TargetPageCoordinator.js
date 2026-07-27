@@ -115,6 +115,10 @@ export class TargetPageCoordinator {
             .toLowerCase()
         const findControl = (pattern) =>
           controls.find((element) => pattern.test(normalizedText(element)))
+        const findVisibleText = (pattern) =>
+          [...document.querySelectorAll('button, [role="button"], [data-test], p, span, div')]
+            .filter(visible)
+            .find((element) => pattern.test(normalizedText(element)))
         const addToCart =
           [
             ...document.querySelectorAll(
@@ -140,13 +144,15 @@ export class TargetPageCoordinator {
             ) || bodyText.includes('still loading')
           ),
           outOfStock: Boolean(
-            findControl(/^(out of stock|sold out)$/i) ||
+            findVisibleText(/^(out of stock|sold out)$/i) ||
             document.querySelector('[data-test*="outOfStock" i], [data-test*="soldOut" i]')
           ),
           challenge: Boolean(
-            document.querySelector(
-              'iframe[src*="captcha" i], iframe[src*="challenge" i], iframe[src*="recaptcha" i]'
-            )
+            [
+              ...document.querySelectorAll(
+                'iframe[src*="captcha" i], iframe[src*="challenge" i], iframe[src*="recaptcha" i]'
+              )
+            ].some(visible)
           ),
           viewCart: Boolean(findControl(/view cart/i)),
           placeOrderVisible: Boolean(placeOrder),

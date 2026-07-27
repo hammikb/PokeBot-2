@@ -250,7 +250,7 @@ describe('Target high-demand checkout submission', () => {
       locator: vi.fn((selector) => {
         if (selector.includes('Add to cart')) return addButton
         if (selector.includes('fulfillment')) {
-          return locator({ count: () => (state.loading ? 1 : 0) })
+          return locator({ isVisible: () => state.loading })
         }
         return locator({ count: () => 0 })
       })
@@ -266,6 +266,42 @@ describe('Target high-demand checkout submission', () => {
       })
     ).resolves.toBe(addButton)
     expect(page.waitForTimeout).toHaveBeenCalled()
+  })
+
+  it('classifies a settled out-of-stock PDP before hidden background challenge frames', async () => {
+    const hiddenChallengeFrame = {
+      url: () => 'https://security.target.com/background-challenge',
+      frameElement: async () => locator({ isVisible: () => false })
+    }
+    const page = {
+      frames: () => [hiddenChallengeFrame],
+      waitForTimeout: vi.fn(async () => {}),
+      locator: vi.fn((selector) => {
+        if (selector.includes('Add to cart')) {
+          return locator({ isVisible: () => true, isDisabled: () => true })
+        }
+        if (selector.includes('fulfillment')) return locator({ isVisible: () => false })
+        if (selector.includes('Out of stock') || selector.includes('text=/')) {
+          return locator({ isVisible: () => true })
+        }
+        if (selector.includes('iframe')) return locator({ isVisible: () => false })
+        return locator()
+      })
+    }
+    const onStep = vi.fn()
+
+    await expect(
+      waitForTargetAddToCartReady(page, {
+        timeoutMs: 100,
+        pollMs: 1,
+        onStep,
+        notificationEngine: null,
+        dropEvent: {}
+      })
+    ).rejects.toThrow('Item is out of stock (Target availability settled)')
+    expect(onStep).not.toHaveBeenCalledWith(
+      'Target security challenge detected - waiting for manual completion'
+    )
   })
 
   it('dismisses the post-submit busy dialog and retries Place your order', async () => {

@@ -58,6 +58,7 @@ export class TaskManager extends EventEmitter {
     this._warmAccountsByTask = new Map()
     this._warmAccountRefs = new Map()
     this._activeCheckoutRuns = new Set()
+    this._activeAccountCheckoutRuns = new Set()
     this._pokemonCenterAutoJoinEnabled = false
     this._pokemonCenterQueueAlertedAt = 0
 
@@ -496,6 +497,38 @@ export class TaskManager extends EventEmitter {
   }
 
   async _runOrdersForAccount(flow, task, dropEvent, accountId, orderSubmissionGate = null) {
+    if (this._activeAccountCheckoutRuns.has(accountId)) {
+      log.info('Skipping checkout because the account is already handling another product', {
+        accountId,
+        retailer: task.retailer,
+        productUrl: dropEvent.productUrl
+      })
+      return {
+        accountId,
+        success: false,
+        accountBusy: true,
+        error: 'Account already has an active checkout for another product',
+        ordersRequested: 0,
+        ordersCompleted: 0,
+        orderResults: []
+      }
+    }
+
+    this._activeAccountCheckoutRuns.add(accountId)
+    try {
+      return await this._runOrdersForAccountUnlocked(
+        flow,
+        task,
+        dropEvent,
+        accountId,
+        orderSubmissionGate
+      )
+    } finally {
+      this._activeAccountCheckoutRuns.delete(accountId)
+    }
+  }
+
+  async _runOrdersForAccountUnlocked(flow, task, dropEvent, accountId, orderSubmissionGate = null) {
     const ordersRequested =
       task.retailer === 'target' &&
       task.mode !== 'test-checkout' &&

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../../src/main/automation/flows/walmart.js', () => ({
   runWalmartFlow: vi.fn(async () => ({
@@ -92,6 +92,65 @@ function makeTaskManager(settings = {}, accountOverrides = {}) {
 }
 
 describe('TaskManager test checkout', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('does not run two products through the same account context concurrently', async () => {
+    const { manager } = makeTaskManager()
+    let finishFirst
+    runTargetFlow.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishFirst = () =>
+            resolve({ success: true, testMode: true, requiresManualCheckout: true })
+        })
+    )
+    const task = {
+      id: 'task-a',
+      retailer: 'target',
+      product_name: 'Product A',
+      product_url: 'https://www.target.com/p/example/A-111',
+      account_ids: JSON.stringify(['account-1']),
+      buy_limit: 1,
+      orders_per_drop: 1,
+      mode: 'test-checkout'
+    }
+    const first = manager._runOrdersForAccount(
+      runTargetFlow,
+      task,
+      {
+        retailer: 'target',
+        productName: 'Product A',
+        productUrl: task.product_url,
+        dropType: 'in_stock'
+      },
+      'account-1'
+    )
+    await vi.waitFor(() => expect(runTargetFlow).toHaveBeenCalledTimes(1))
+
+    const second = await manager._runOrdersForAccount(
+      runTargetFlow,
+      { ...task, id: 'task-b', product_url: 'https://www.target.com/p/example/A-222' },
+      {
+        retailer: 'target',
+        productName: 'Product B',
+        productUrl: 'https://www.target.com/p/example/A-222',
+        dropType: 'in_stock'
+      },
+      'account-1'
+    )
+
+    expect(second).toMatchObject({
+      success: false,
+      accountBusy: true,
+      error: 'Account already has an active checkout for another product'
+    })
+    expect(runTargetFlow).toHaveBeenCalledTimes(1)
+    finishFirst()
+    await first
+  })
+
   it('runs two separate confirmed Target orders when the task requests two', async () => {
     const { manager } = makeTaskManager()
     runTargetFlow

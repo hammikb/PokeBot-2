@@ -1292,6 +1292,18 @@ export async function waitForTargetAddToCartReady(
   let sawLoading = false
 
   while (Date.now() < deadline) {
+    const addToCartBtn = getVisibleTargetAddToCartButton(page)
+    const visible = await addToCartBtn.isVisible().catch(() => false)
+    if (visible && !(await addToCartBtn.isDisabled().catch(() => true))) return addToCartBtn
+
+    const loading = await isTargetFulfillmentLoading(page)
+    sawLoading ||= loading
+    // A normal Target PDP can contain hidden background challenge frames. Prefer
+    // the visible, settled fulfillment state before considering a challenge.
+    if (!loading && (await hasExplicitTargetOutOfStockState(page))) {
+      throw new Error('Item is out of stock (Target availability settled)')
+    }
+
     if (await hasTargetChallengeFrame(page)) {
       if (!challengeReported) {
         challengeReported = true
@@ -1300,16 +1312,6 @@ export async function waitForTargetAddToCartReady(
       await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
       await page.waitForTimeout(pollMs)
       continue
-    }
-
-    const addToCartBtn = getVisibleTargetAddToCartButton(page)
-    const visible = await addToCartBtn.isVisible().catch(() => false)
-    if (visible && !(await addToCartBtn.isDisabled().catch(() => true))) return addToCartBtn
-
-    const loading = await isTargetFulfillmentLoading(page)
-    sawLoading ||= loading
-    if (!loading && (await hasExplicitTargetOutOfStockState(page))) {
-      throw new Error('Item is out of stock (Target availability settled)')
     }
 
     const snapshot = await coordinator?.signalState()
@@ -1326,22 +1328,21 @@ export async function waitForTargetAddToCartReady(
 }
 
 async function hasTargetChallengeFrame(page) {
+  const selector =
+    'iframe[src*="captcha" i], iframe[src*="challenge" i], iframe[src*="recaptcha" i]'
+  const visibleFrame = page.locator(selector).first()
+  if (await visibleFrame.isVisible().catch(() => false)) return true
+
   try {
-    if (
-      (page.frames?.() || []).some((frame) =>
-        /(?:captcha|challenge|recaptcha|hcaptcha)/i.test(String(frame.url?.() || ''))
-      )
-    ) {
-      return true
+    for (const frame of page.frames?.() || []) {
+      if (!/(?:captcha|challenge|recaptcha|hcaptcha)/i.test(String(frame.url?.() || ''))) continue
+      const frameElement = await frame.frameElement?.()
+      if (frameElement && (await frameElement.isVisible().catch(() => false))) return true
     }
   } catch {
-    // Fall through to the iframe locator.
+    // A detached background frame is not proof of a visible challenge.
   }
-
-  const frame = page
-    .locator('iframe[src*="captcha" i], iframe[src*="challenge" i], iframe[src*="recaptcha" i]')
-    .first()
-  return (await frame.count().catch(() => 0)) > 0
+  return false
 }
 
 async function isTargetFulfillmentLoading(page) {
@@ -1350,16 +1351,21 @@ async function isTargetFulfillmentLoading(page) {
       '[data-test^="fulfillment-cell"][aria-label*="loading" i], [data-test*="fulfillment"][aria-label*="loading" i], [role="dialog"]:has-text("Still loading")'
     )
     .first()
-  return (await loading.count().catch(() => 0)) > 0
+  return loading.isVisible().catch(() => false)
 }
 
 async function hasExplicitTargetOutOfStockState(page) {
-  const outOfStock = page
+  const markedOutOfStock = page
     .locator(
       'button:visible:has-text("Out of stock"), button:visible:has-text("Sold out"), [data-test*="outOfStock" i]:visible, [data-test*="soldOut" i]:visible'
     )
     .first()
-  return (await outOfStock.count().catch(() => 0)) > 0
+  if (await markedOutOfStock.isVisible().catch(() => false)) return true
+
+  const exactStatus = page.getByText
+    ? page.getByText(/^(Out of stock|Sold out)$/i).first()
+    : page.locator('text=/^(Out of stock|Sold out)$/i').first()
+  return exactStatus.isVisible().catch(() => false)
 }
 
 async function waitForTargetCartState(page, tcin, timeoutMs, coordinator = null) {
