@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, safeStorage, shell } from 'electron'
 import { join } from 'path'
+import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initDb, getDb } from './db.js'
 import { initializeVaultKey } from './security/VaultKeyManager.js'
@@ -23,6 +24,7 @@ import { logger } from './utils/logger.js'
 import { IPC } from '../shared/constants.js'
 import { runStartupDiagnostics } from './health/StartupDiagnostics.js'
 import { MonitorHealth } from './health/MonitorHealth.js'
+import { configureRendererSecurity } from './security/RendererSecurity.js'
 
 let mainWindow
 let taskManager
@@ -195,6 +197,11 @@ async function createMainWindow(encryptionKey) {
     mainWindow?.webContents?.send(IPC.PROGRESS_STREAM_ERROR, data)
   })
 
+  const rendererEntry =
+    is.dev && process.env['ELECTRON_RENDERER_URL']
+      ? process.env['ELECTRON_RENDERER_URL']
+      : pathToFileURL(join(__dirname, '../renderer/index.html')).href
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -209,6 +216,18 @@ async function createMainWindow(encryptionKey) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true
+    }
+  })
+
+  configureRendererSecurity({
+    window: mainWindow,
+    trustedRendererUrl: rendererEntry,
+    openExternal: (url) => shell.openExternal(url),
+    onExternalOpenError: (error, url) => {
+      logger.warn('Renderer', 'External link could not be opened', {
+        url,
+        error: error.message
+      })
     }
   })
 
@@ -240,7 +259,7 @@ async function createMainWindow(encryptionKey) {
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    mainWindow.loadURL(rendererEntry)
     // mainWindow.webContents.openDevTools() // Disabled - press F12 to open if needed
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
