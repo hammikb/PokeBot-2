@@ -32,12 +32,8 @@ export default function App() {
   useEffect(() => {
     const ipc = window.electron?.ipcRenderer
     checkAuthStatus()
-    if (ipc) {
-      ipc.on(IPC.AUTH_STATE_CHANGED, (_event, state) => setAuthState(state))
-    }
-    return () => {
-      ipc?.removeAllListeners(IPC.AUTH_STATE_CHANGED)
-    }
+    const unsubscribe = ipc?.on(IPC.AUTH_STATE_CHANGED, (state) => setAuthState(state))
+    return () => unsubscribe?.()
   }, [checkAuthStatus, setAuthState])
 
   // App data + live feed only load once actually signed in.
@@ -49,21 +45,24 @@ export default function App() {
     loadAccounts()
     loadCatalog()
     loadSettings()
-    if (ipc) {
-      ipc.on(IPC.FEED_EVENT, (_event, data) => pushFeedEvent(data))
-      ipc.on(IPC.TASK_STATUS, (_event, { taskId, status }) => setTaskStatus(taskId, status))
-      ipc.on(IPC.QUEUE_PROGRESS, (_event, data) => pushQueueProgress(data))
-      ipc.on(IPC.ACCOUNT_STATUS, (_event, data) => {
-        loadAccounts()
-        if (data?.email)
-          setAccountRegistrationStatus(data.email, { state: 'success', message: data.message })
-      })
-    }
+    const unsubscribers = ipc
+      ? [
+          ipc.on(IPC.FEED_EVENT, (data) => pushFeedEvent(data)),
+          ipc.on(IPC.TASK_STATUS, ({ taskId, status }) => setTaskStatus(taskId, status)),
+          ipc.on(IPC.QUEUE_PROGRESS, (data) => pushQueueProgress(data)),
+          ipc.on(IPC.ACCOUNT_STATUS, (data) => {
+            loadAccounts()
+            if (data?.email) {
+              setAccountRegistrationStatus(data.email, {
+                state: 'success',
+                message: data.message
+              })
+            }
+          })
+        ]
+      : []
     return () => {
-      ipc?.removeAllListeners(IPC.FEED_EVENT)
-      ipc?.removeAllListeners(IPC.TASK_STATUS)
-      ipc?.removeAllListeners(IPC.QUEUE_PROGRESS)
-      ipc?.removeAllListeners(IPC.ACCOUNT_STATUS)
+      unsubscribers.forEach((unsubscribe) => unsubscribe?.())
     }
   }, [
     authStatus,

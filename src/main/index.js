@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, dialog, powerMonitor, safeStorage, shell } from 'electron'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -25,6 +25,7 @@ import { IPC } from '../shared/constants.js'
 import { runStartupDiagnostics } from './health/StartupDiagnostics.js'
 import { MonitorHealth } from './health/MonitorHealth.js'
 import { configureRendererSecurity } from './security/RendererSecurity.js'
+import { attachRendererRecovery } from './lifecycle/RendererRecovery.js'
 
 let mainWindow
 let taskManager
@@ -35,6 +36,10 @@ let browserPool
 let encryptionKey = null
 let shutdownPromise = null
 let startupDiagnostics = null
+let authSessionManager
+let checkoutTelemetry
+let monitorHealth
+let rendererRecovery
 const CAPSOLVER_API_KEY = import.meta.env.MAIN_VITE_CAPSOLVER_API_KEY || null
 
 function getSettings() {
@@ -70,7 +75,7 @@ async function createMainWindow(encryptionKey) {
   // window loads, so the renderer's first AUTH_GET_STATUS call already reflects the real
   // state — no login-screen flash for an already-signed-in user. `mainWindow` is assigned
   // further below; the 'change' listener only fires after that point, via closure.
-  const authSessionManager = new AuthSessionManager({ getDb, encryptionKey })
+  authSessionManager = new AuthSessionManager({ getDb, encryptionKey })
   // restoreSession() itself never rejects, so the only startup-blocking risk is the
   // underlying network call hanging with no timeout. Bound the wait so a bad connection
   // delays the window by at most 8s instead of indefinitely — the renderer's own
@@ -98,8 +103,11 @@ async function createMainWindow(encryptionKey) {
       }
     }
   })
+  authSessionManager.on('realtime-heartbeat', (status) => {
+    taskManager?.handleRealtimeHeartbeat?.(status)
+  })
 
-  const checkoutTelemetry = new CheckoutTelemetry({
+  checkoutTelemetry = new CheckoutTelemetry({
     getDb,
     authSessionManager,
     getSettings,
@@ -123,7 +131,7 @@ async function createMainWindow(encryptionKey) {
     checkoutTelemetry,
     paymentManager
   })
-  const monitorHealth = new MonitorHealth({
+  monitorHealth = new MonitorHealth({
     authSessionManager,
     taskManager
   })
@@ -230,6 +238,19 @@ async function createMainWindow(encryptionKey) {
       })
     }
   })
+  rendererRecovery?.dispose?.()
+  rendererRecovery = attachRendererRecovery({
+    window: mainWindow,
+    isShuttingDown: () => Boolean(shutdownPromise),
+    onRecovery: (reason) => {
+      logger.warn('Renderer', 'Reloading the Electron interface after a renderer failure', {
+        reason
+      })
+    },
+    onUnresponsive: () => {
+      logger.warn('Renderer', 'The Electron interface became unresponsive')
+    }
+  })
 
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
@@ -309,6 +330,24 @@ app
     app.on('browser-window-created', (_, window) => {
       optimizer.watchWindowShortcuts(window)
     })
+    app.on('child-process-gone', (_event, details) => {
+      logger.warn('Electron', 'An Electron child process exited', {
+        type: details.type,
+        reason: details.reason,
+        exitCode: details.exitCode
+      })
+    })
+    powerMonitor.on('suspend', () => {
+      logger.info('Power', 'System suspended; preserving monitor and checkout state')
+    })
+    powerMonitor.on('resume', () => {
+      logger.info('Power', 'System resumed; refreshing monitor channels and browser sessions')
+      taskManager?.handleSystemResume?.().catch((error) => {
+        logger.warn('Power', 'Resume recovery did not complete cleanly', {
+          error: error.message
+        })
+      })
+    })
 
     const userDataPath = app.getPath('userData')
     initDb(join(userDataPath, 'pokebot.db'))
@@ -362,6 +401,8 @@ function shutdownAndExit() {
       pokemonCenterQueueJoiner?.stopAll?.()
     ])
     await browserPool?.closeAll?.()
+    rendererRecovery?.dispose?.()
+    authSessionManager?.dispose?.()
     app.exit(0)
   })()
   return shutdownPromise

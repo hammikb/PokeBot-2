@@ -221,6 +221,44 @@ export default function Settings() {
         </div>
       </div>
 
+      <div className="border border-gray-800 rounded-lg p-3 bg-[#0d0d0f]">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <div className="text-gray-300 uppercase tracking-wider text-sm">
+              Record Checkout Traces
+            </div>
+            <div className="text-gray-600 text-sm mt-1">
+              Saves a detailed browser recording for troubleshooting. Test checkouts are always
+              recorded; leave this off for the lightest normal checkout path.
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={settings.recordCheckoutTraces === true}
+            onClick={() =>
+              saveSetting('recordCheckoutTraces', settings.recordCheckoutTraces !== true)
+            }
+            className={`relative w-12 h-7 rounded-full shrink-0 transition-colors ${
+              settings.recordCheckoutTraces === true ? 'bg-red-600' : 'bg-gray-700'
+            }`}
+          >
+            <span
+              className={`pointer-events-none absolute left-0 top-1 w-5 h-5 bg-white rounded-full transition-transform ${
+                settings.recordCheckoutTraces === true ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+            <span className="sr-only">Toggle detailed checkout recordings</span>
+          </button>
+        </div>
+        <div className="text-xs mt-2 text-gray-500">
+          Current:{' '}
+          {settings.recordCheckoutTraces === true
+            ? 'Recording normal checkouts'
+            : 'Failure diagnostics only'}
+        </div>
+      </div>
+
       {FIELDS.map((field) => (
         <div key={field.key}>
           <label className="text-gray-500 uppercase tracking-wider text-sm block mb-1.5">

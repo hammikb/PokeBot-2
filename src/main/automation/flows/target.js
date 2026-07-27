@@ -39,6 +39,7 @@ export async function runTargetFlow(
     useTargetCartApi = false,
     targetCheckoutLiteMode = false,
     targetCommitNavigationEnabled = false,
+    recordCheckoutTrace = false,
     orderSubmissionGate = null,
     orderSubmissionKey = null,
     onStep = () => {},
@@ -60,7 +61,8 @@ export async function runTargetFlow(
   const trace = await startTrace(context, {
     retailer: 'target',
     accountName: account?.name,
-    taskId: dropEvent?.productName || 'checkout'
+    taskId: dropEvent?.productName || 'checkout',
+    enabled: recordCheckoutTrace || mode === 'test-checkout'
   })
   const diagnostics = await startCheckoutDiagnostics(page, {
     retailer: 'target',

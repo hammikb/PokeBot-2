@@ -19,6 +19,7 @@ const POKEMON_CENTER_AUTO_JOIN_ID = 'pokemon-center-auto-join'
 const POKEMON_CENTER_QUEUE_URL = 'https://www.pokemoncenter.com/'
 const POKEMON_CENTER_QUEUE_ALERT_COOLDOWN_MS = 6 * 60 * 60 * 1000
 const QUEUE_CHECKOUT_TIMEOUT_MS = 10 * 60 * 1000
+const REALTIME_RECOVERY_DELAY_MS = 1500
 
 const FLOWS = {
   walmart: runWalmartFlow,
@@ -72,6 +73,11 @@ export class TaskManager extends EventEmitter {
     this._taskStartPromises = new Map()
     this._unsubscribeRetryTimer = null
     this._unsubscribeRetryAttempt = 0
+    this._realtimeHeartbeatStatus = 'unknown'
+    this._realtimeHeartbeatAt = null
+    this._realtimeHeartbeatFailures = 0
+    this._realtimeRecoveryTimer = null
+    this._monitorRefreshPromise = null
     this._pokemonCenterAutoJoinEnabled = false
     this._pokemonCenterQueueAlertedAt = 0
     this._recoverUncertainAccountHolds()
@@ -295,12 +301,86 @@ export class TaskManager extends EventEmitter {
   async shutdown() {
     if (this._unsubscribeRetryTimer) clearTimeout(this._unsubscribeRetryTimer)
     this._unsubscribeRetryTimer = null
+    if (this._realtimeRecoveryTimer) clearTimeout(this._realtimeRecoveryTimer)
+    this._realtimeRecoveryTimer = null
     await this.stopAll({ unsubscribe: false })
     await this._supabaseSource?.stop?.().catch(() => {})
     this._checkoutTelemetry?.flushLocal?.()
     this._supabaseSource = null
     this._supabaseSourcePromise = null
     this._supabaseSourceUserId = null
+  }
+
+  handleRealtimeHeartbeat(status) {
+    const normalized = ['ok', 'timeout', 'disconnected'].includes(status) ? status : 'unknown'
+    this._realtimeHeartbeatStatus = normalized
+    this._realtimeHeartbeatAt = Date.now()
+
+    if (normalized === 'ok') {
+      this._realtimeHeartbeatFailures = 0
+      if (this._realtimeRecoveryTimer) clearTimeout(this._realtimeRecoveryTimer)
+      this._realtimeRecoveryTimer = null
+      return
+    }
+
+    this._realtimeHeartbeatFailures += 1
+    if (
+      this._tasks.size === 0 ||
+      this._realtimeRecoveryTimer ||
+      (normalized === 'timeout' && this._realtimeHeartbeatFailures < 2)
+    ) {
+      return
+    }
+
+    this._realtimeRecoveryTimer = setTimeout(() => {
+      this._realtimeRecoveryTimer = null
+      this.refreshMonitorConnections(`realtime-${normalized}`).catch((error) => {
+        log.warn('Could not recover Supabase monitor channels after heartbeat failure', {
+          status: normalized,
+          error: error.message
+        })
+      })
+    }, REALTIME_RECOVERY_DELAY_MS)
+    this._realtimeRecoveryTimer.unref?.()
+  }
+
+  async refreshMonitorConnections(reason = 'manual') {
+    if (this._monitorRefreshPromise) return this._monitorRefreshPromise
+    const state = this._authSessionManager?.getStatus?.()
+    if (!state?.authenticated) return { authenticated: false, rebound: 0 }
+
+    log.info('Refreshing Supabase monitor channels', {
+      reason,
+      activeTasks: this._tasks.size
+    })
+    this._monitorRefreshPromise = this.handleAuthChange(state).finally(() => {
+      this._monitorRefreshPromise = null
+    })
+    return this._monitorRefreshPromise
+  }
+
+  async handleSystemResume() {
+    const accountIds = [...this._warmAccountRefs.keys()]
+    const browserResults = await Promise.allSettled(
+      accountIds.map(async (accountId) => {
+        const account = this._accountManager.getDecrypted(accountId)
+        if (!account?.profile_path) return false
+        await this._pool.pin(accountId, {
+          profilePath: account.profile_path,
+          proxy: account.proxy,
+          retailer: account.retailer,
+          priority: 10
+        })
+        return true
+      })
+    )
+    const monitorResult = await this.refreshMonitorConnections('system-resume')
+    return {
+      browsersRecovered: browserResults.filter(
+        (result) => result.status === 'fulfilled' && result.value === true
+      ).length,
+      monitorResult
+    }
   }
 
   async handleAuthChange(state) {
@@ -595,6 +675,10 @@ export class TaskManager extends EventEmitter {
         : this._supabaseSourcePromise
           ? 'connecting'
           : 'idle',
+      heartbeat: {
+        status: this._realtimeHeartbeatStatus,
+        lastAt: this._realtimeHeartbeatAt
+      },
       channels: {
         total: channels.length,
         subscribed: channels.filter((channel) => channel.status === 'SUBSCRIBED').length,
@@ -821,6 +905,7 @@ export class TaskManager extends EventEmitter {
         buyLimit: task.buy_limit,
         maxPrice: task.max_price,
         requireRetailerSeller: this._getSettings().walmartRequireRetailerSeller !== false,
+        recordCheckoutTrace: this._getSettings().recordCheckoutTraces === true,
         onBeforeSubmit: () => {
           if (deadlineExpired) {
             throw new Error('Walmart queue checkout deadline expired before order submission')
@@ -1166,6 +1251,7 @@ export class TaskManager extends EventEmitter {
               targetCheckoutLiteMode: checkoutSettings.targetCheckoutLiteMode === true,
               targetCommitNavigationEnabled:
                 checkoutSettings.targetCommitNavigationEnabled === true,
+              recordCheckoutTrace: checkoutSettings.recordCheckoutTraces === true,
               orderSubmissionGate,
               orderSubmissionKey: `${accountId}:${task.order_sequence || 1}`,
               onBeforeSubmit: () => {

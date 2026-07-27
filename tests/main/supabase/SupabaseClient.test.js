@@ -39,6 +39,17 @@ describe('SupabaseClient', () => {
     expect(setAuth).toHaveBeenCalledWith('jwt-123')
   })
 
+  it('reports Supabase realtime heartbeat status changes', () => {
+    const sc = new SupabaseClient({ url: 'https://x.supabase.co', key: 'k' })
+    const heartbeat = vi.fn()
+    sc.on('realtime-heartbeat', heartbeat)
+    const options = createClient.mock.calls.at(-1)[2]
+
+    options.realtime.heartbeatCallback('timeout')
+
+    expect(heartbeat).toHaveBeenCalledWith('timeout')
+  })
+
   it('throws a clear error when sign-in fails', async () => {
     signInWithPassword.mockResolvedValue({ data: {}, error: { message: 'invalid login' } })
     const sc = new SupabaseClient({ url: 'https://x.supabase.co', key: 'k' })

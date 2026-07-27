@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { EventEmitter } from 'events'
 import { AuthSessionManager } from '../../../src/main/supabase/AuthSessionManager.js'
 import { decrypt } from '../../../src/main/crypto.js'
 
@@ -122,6 +123,32 @@ describe('AuthSessionManager', () => {
 
     const stored = JSON.parse(db._store.authRefreshTokenEnc)
     expect(decrypt(stored, KEY)).toBe('rt-rotated')
+  })
+
+  it('forwards heartbeat events and releases subscriptions on dispose', () => {
+    const unsubscribe = vi.fn()
+    const heartbeatClient = Object.assign(new EventEmitter(), makeFakeClient(), {
+      client: {
+        auth: {
+          onAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe } } }))
+        }
+      }
+    })
+    const disposableManager = new AuthSessionManager({
+      getDb: () => db,
+      encryptionKey: KEY,
+      client: heartbeatClient
+    })
+    const heartbeat = vi.fn()
+    disposableManager.on('realtime-heartbeat', heartbeat)
+
+    heartbeatClient.emit('realtime-heartbeat', 'ok')
+    disposableManager.dispose()
+    heartbeatClient.emit('realtime-heartbeat', 'timeout')
+
+    expect(heartbeat).toHaveBeenCalledTimes(1)
+    expect(heartbeat).toHaveBeenCalledWith('ok')
+    expect(unsubscribe).toHaveBeenCalledOnce()
   })
 
   it('signOut clears local session state even if the remote sign-out call fails', async () => {

@@ -22,6 +22,7 @@ export async function runSamsClubFlow(
     mode,
     buyLimit = 1,
     maxPrice = null,
+    recordCheckoutTrace = false,
     onStep = () => {},
     onBeforeSubmit = () => {},
     onMilestone = () => {}
@@ -31,7 +32,8 @@ export async function runSamsClubFlow(
   const trace = await startTrace(context, {
     retailer: 'samsclub',
     accountName: account?.name,
-    taskId: dropEvent?.productName || 'checkout'
+    taskId: dropEvent?.productName || 'checkout',
+    enabled: recordCheckoutTrace || mode === 'test-checkout'
   })
   const diagnostics = await startCheckoutDiagnostics(page, {
     retailer: 'samsclub',

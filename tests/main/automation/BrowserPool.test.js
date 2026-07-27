@@ -176,4 +176,52 @@ describe('BrowserPool', () => {
     await expect(secondLaunch).resolves.toBe(secondContext)
     await pool.closeAll()
   })
+
+  it('cancels active downloads before closing a persistent browser context', async () => {
+    const pageHandlers = {}
+    const downloadPage = {
+      on: vi.fn((event, handler) => {
+        pageHandlers[event] = handler
+      })
+    }
+    const context = makeContext({ open: true })
+    context.pages = vi.fn(() => [downloadPage])
+    mocks.launchPersistentContext.mockReset()
+    mocks.launchPersistentContext.mockResolvedValueOnce(context)
+    const pool = new BrowserPool({ setupWarmupMs: 0 })
+
+    await pool.launch('download-account', {
+      profilePath: 'C:/tmp/download-account',
+      proxy: ''
+    })
+    const download = {
+      cancel: vi.fn(async () => {}),
+      failure: vi.fn(() => new Promise(() => {}))
+    }
+    pageHandlers.download(download)
+
+    await pool.close('download-account')
+
+    expect(download.cancel).toHaveBeenCalledOnce()
+    expect(context.close).toHaveBeenCalledOnce()
+  })
+
+  it('falls back to browser close when context shutdown times out', async () => {
+    const browser = { close: vi.fn(async () => {}) }
+    const context = makeContext({ open: true })
+    context.browser = vi.fn(() => browser)
+    context.close = vi.fn(() => new Promise(() => {}))
+    mocks.launchPersistentContext.mockReset()
+    mocks.launchPersistentContext.mockResolvedValueOnce(context)
+    const pool = new BrowserPool({ setupWarmupMs: 0, closeTimeoutMs: 100 })
+
+    await pool.launch('stuck-account', {
+      profilePath: 'C:/tmp/stuck-account',
+      proxy: ''
+    })
+    await pool.close('stuck-account')
+
+    expect(browser.close).toHaveBeenCalledOnce()
+    expect(pool.getActiveCount()).toBe(0)
+  })
 })

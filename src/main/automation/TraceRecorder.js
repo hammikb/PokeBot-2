@@ -4,7 +4,12 @@ import { app } from 'electron'
 
 const DEBUG_DIR = 'debug-traces'
 
-export async function startTrace(context, { retailer, accountName, taskId = 'checkout' } = {}) {
+export async function startTrace(
+  context,
+  { retailer, accountName, taskId = 'checkout', enabled = true } = {}
+) {
+  if (!enabled) return createDisabledTrace({ retailer, accountName, taskId })
+
   const dir = await getTraceDir()
   const safeAccount = safeSegment(accountName || 'account')
   const safeRetailer = safeSegment(retailer || 'retailer')
@@ -37,6 +42,37 @@ export async function startTrace(context, { retailer, accountName, taskId = 'che
         await context.tracing.stop({ path: tracePath }).catch(() => {})
       }
       return { tracePath, screenshotPath }
+    }
+  }
+}
+
+function createDisabledTrace({ retailer, accountName, taskId }) {
+  let screenshotPath = null
+
+  return {
+    tracePath: null,
+    get screenshotPath() {
+      return screenshotPath
+    },
+    async capture(page) {
+      if (!page?.screenshot) return
+
+      if (!screenshotPath) {
+        const dir = await getTraceDir()
+        const safeAccount = safeSegment(accountName || 'account')
+        const safeRetailer = safeSegment(retailer || 'retailer')
+        const safeTask = safeSegment(taskId || 'checkout')
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+        screenshotPath = join(
+          dir,
+          `${stamp}-${safeRetailer}-${safeAccount}-${safeTask}.png`
+        )
+      }
+
+      await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {})
+    },
+    async stop() {
+      return { tracePath: null, screenshotPath }
     }
   }
 }

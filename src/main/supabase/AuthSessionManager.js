@@ -31,11 +31,14 @@ export class AuthSessionManager extends EventEmitter {
     // persist goes stale after the first refresh, breaking "session survives restart"
     // once the app has been open long enough for one. Optional chaining throughout so
     // test fixtures that pass a bare fake client (no .client.auth) don't throw.
-    this._client.client?.auth?.onAuthStateChange?.((event, session) => {
+    const authSubscription = this._client.client?.auth?.onAuthStateChange?.((event, session) => {
       if (event === 'TOKEN_REFRESHED' && session?.refresh_token && this._remember) {
         this._saveRefreshToken(session.refresh_token)
       }
     })
+    this._authSubscription = authSubscription?.data?.subscription || null
+    this._heartbeatHandler = (status) => this.emit('realtime-heartbeat', status)
+    this._client.on?.('realtime-heartbeat', this._heartbeatHandler)
   }
 
   getClient() {
@@ -120,5 +123,12 @@ export class AuthSessionManager extends EventEmitter {
       this._setState(false, null)
       return false
     }
+  }
+
+  dispose() {
+    this._authSubscription?.unsubscribe?.()
+    this._authSubscription = null
+    this._client.off?.('realtime-heartbeat', this._heartbeatHandler)
+    this.removeAllListeners()
   }
 }

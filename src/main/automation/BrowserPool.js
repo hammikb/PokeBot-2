@@ -6,6 +6,7 @@ import { buildCloakBrowserOptions, redactProxyUrl } from './cloakBrowserConfig.j
 const log = createModuleLogger('BrowserPool')
 const DEFAULT_TIMEOUT = 60 * 60 * 1000 // 60 minutes
 const HEALTH_CHECK_INTERVAL = 5 * 60 * 1000 // 5 minutes
+const DEFAULT_CLOSE_TIMEOUT_MS = 10_000
 
 const SHAPE_COOKIE_NAMES = ['_shapes', 'shape', '_sfid', '_sctr', '_sdid']
 const RETAILER_HOME = {
@@ -20,12 +21,14 @@ export class BrowserPool {
     maxConcurrent = 3,
     contextTimeout = DEFAULT_TIMEOUT,
     setupWarmupMs = 1500,
-    capacityWaitMs = 20_000
+    capacityWaitMs = 20_000,
+    closeTimeoutMs = DEFAULT_CLOSE_TIMEOUT_MS
   } = {}) {
     this._maxConcurrent = maxConcurrent
     this._contextTimeout = contextTimeout
     this._setupWarmupMs = setupWarmupMs
     this._capacityWaitMs = capacityWaitMs
+    this._closeTimeoutMs = Math.max(100, Number(closeTimeoutMs) || DEFAULT_CLOSE_TIMEOUT_MS)
     this._active = new Map()
     this._pending = new Map()
     this._pendingProxy = new Map()
@@ -33,6 +36,7 @@ export class BrowserPool {
     this._lastActivity = new Map()
     this._proxyByAccount = new Map()
     this._retailerByAccount = new Map()
+    this._downloadsByAccount = new Map()
     this._healthCheckTimer = null
     this._capacityWaiters = []
     this._capacityReservations = new Set()
@@ -169,6 +173,7 @@ export class BrowserPool {
         proxy: Boolean(proxyUrl)
       })
       const context = await launchPersistentContext(contextOptions)
+      this._trackContextDownloads(accountId, context)
 
       const warmupUrl = RETAILER_HOME[retailer]
       if (warmupUrl) {
@@ -204,6 +209,7 @@ export class BrowserPool {
           this._lastActivity.delete(accountId)
           this._proxyByAccount.delete(accountId)
           this._retailerByAccount.delete(accountId)
+          this._downloadsByAccount.delete(accountId)
           this._drainCapacityWaiters()
           log.info('Browser context closed', { accountId })
         }
@@ -245,15 +251,38 @@ export class BrowserPool {
   async close(accountId) {
     const ctx = this._active.get(accountId)
     if (ctx) {
+      const downloads = [...(this._downloadsByAccount.get(accountId) || [])]
       try {
-        await ctx.close()
-      } catch {
-        // Best effort cleanup
+        await Promise.allSettled(downloads.map((download) => download.cancel?.()))
+        await withTimeout(
+          Promise.resolve(ctx.close({ reason: 'PokeBot browser pool cleanup' })),
+          this._closeTimeoutMs,
+          `Browser context ${accountId} did not close within ${this._closeTimeoutMs}ms`
+        )
+      } catch (error) {
+        log.warn('Browser context required forced cleanup', {
+          accountId,
+          error: error.message
+        })
+        const browser = ctx.browser?.()
+        if (browser?.close) {
+          await withTimeout(
+            Promise.resolve(browser.close({ reason: 'PokeBot forced browser cleanup' })),
+            Math.min(3000, this._closeTimeoutMs),
+            `Browser ${accountId} did not close after its context timed out`
+          ).catch((browserError) => {
+            log.error('Browser process could not be closed cleanly', {
+              accountId,
+              error: browserError.message
+            })
+          })
+        }
       }
       this._active.delete(accountId)
       this._proxyByAccount.delete(accountId)
       this._retailerByAccount.delete(accountId)
       this._lastActivity.delete(accountId)
+      this._downloadsByAccount.delete(accountId)
       this._drainCapacityWaiters()
     }
   }
@@ -270,7 +299,7 @@ export class BrowserPool {
       waiter.reject(new Error('Browser pool is shutting down'))
     }
 
-    for (const id of [...this._active.keys()]) await this.close(id)
+    await Promise.allSettled([...this._active.keys()].map((id) => this.close(id)))
   }
 
   getActiveCount() {
@@ -294,6 +323,21 @@ export class BrowserPool {
     } catch {
       return false
     }
+  }
+
+  _trackContextDownloads(accountId, context) {
+    const downloads = new Set()
+    this._downloadsByAccount.set(accountId, downloads)
+    const trackPage = (page) => {
+      page.on?.('download', (download) => {
+        downloads.add(download)
+        Promise.resolve(download.failure?.())
+          .catch(() => {})
+          .finally(() => downloads.delete(download))
+      })
+    }
+    context.pages?.().forEach(trackPage)
+    context.on?.('page', trackPage)
   }
 
   async _waitForCapacity(accountId, priority, timeoutMs) {
@@ -349,6 +393,17 @@ function isContextOpen(context) {
   } catch {
     return false
   }
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  let timer
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), timeoutMs)
+      timer.unref?.()
+    })
+  ]).finally(() => clearTimeout(timer))
 }
 
 export function buildProxyUrl(proxy) {

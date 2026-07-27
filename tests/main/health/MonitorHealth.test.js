@@ -8,6 +8,7 @@ function makeTaskManager(overrides = {}) {
     getMonitorHealthSnapshot: vi.fn(() => ({
       activeTaskCount: 2,
       sourceState: 'connected',
+      heartbeat: { status: 'ok', lastAt: NOW - 5000 },
       channels: {
         total: 2,
         subscribed: 2,
@@ -123,6 +124,22 @@ describe('MonitorHealth', () => {
     const service = new MonitorHealth({
       authSessionManager: auth.manager,
       taskManager,
+      now: () => NOW
+    })
+
+    await expect(service.getSnapshot()).resolves.toMatchObject({
+      status: 'degraded',
+      reason: 'realtime_interrupted'
+    })
+  })
+
+  it('reports healthy Pi telemetry as degraded when the realtime heartbeat disconnects', async () => {
+    const auth = makeAuth({ data: [healthyRow()], error: null })
+    const service = new MonitorHealth({
+      authSessionManager: auth.manager,
+      taskManager: makeTaskManager({
+        heartbeat: { status: 'disconnected', lastAt: NOW - 5000 }
+      }),
       now: () => NOW
     })
 

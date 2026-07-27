@@ -12,6 +12,7 @@ export async function runPokemonCenterFlow(
     notificationEngine,
     dropEvent,
     mode,
+    recordCheckoutTrace = false,
     onStep = () => {},
     onBeforeSubmit = () => {},
     onMilestone = () => {}
@@ -21,7 +22,8 @@ export async function runPokemonCenterFlow(
   const trace = await startTrace(context, {
     retailer: 'pokemon-center',
     accountName: account?.name,
-    taskId: dropEvent?.productName || 'checkout'
+    taskId: dropEvent?.productName || 'checkout',
+    enabled: recordCheckoutTrace || mode === 'test-checkout'
   })
   const diagnostics = await startCheckoutDiagnostics(page, {
     retailer: 'pokemon-center',

@@ -33,6 +33,7 @@ export async function runWalmartFlow(
     buyLimit = 1,
     maxPrice = null,
     requireRetailerSeller = true,
+    recordCheckoutTrace = false,
     onStep = () => {},
     onBeforeSubmit = () => {},
     onMilestone = () => {}
@@ -46,7 +47,8 @@ export async function runWalmartFlow(
   const trace = await startTrace(context, {
     retailer: 'walmart',
     accountName: account?.name,
-    taskId: dropEvent?.productName || 'checkout'
+    taskId: dropEvent?.productName || 'checkout',
+    enabled: recordCheckoutTrace || mode === 'test-checkout'
   })
   const diagnostics = await startCheckoutDiagnostics(page, {
     retailer: 'walmart',

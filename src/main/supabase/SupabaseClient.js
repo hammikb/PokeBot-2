@@ -1,12 +1,19 @@
 import { createClient } from '@supabase/supabase-js'
+import { EventEmitter } from 'events'
 
 // Thin wrapper around supabase-js for the Electron main process. Disables session
 // persistence (no browser localStorage in main) and pushes the access token into
 // the Realtime socket so private channels (drops:product:{id}) authorize.
-export class SupabaseClient {
+export class SupabaseClient extends EventEmitter {
   constructor({ url, key }) {
+    super()
     this._client = createClient(url, key, {
-      auth: { persistSession: false, autoRefreshToken: true }
+      auth: { persistSession: false, autoRefreshToken: true },
+      realtime: {
+        heartbeatCallback: (status) => {
+          this.emit('realtime-heartbeat', status)
+        }
+      }
     })
   }
 

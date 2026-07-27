@@ -29,6 +29,31 @@ try {
   if (!result.bridge || !result.authIpc) {
     throw new Error(`Electron preload verification failed: ${JSON.stringify(result)}`)
   }
+  const eventPromise = window.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const unsubscribe = window.electron.ipcRenderer.on('task:status', (...args) => {
+          unsubscribe()
+          resolve({ argCount: args.length, payload: args[0] })
+        })
+        window.__pb2BridgeListenerReady = true
+      })
+  )
+  await window.waitForFunction(() => window.__pb2BridgeListenerReady === true)
+  await electronApp.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0].webContents.send('task:status', {
+      taskId: 'preload-smoke',
+      status: 'monitoring'
+    })
+  })
+  const eventResult = await eventPromise
+  if (
+    eventResult.argCount !== 1 ||
+    eventResult.payload?.taskId !== 'preload-smoke' ||
+    eventResult.payload?.status !== 'monitoring'
+  ) {
+    throw new Error(`Electron event bridge exposed an unsafe payload: ${JSON.stringify(eventResult)}`)
+  }
   const visibleText = await window.locator('body').innerText()
   if (visibleText.includes('IPC not available')) {
     throw new Error('Renderer still reports that IPC is unavailable')

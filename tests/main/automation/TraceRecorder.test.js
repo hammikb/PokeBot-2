@@ -48,4 +48,27 @@ describe('startTrace', () => {
       path: expect.stringContaining('.zip')
     })
   })
+
+  it('skips full tracing but still captures a failure screenshot when recording is disabled', async () => {
+    const context = {
+      tracing: {
+        start: vi.fn(async () => {}),
+        stop: vi.fn(async () => {})
+      }
+    }
+    const page = { screenshot: vi.fn(async () => {}) }
+
+    const trace = await startTrace(context, { enabled: false })
+    await trace.capture(page)
+    const result = await trace.stop()
+
+    expect(context.tracing.start).not.toHaveBeenCalled()
+    expect(context.tracing.stop).not.toHaveBeenCalled()
+    expect(result.tracePath).toBeNull()
+    expect(result.screenshotPath).toMatch(/\.png$/)
+    expect(page.screenshot).toHaveBeenCalledWith({
+      path: result.screenshotPath,
+      fullPage: true
+    })
+  })
 })

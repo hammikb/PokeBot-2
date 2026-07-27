@@ -12,12 +12,10 @@ const electron = Object.freeze({
     },
     on(channel, listener) {
       if (!eventChannels.has(channel)) throw new Error(`IPC event is not allowed: ${channel}`)
-      ipcRenderer.on(channel, listener)
-      return electron.ipcRenderer
-    },
-    removeAllListeners(channel) {
-      if (!eventChannels.has(channel)) throw new Error(`IPC event is not allowed: ${channel}`)
-      ipcRenderer.removeAllListeners(channel)
+      if (typeof listener !== 'function') throw new TypeError('IPC listener must be a function')
+      const wrappedListener = (_event, ...args) => listener(...args)
+      ipcRenderer.on(channel, wrappedListener)
+      return () => ipcRenderer.removeListener(channel, wrappedListener)
     }
   }),
   process: Object.freeze({

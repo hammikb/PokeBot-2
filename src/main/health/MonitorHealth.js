@@ -94,6 +94,7 @@ function classifyHealth(snapshot) {
   const workerStateHealthy = HEALTHY_WORKER_STATES.has(worker.status.toLowerCase())
   const stale = worker.ageMs > snapshot.staleAfterMs
   const channelProblem =
+    ['timeout', 'disconnected'].includes(realtime.heartbeat.status) ||
     realtime.channels.interrupted > 0 ||
     realtime.channels.catchUpErrors > 0 ||
     (realtime.activeTaskCount > 0 &&
@@ -186,6 +187,12 @@ function normalizeRealtime(value = {}) {
     sourceState: ['connected', 'connecting', 'idle'].includes(value?.sourceState)
       ? value.sourceState
       : 'idle',
+    heartbeat: {
+      status: ['ok', 'timeout', 'disconnected', 'unknown'].includes(value?.heartbeat?.status)
+        ? value.heartbeat.status
+        : 'unknown',
+      lastAt: Number.isFinite(value?.heartbeat?.lastAt) ? value.heartbeat.lastAt : null
+    },
     channels: {
       total: nonNegativeInteger(channels.total),
       subscribed: nonNegativeInteger(channels.subscribed),

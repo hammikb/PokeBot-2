@@ -40,6 +40,10 @@ describe('TaskManager monitor health snapshot', () => {
     expect(manager.getMonitorHealthSnapshot()).toEqual({
       activeTaskCount: 2,
       sourceState: 'connected',
+      heartbeat: {
+        status: 'unknown',
+        lastAt: null
+      },
       channels: {
         total: 3,
         subscribed: 1,
@@ -63,6 +67,10 @@ describe('TaskManager monitor health snapshot', () => {
     expect(manager.getMonitorHealthSnapshot()).toEqual({
       activeTaskCount: 0,
       sourceState: 'idle',
+      heartbeat: {
+        status: 'unknown',
+        lastAt: null
+      },
       channels: {
         total: 0,
         subscribed: 0,
@@ -89,5 +97,24 @@ describe('TaskManager monitor health snapshot', () => {
     })
 
     expect(manager.getMonitorHealthSnapshot().openCircuits).toBe(0)
+  })
+
+  it('refreshes monitor channels after a disconnected realtime heartbeat', async () => {
+    vi.useFakeTimers()
+    const manager = new TaskManager({
+      accountManager: {},
+      notificationEngine: {},
+      browserPool: {},
+      getDb: () => ({})
+    })
+    manager._tasks.set('task-1', {})
+    manager.refreshMonitorConnections = vi.fn(async () => ({}))
+
+    manager.handleRealtimeHeartbeat('disconnected')
+    await vi.advanceTimersByTimeAsync(1500)
+
+    expect(manager.refreshMonitorConnections).toHaveBeenCalledWith('realtime-disconnected')
+    expect(manager.getMonitorHealthSnapshot().heartbeat.status).toBe('disconnected')
+    vi.useRealTimers()
   })
 })
