@@ -73,9 +73,11 @@ proxy addresses, and IP addresses are not uploaded.
 
 ## Useful directories
 
-- `src/main` — Electron main process, monitoring, tasks, retailer flows, and persistence
-- `src/renderer` — React user interface
-- `src/shared` — shared IPC constants
-- `tests` — Vitest test suite
-- `scripts` — optional Pi services, diagnostics, and Python integrations
-- `docs` — architecture, setup, and retailer notes
+- [`src/main`](src/main) — Electron main process, monitoring, tasks, retailer flows, and persistence
+- [`src/main/experimental`](src/main/experimental) — labeled prototypes with no production callers
+- [`src/renderer`](src/renderer) — React user interface
+- [`src/shared`](src/shared) — shared IPC constants
+- [`tests`](tests/README.md) — Vitest suite organized to mirror the source domains
+- [`scripts`](scripts/README.md) — indexed build tools, Pi monitors, service templates, and diagnostics
+- [`docs`](docs/README.md) — guides, technical references, roadmaps, and dated design archives
+- [`supabase`](supabase/README.md) — local Supabase configuration and production migrations

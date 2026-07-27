@@ -7,10 +7,12 @@
   "author": "PokeBot2",
   "scripts": {
     "clean": "node scripts/clean-build-artifacts.mjs",
+    "check:structure": "node scripts/check-repository-structure.mjs",
     "format": "prettier --write .",
     "lint": "eslint --cache .",
     "test": "vitest run",
     "test:electron": "npm run build && node scripts/verify-electron-preload.mjs",
+    "verify": "npm run check:structure && npm run lint && npm test && npm run test:electron",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
     "start": "node scripts/run-electron-vite.mjs preview",

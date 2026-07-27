@@ -11,8 +11,8 @@
 The app currently has no login screen — it boots straight to the Dashboard. Supabase access is a
 single **shared bot account**: an email/password saved in the `settings` table
 (`supabaseEmail` / `supabasePasswordEnc`, set via the Settings page's "Bot Email" field) that
-`getSupabaseSession()` ([src/main/supabase/session.js](../../../src/main/supabase/session.js))
-signs in with once at startup. Every install, and every user of an install, shares that one
+`getSupabaseSession()` (in the former `src/main/supabase/session.js`) signs in
+with once at startup. Every install, and every user of an install, shares that one
 Supabase identity.
 
 Per the [B2 monitor-mode spec](2026-06-15-supabase-monitor-mode-b2-design.md), the `products` /

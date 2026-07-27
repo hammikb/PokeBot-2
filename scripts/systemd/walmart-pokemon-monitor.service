@@ -1,0 +1,24 @@
+# Deployment template for the legacy Node Walmart monitor.
+[Unit]
+Description=Walmart Pokemon Card Drop Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/pokebot-monitor
+ExecStart=/usr/bin/node /home/pi/pokebot-monitor/scripts/monitor_walmart_pokemon.mjs --interval=15000
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+Environment=NODE_ENV=production
+EnvironmentFile=/home/pi/pokebot-monitor/.env
+
+# Friendly kill on service stop
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

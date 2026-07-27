@@ -18,7 +18,7 @@ import { runTargetRegistration } from './automation/flows/register-target.js'
 import { runWalmartRegistration } from './automation/flows/register-walmart.js'
 import { cookieManager } from './automation/cookieManager.js'
 import { buildTaskReadiness } from './tasks/TaskReadiness.js'
-import { getPublicClient } from './supabase/session.js'
+import { getPublicClient } from './supabase/publicClient.js'
 import { findWalmartMatch, findWalmartMatchCached } from './products/WalmartMatch.js'
 import { persistTaskState, TASK_STATE } from './tasks/TaskState.js'
 
