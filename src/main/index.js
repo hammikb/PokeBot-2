@@ -182,7 +182,7 @@ async function createMainWindow(encryptionKey) {
     backgroundColor: '#0f0f0f',
     center: true,
     webPreferences: {
-      preload: join(__dirname, '../preload/index.mjs'),
+      preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true
@@ -219,11 +219,21 @@ async function createMainWindow(encryptionKey) {
     // mainWindow.webContents.openDevTools() // Disabled - press F12 to open if needed
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
-    const { autoUpdater } = await import('electron-updater')
-    autoUpdater.autoInstallOnAppQuit = false
-    autoUpdater.checkForUpdatesAndNotify()
-    autoUpdater.on('update-available', () => mainWindow?.webContents?.send('update:available'))
-    autoUpdater.on('update-downloaded', () => mainWindow?.webContents?.send('update:downloaded'))
+    if (app.isPackaged) {
+      try {
+        const updaterModule = await import('electron-updater')
+        const autoUpdater = updaterModule.autoUpdater || updaterModule.default?.autoUpdater
+        if (!autoUpdater) throw new Error('electron-updater did not expose autoUpdater')
+        autoUpdater.autoInstallOnAppQuit = false
+        autoUpdater.checkForUpdatesAndNotify()
+        autoUpdater.on('update-available', () => mainWindow?.webContents?.send('update:available'))
+        autoUpdater.on('update-downloaded', () =>
+          mainWindow?.webContents?.send('update:downloaded')
+        )
+      } catch (error) {
+        logger.warn('Updater', 'Automatic update check is unavailable', { error: error.message })
+      }
+    }
   }
 }
 
