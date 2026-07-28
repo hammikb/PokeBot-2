@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAppStore } from '../store/appStore'
 import QueuePanel from '../components/QueuePanel'
+import { formatAppTime } from '../utils/time'
 
 const TYPE_COLOR = {
   in_stock: 'text-green-400',
@@ -171,9 +172,7 @@ export default function Dashboard() {
             )}
             {feedEvents.map((e) => (
               <div key={e.id} className="text-sm flex gap-2 items-baseline">
-                <span className="text-gray-600 shrink-0">
-                  {new Date(e.timestamp).toLocaleTimeString()}
-                </span>
+                <span className="text-gray-600 shrink-0">{formatAppTime(e.timestamp)}</span>
                 <span className={`shrink-0 ${TYPE_COLOR[e.dropType] || 'text-gray-300'}`}>
                   {e.retailer}
                 </span>
@@ -290,9 +289,7 @@ export default function Dashboard() {
                 key={e.id}
                 className="text-sm flex gap-2 items-baseline bg-yellow-900/10 px-3 py-2 rounded"
               >
-                <span className="text-gray-600 shrink-0">
-                  {new Date(e.timestamp).toLocaleTimeString()}
-                </span>
+                <span className="text-gray-600 shrink-0">{formatAppTime(e.timestamp)}</span>
                 <span className="text-yellow-400 shrink-0">{e.retailer}</span>
                 <span className="text-gray-200 break-words min-w-0">{e.productName}</span>
                 {e.price != null && <span className="text-gray-400 shrink-0">${e.price}</span>}

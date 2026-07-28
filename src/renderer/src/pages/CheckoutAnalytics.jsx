@@ -1,6 +1,7 @@
 /* eslint-disable react/prop-types */
 import { useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '../store/appStore'
+import { formatAppDateTime } from '../utils/time'
 
 const OUTCOME_STYLES = {
   confirmed: 'border-emerald-700/60 bg-emerald-950/30 text-emerald-300',
@@ -486,7 +487,7 @@ function formatPercent(value) {
 
 function formatTimestamp(value) {
   if (!value) return 'Unknown time'
-  return new Date(value).toLocaleString()
+  return formatAppDateTime(value)
 }
 
 function labelize(value) {
