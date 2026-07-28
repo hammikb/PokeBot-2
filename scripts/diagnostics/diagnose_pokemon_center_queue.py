@@ -28,7 +28,9 @@ async def main():
             args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking"],
         )
         try:
-            for proxy_number, proxy in enumerate([None, *proxies[:4]], start=0):
+            # Never fall back to the Pi's home IP. Pokemon Center diagnostics
+            # must obey the same proxy-only rule as the production detector.
+            for proxy_number, proxy in enumerate(proxies[:4], start=1):
                 context_options = dict(
                     user_agent=(
                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -69,7 +71,7 @@ async def main():
                         json.dumps(
                             {
                                 "proxy_number": proxy_number,
-                                "connection": "proxy" if proxy else "direct",
+                                "connection": "proxy",
                                 "status": response.status if response else None,
                                 "final_url": page.url,
                                 "title": await page.title(),
