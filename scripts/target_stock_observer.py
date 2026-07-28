@@ -9,6 +9,7 @@ import re
 import time
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -16,6 +17,16 @@ try:
     from config import DISCORD_WEBHOOK_URL as CONFIG_DISCORD_WEBHOOK_URL
 except (ImportError, AttributeError):
     CONFIG_DISCORD_WEBHOOK_URL = ""
+
+
+def parse_clock_minutes(value):
+    match = re.fullmatch(r"(\d{1,2}):(\d{2})", str(value or "").strip())
+    if not match:
+        raise ValueError(f"Invalid clock time {value!r}; expected HH:MM")
+    hour, minute = (int(part) for part in match.groups())
+    if hour > 23 or minute > 59:
+        raise ValueError(f"Invalid clock time {value!r}; expected HH:MM")
+    return hour * 60 + minute
 
 
 REDSKY_URL = (
@@ -41,6 +52,18 @@ STORE_ID = os.getenv("TARGET_STOCK_STORE_ID", "1296").strip()
 ZIP_CODE = os.getenv("TARGET_STOCK_ZIP", "90001").strip()
 STATE_CODE = os.getenv("TARGET_STOCK_STATE", "CA").strip()
 CHECK_SECONDS = max(15, int(os.getenv("TARGET_STOCK_CHECK_SECONDS", "30")))
+SLOW_CHECK_SECONDS = max(
+    CHECK_SECONDS, int(os.getenv("TARGET_STOCK_SLOW_CHECK_SECONDS", "300"))
+)
+POLL_TIME_ZONE_NAME = os.getenv(
+    "TARGET_STOCK_TIME_ZONE", "America/Los_Angeles"
+).strip()
+FAST_WINDOW_START_MINUTE = parse_clock_minutes(
+    os.getenv("TARGET_STOCK_FAST_WINDOW_START", "23:30")
+)
+FAST_WINDOW_END_MINUTE = parse_clock_minutes(
+    os.getenv("TARGET_STOCK_FAST_WINDOW_END", "03:30")
+)
 REQUEST_SPACING_SECONDS = max(
     0.0, float(os.getenv("TARGET_STOCK_REQUEST_SPACING_SECONDS", "2"))
 )
@@ -81,6 +104,24 @@ class TargetBlockedError(RuntimeError):
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
+
+
+def is_fast_poll_window(local_datetime):
+    minute_of_day = local_datetime.hour * 60 + local_datetime.minute
+    if FAST_WINDOW_START_MINUTE < FAST_WINDOW_END_MINUTE:
+        return FAST_WINDOW_START_MINUTE <= minute_of_day < FAST_WINDOW_END_MINUTE
+    return (
+        minute_of_day >= FAST_WINDOW_START_MINUTE
+        or minute_of_day < FAST_WINDOW_END_MINUTE
+    )
+
+
+def current_poll_schedule(now=None, monitor_timezone=None):
+    zone = monitor_timezone or ZoneInfo(POLL_TIME_ZONE_NAME)
+    current = (now or datetime.now(timezone.utc)).astimezone(zone)
+    if is_fast_poll_window(current):
+        return "fast", CHECK_SECONDS, current
+    return "slow", SLOW_CHECK_SECONDS, current
 
 
 def extract_tcin(product_url):
@@ -380,10 +421,15 @@ async def run():
     downloaded_bytes = 0
     last_bandwidth_log = time.monotonic()
     last_product_refresh = time.monotonic()
+    schedule_mode, scheduled_interval, local_now = current_poll_schedule()
+    last_schedule_mode = schedule_mode
 
     print(
         "[INFO] Target stock observer started "
-        f"(products={len(product_urls)}, every={CHECK_SECONDS}s, "
+        f"(products={len(product_urls)}, fast={CHECK_SECONDS}s "
+        f"from 23:30-03:30 {POLL_TIME_ZONE_NAME}, "
+        f"slow={SLOW_CHECK_SECONDS}s, current={schedule_mode} "
+        f"at {local_now.strftime('%Y-%m-%d %H:%M:%S %Z')}, "
         f"proxy_required=true, {proxy_label(proxies[proxy_index], proxy_index)})",
         flush=True,
     )
@@ -391,6 +437,15 @@ async def run():
     try:
         while True:
             cycle_started = time.monotonic()
+            schedule_mode, scheduled_interval, local_now = current_poll_schedule()
+            if schedule_mode != last_schedule_mode:
+                print(
+                    "[INFO] Target polling schedule changed "
+                    f"(mode={schedule_mode}, interval={scheduled_interval}s, "
+                    f"local_time={local_now.strftime('%Y-%m-%d %H:%M:%S %Z')})",
+                    flush=True,
+                )
+                last_schedule_mode = schedule_mode
             cycle_succeeded = True
             cycle_target_blocked = False
             if time.monotonic() - last_product_refresh >= PRODUCT_REFRESH_SECONDS:
@@ -508,15 +563,18 @@ async def run():
                 )
                 last_bandwidth_log = time.monotonic()
 
-            interval = CHECK_SECONDS
+            interval = scheduled_interval
             if cycle_target_blocked:
                 # A 15-minute circuit breaker avoids burning all residential
                 # proxy identities while Target is denying the pool.
-                interval = max(900, CHECK_SECONDS)
+                interval = max(900, scheduled_interval)
             elif consecutive_errors:
                 interval = min(
                     ERROR_BACKOFF_MAX_SECONDS,
-                    max(60, CHECK_SECONDS * (2 ** min(consecutive_errors, 5))),
+                    max(
+                        60,
+                        scheduled_interval * (2 ** min(consecutive_errors, 5)),
+                    ),
                 )
             await asyncio.sleep(
                 max(1, interval - (time.monotonic() - cycle_started))

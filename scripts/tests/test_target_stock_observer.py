@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Small dependency-free regression checks for the Target stock observer."""
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -8,12 +9,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from target_stock_observer import (
     TargetBlockedError,
     changed_to_available,
+    current_poll_schedule,
     extract_tcin,
     find_shipping_options,
     inventory_changed,
     is_available,
+    is_fast_poll_window,
     is_retryable_proxy_error,
     is_target_block,
+    parse_clock_minutes,
 )
 
 
@@ -66,6 +70,21 @@ def main():
     assert is_target_block(TargetBlockedError("Target blocked with HTTP 403"))
     assert not is_retryable_proxy_error(TargetBlockedError("Target blocked with HTTP 403"))
     assert not is_retryable_proxy_error(RuntimeError("invalid JSON"))
+    assert parse_clock_minutes("23:30") == 23 * 60 + 30
+    assert parse_clock_minutes("03:30") == 3 * 60 + 30
+    assert not is_fast_poll_window(datetime(2026, 7, 27, 23, 29))
+    assert is_fast_poll_window(datetime(2026, 7, 27, 23, 30))
+    assert is_fast_poll_window(datetime(2026, 7, 28, 0, 0))
+    assert is_fast_poll_window(datetime(2026, 7, 28, 3, 29))
+    assert not is_fast_poll_window(datetime(2026, 7, 28, 3, 30))
+    assert current_poll_schedule(
+        datetime(2026, 7, 27, 23, 30, tzinfo=timezone.utc),
+        monitor_timezone=timezone.utc,
+    )[:2] == ("fast", 30)
+    assert current_poll_schedule(
+        datetime(2026, 7, 27, 12, 0, tzinfo=timezone.utc),
+        monitor_timezone=timezone.utc,
+    )[:2] == ("slow", 300)
     print("Target stock observer regression checks passed")
 
 

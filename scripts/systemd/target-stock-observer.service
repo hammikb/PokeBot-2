@@ -12,6 +12,10 @@ Environment=PYTHONUNBUFFERED=1
 Environment=TARGET_STOCK_PROXY_FILE=/home/hammikb/api-monitor-python/proxies.txt
 Environment=TARGET_STOCK_PROXY_INDEX=0
 Environment=TARGET_STOCK_CHECK_SECONDS=30
+Environment=TARGET_STOCK_SLOW_CHECK_SECONDS=300
+Environment=TARGET_STOCK_TIME_ZONE=America/Los_Angeles
+Environment=TARGET_STOCK_FAST_WINDOW_START=23:30
+Environment=TARGET_STOCK_FAST_WINDOW_END=03:30
 Environment=TARGET_STOCK_REQUEST_SPACING_SECONDS=2
 Environment=TARGET_STOCK_PRODUCT_REFRESH_SECONDS=300
 ExecStart=/home/hammikb/api-monitor-python/.venv/bin/python /home/hammikb/api-monitor-python/target_stock_observer.py
