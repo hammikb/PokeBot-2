@@ -65,4 +65,22 @@ describe('RendererRecovery', () => {
     expect(window.webContents.reload).not.toHaveBeenCalled()
     recovery.dispose()
   })
+
+  it('can dispose after Electron destroys the BrowserWindow and its webContents', () => {
+    const window = makeWindow()
+    const webContents = window.webContents
+    const recovery = attachRendererRecovery({ window })
+
+    window.isDestroyed.mockReturnValue(true)
+    webContents.isDestroyed.mockReturnValue(true)
+    Object.defineProperty(window, 'webContents', {
+      configurable: true,
+      get() {
+        throw new TypeError('Object has been destroyed')
+      }
+    })
+
+    expect(() => window.emit('closed')).not.toThrow()
+    expect(() => recovery.dispose()).not.toThrow()
+  })
 })

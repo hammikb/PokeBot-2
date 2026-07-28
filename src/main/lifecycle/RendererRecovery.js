@@ -7,6 +7,8 @@ export function attachRendererRecovery({
   unresponsiveDelayMs = 5000
 }) {
   let recoveryTimer = null
+  let disposed = false
+  const webContents = window.webContents
 
   const cancelRecovery = () => {
     if (recoveryTimer) clearTimeout(recoveryTimer)
@@ -17,9 +19,9 @@ export function attachRendererRecovery({
     if (recoveryTimer || isShuttingDown()) return
     recoveryTimer = setTimeout(() => {
       recoveryTimer = null
-      if (isShuttingDown() || window.isDestroyed?.() || window.webContents?.isDestroyed?.()) return
+      if (isShuttingDown() || window.isDestroyed?.() || webContents.isDestroyed?.()) return
       onRecovery(reason)
-      window.webContents.reload()
+      webContents.reload()
     }, delayMs)
     recoveryTimer.unref?.()
   }
@@ -34,14 +36,20 @@ export function attachRendererRecovery({
   }
   const onWindowResponsive = () => cancelRecovery()
   const dispose = () => {
+    if (disposed) return
+    disposed = true
     cancelRecovery()
-    window.webContents.off?.('render-process-gone', onRenderProcessGone)
-    window.off?.('unresponsive', onWindowUnresponsive)
-    window.off?.('responsive', onWindowResponsive)
-    window.off?.('closed', dispose)
+    if (!webContents.isDestroyed?.()) {
+      webContents.off?.('render-process-gone', onRenderProcessGone)
+    }
+    if (!window.isDestroyed?.()) {
+      window.off?.('unresponsive', onWindowUnresponsive)
+      window.off?.('responsive', onWindowResponsive)
+      window.off?.('closed', dispose)
+    }
   }
 
-  window.webContents.on('render-process-gone', onRenderProcessGone)
+  webContents.on('render-process-gone', onRenderProcessGone)
   window.on('unresponsive', onWindowUnresponsive)
   window.on('responsive', onWindowResponsive)
   window.on('closed', dispose)

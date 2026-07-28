@@ -395,15 +395,54 @@ app.on('before-quit', (event) => {
 function shutdownAndExit() {
   if (shutdownPromise) return shutdownPromise
   shutdownPromise = (async () => {
-    await Promise.allSettled([
-      taskManager?.shutdown?.(),
-      queueJoiner?.stopAll?.(),
-      pokemonCenterQueueJoiner?.stopAll?.()
-    ])
-    await browserPool?.closeAll?.()
-    rendererRecovery?.dispose?.()
-    authSessionManager?.dispose?.()
-    app.exit(0)
+    try {
+      await settleShutdownOperations('background services', [
+        () => taskManager?.shutdown?.(),
+        () => queueJoiner?.stopAll?.(),
+        () => pokemonCenterQueueJoiner?.stopAll?.()
+      ])
+      await settleShutdownOperations('browser pool', [() => browserPool?.closeAll?.()])
+
+      for (const [name, dispose] of [
+        ['renderer recovery', () => rendererRecovery?.dispose?.()],
+        ['authentication session', () => authSessionManager?.dispose?.()]
+      ]) {
+        try {
+          dispose()
+        } catch (error) {
+          logger.warn('Shutdown', `Could not dispose ${name} cleanly`, {
+            error: error.message
+          })
+        }
+      }
+    } finally {
+      app.exit(0)
+    }
   })()
   return shutdownPromise
+}
+
+async function settleShutdownOperations(label, operations, timeoutMs = 5000) {
+  let timeoutId
+  const cleanup = Promise.allSettled(
+    operations.map((operation) => Promise.resolve().then(operation))
+  )
+  const timeout = new Promise((resolve) => {
+    timeoutId = setTimeout(() => resolve(null), timeoutMs)
+    timeoutId.unref?.()
+  })
+  const results = await Promise.race([cleanup, timeout])
+  clearTimeout(timeoutId)
+
+  if (!results) {
+    logger.warn('Shutdown', `Timed out while stopping ${label}`, { timeoutMs })
+    return
+  }
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      logger.warn('Shutdown', `Could not stop ${label} cleanly`, {
+        error: result.reason?.message || String(result.reason)
+      })
+    }
+  }
 }
