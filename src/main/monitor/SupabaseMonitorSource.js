@@ -5,6 +5,7 @@ const CATCH_UP_CURSOR_OVERLAP_MS = 1000
 const MAX_CATCH_UP_ROWS = 500
 const MAX_SEEN_EVENT_IDS_PER_PRODUCT = 1000
 const MAX_CATCH_UP_RETRY_MS = 30_000
+const WALMART_QUEUE_TOPIC = 'drops:retailer:walmart:queues'
 const ACTIONABLE_DROP_TYPES = new Set([
   'in_stock',
   'restock',
@@ -34,6 +35,8 @@ export class SupabaseMonitorSource extends EventEmitter {
     this._catchUpRetryAttempts = new Map()
     this._cursors = new Map()
     this._seenEventIds = new Map()
+    this._walmartQueueChannel = null
+    this._walmartQueueProductCache = new Map()
   }
 
   async addProduct({ productUrl, retailer, productKey, productName, maxPrice }) {
@@ -125,6 +128,124 @@ export class SupabaseMonitorSource extends EventEmitter {
     this._channels.set(productUrl, { channel, productId })
 
     return { subscribed: true, productId }
+  }
+
+  async subscribeWalmartQueueFeed() {
+    if (this._walmartQueueChannel) {
+      return { subscribed: true, topic: WALMART_QUEUE_TOPIC }
+    }
+
+    const channel = this._client
+      .channel(WALMART_QUEUE_TOPIC, { config: { private: true } })
+      .on('broadcast', { event: 'drop' }, ({ payload }) => {
+        this._handleWalmartQueueDrop(payload).catch((error) => {
+          this.emit('notice', {
+            message: `Could not process a Walmart queue alert: ${error.message}`
+          })
+        })
+      })
+
+    this._walmartQueueChannel = channel
+    const result = await new Promise((resolve, reject) => {
+      channel.subscribe((status, error) => {
+        this.emit('health', {
+          productId: 'walmart-queue-feed',
+          productUrl: null,
+          status,
+          error
+        })
+        if (status === 'SUBSCRIBED') {
+          resolve({ subscribed: true, topic: WALMART_QUEUE_TOPIC })
+        } else if (['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'].includes(status)) {
+          reject(error || new Error(`Walmart queue feed ${status.toLowerCase()}`))
+        }
+      })
+    }).catch(async (error) => {
+      if (this._walmartQueueChannel === channel) this._walmartQueueChannel = null
+      await this._client.removeChannel(channel).catch(() => {})
+      throw error
+    })
+
+    await this._catchUpWalmartQueueFeed().catch((error) => {
+      this.emit('notice', {
+        message: `Walmart queue feed connected, but recent-alert catch-up failed: ${error.message}`
+      })
+    })
+    return result
+  }
+
+  async unsubscribeWalmartQueueFeed() {
+    const channel = this._walmartQueueChannel
+    this._walmartQueueChannel = null
+    this._walmartQueueProductCache.clear()
+    if (channel) await this._client.removeChannel(channel)
+  }
+
+  async _handleWalmartQueueDrop(payload) {
+    const productId = String(payload?.product_id || '').trim()
+    const dropType = String(payload?.drop_type || '').toLowerCase()
+    if (!productId || String(payload?.retailer || '').toLowerCase() !== 'walmart') return false
+    if (dropType !== 'queue_open') return false
+
+    const receivedAt = this._now()
+    const observedAt = normalizeObservedAt(
+      payload?.created_at ?? payload?.observed_at ?? payload?.timestamp,
+      receivedAt
+    )
+    const eventId = stableEventId(productId, payload, observedAt, receivedAt)
+    if (this._hasSeenEvent(productId, eventId)) return false
+    this._rememberEvent(productId, eventId)
+
+    let product = this._walmartQueueProductCache.get(productId)
+    if (!product) {
+      const { data, error } = await this._client
+        .from('products')
+        .select('product_url,product_key,name')
+        .eq('id', productId)
+        .maybeSingle()
+      if (error) throw new Error(`Walmart queue product lookup failed: ${error.message}`)
+      product = data || null
+      if (product) this._walmartQueueProductCache.set(productId, product)
+    }
+    if (!product?.product_url) {
+      this.emit('notice', {
+        message: 'A Walmart queue opened, but its product URL was unavailable.'
+      })
+      return false
+    }
+
+    this.emit('drop', {
+      retailer: 'walmart',
+      productName: payload?.name || product.name || product.product_key || 'Walmart product',
+      productUrl: product.product_url,
+      productKey: product.product_key || null,
+      price: payload?.price ?? null,
+      dropType,
+      productId,
+      eventId,
+      dropCycleId: String(payload?.drop_cycle_id ?? payload?.dropCycleId ?? eventId),
+      observedAt
+    })
+    return true
+  }
+
+  async _catchUpWalmartQueueFeed() {
+    const since = new Date(this._now() - this._catchUpWindowMs).toISOString()
+    const { data, error } = await this._client
+      .from('drops')
+      .select('id,product_id,retailer,name,price,drop_type,drop_cycle_id,created_at')
+      .eq('retailer', 'walmart')
+      .eq('drop_type', 'queue_open')
+      .gte('created_at', since)
+      .order('created_at', { ascending: true })
+      .limit(MAX_CATCH_UP_ROWS + 1)
+    if (error) throw new Error(`Walmart queue catch-up failed: ${error.message}`)
+    if ((data || []).length > MAX_CATCH_UP_ROWS) {
+      throw new Error(`Walmart queue catch-up exceeded ${MAX_CATCH_UP_ROWS} rows`)
+    }
+    for (const row of data || []) {
+      await this._handleWalmartQueueDrop(row)
+    }
   }
 
   _handleDrop(productId, payload, { delivery = 'realtime' } = {}) {
@@ -221,6 +342,7 @@ export class SupabaseMonitorSource extends EventEmitter {
   }
 
   async stop() {
+    await this.unsubscribeWalmartQueueFeed()
     for (const productUrl of [...this._channels.keys()]) {
       await this.releaseChannel(productUrl)
     }

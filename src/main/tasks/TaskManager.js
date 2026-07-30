@@ -18,6 +18,7 @@ const log = createModuleLogger('TaskManager')
 const POKEMON_CENTER_AUTO_JOIN_ID = 'pokemon-center-auto-join'
 const POKEMON_CENTER_QUEUE_URL = 'https://www.pokemoncenter.com/'
 const POKEMON_CENTER_QUEUE_ALERT_COOLDOWN_MS = 6 * 60 * 60 * 1000
+const WALMART_AUTO_QUEUE_PREFIX = 'walmart-auto-queue:'
 const QUEUE_CHECKOUT_TIMEOUT_MS = 10 * 60 * 1000
 const REALTIME_RECOVERY_DELAY_MS = 1500
 
@@ -80,6 +81,8 @@ export class TaskManager extends EventEmitter {
     this._monitorRefreshPromise = null
     this._pokemonCenterAutoJoinEnabled = false
     this._pokemonCenterQueueAlertedAt = 0
+    this._walmartJoinAllQueuesEnabled = false
+    this._walmartAutoQueueJobIds = new Set()
     this._recoverUncertainAccountHolds()
 
     this._supabaseSource = null
@@ -96,6 +99,14 @@ export class TaskManager extends EventEmitter {
           dropType: 'supabase_notice'
         })
       })
+    })
+    this._queueJoiner?.on('progress', (payload) => {
+      if (
+        this._walmartAutoQueueJobIds.has(payload?.id) &&
+        ['stopped', 'timeout', 'error', 'no-queue'].includes(payload?.phase)
+      ) {
+        this._walmartAutoQueueJobIds.delete(payload.id)
+      }
     })
   }
 
@@ -325,7 +336,9 @@ export class TaskManager extends EventEmitter {
 
     this._realtimeHeartbeatFailures += 1
     if (
-      this._tasks.size === 0 ||
+      (this._tasks.size === 0 &&
+        !this._walmartJoinAllQueuesEnabled &&
+        !this._pokemonCenterAutoJoinEnabled) ||
       this._realtimeRecoveryTimer ||
       (normalized === 'timeout' && this._realtimeHeartbeatFailures < 2)
     ) {
@@ -421,9 +434,15 @@ export class TaskManager extends EventEmitter {
         error: error.message
       })
     })
+    let walmartQueueFeedConnected = false
+    if (this._walmartJoinAllQueuesEnabled) {
+      const queueFeed = await this.setWalmartJoinAllQueues(true)
+      walmartQueueFeedConnected = queueFeed.connected === true
+    }
     return {
       authenticated: true,
-      rebound: results.filter((result) => result.status === 'fulfilled').length
+      rebound: results.filter((result) => result.status === 'fulfilled').length,
+      walmartQueueFeedConnected
     }
   }
 
@@ -622,6 +641,39 @@ export class TaskManager extends EventEmitter {
     return this._pokemonCenterAutoJoinEnabled
   }
 
+  async setWalmartJoinAllQueues(enabled) {
+    const next = enabled === true
+    this._walmartJoinAllQueuesEnabled = next
+    if (!next) {
+      await this._supabaseSource?.unsubscribeWalmartQueueFeed?.()
+      await Promise.allSettled(
+        [...this._walmartAutoQueueJobIds].map((id) => this._queueJoiner?.stop(id))
+      )
+      this._walmartAutoQueueJobIds.clear()
+      return { enabled: false, connected: false }
+    }
+
+    if (this._authSessionManager && !this._authSessionManager.getStatus().authenticated) {
+      log.warn('Walmart join-all-queues is armed; waiting for Supabase authentication')
+      return { enabled: true, connected: false, reason: 'auth-pending' }
+    }
+
+    try {
+      const source = await this._getSupabaseSource()
+      const result = await source.subscribeWalmartQueueFeed()
+      return { enabled: true, connected: result?.subscribed === true }
+    } catch (error) {
+      log.warn('Walmart join-all-queues is armed; connection will retry', {
+        error: error.message
+      })
+      return { enabled: true, connected: false, reason: error.message }
+    }
+  }
+
+  isWalmartJoinAllQueuesEnabled() {
+    return this._walmartJoinAllQueuesEnabled
+  }
+
   clearAccountManualReview(accountId) {
     this._manualReviewAccounts.delete(accountId)
   }
@@ -749,6 +801,28 @@ export class TaskManager extends EventEmitter {
           account: this._getPokemonCenterAccount(),
           browserMode: this._getSettings().pokemonCenterQueueBrowser || 'managed'
         })
+      } else if (dropEvent.retailer === 'walmart' && this._walmartJoinAllQueuesEnabled && joiner) {
+        const taskAccountIds = task ? parseAccountIds(task.account_ids) : []
+        const account = taskAccountIds.length
+          ? this._accountManager.getDecrypted(taskAccountIds[0])
+          : this._getWalmartQueueAccount()
+        if (!account) {
+          this.emit('drop', {
+            retailer: 'walmart',
+            productName:
+              'Walmart queue detected, but no active Walmart account is configured for Join All Queues.',
+            productUrl: dropEvent.productUrl,
+            dropType: 'supabase_notice'
+          })
+        } else {
+          const id = task?.id || walmartAutoQueueJobId(dropEvent)
+          if (!task) this._walmartAutoQueueJobIds.add(id)
+          joiner.start(id, {
+            productUrl: dropEvent.productUrl,
+            label: dropEvent.productName || dropEvent.productUrl,
+            account
+          })
+        }
       } else if (task && joiner) {
         const accountIds = parseAccountIds(task.account_ids)
         const account = accountIds.length ? this._accountManager.getDecrypted(accountIds[0]) : null
@@ -1519,6 +1593,15 @@ export class TaskManager extends EventEmitter {
     })
     this.emit('drop', event)
   }
+
+  _getWalmartQueueAccount() {
+    const accounts =
+      this._accountManager.getAll?.().filter((entry) => entry.retailer === 'walmart') || []
+    const account =
+      accounts.find((entry) => entry.status === 'active') ||
+      accounts.find((entry) => entry.status !== 'manual_review')
+    return account ? this._accountManager.getDecrypted(account.id) : null
+  }
 }
 
 function parseAccountIds(value) {
@@ -1550,6 +1633,15 @@ function buildMonitorIdentity(taskRow) {
     retailer: taskRow?.retailer,
     productKey: taskRow?.product_key || extractProductKey(taskRow?.retailer, taskRow?.product_url)
   }
+}
+
+function walmartAutoQueueJobId(dropEvent) {
+  const identity =
+    dropEvent?.productId ||
+    dropEvent?.productKey ||
+    extractProductKey('walmart', dropEvent?.productUrl) ||
+    String(dropEvent?.productUrl || 'unknown')
+  return `${WALMART_AUTO_QUEUE_PREFIX}${identity}`
 }
 
 export function isRetryableCheckoutError(message = '', code = '') {

@@ -18,6 +18,7 @@ following groups.
 - `pokemon_center_queue_monitor.py` — Pokemon Center waiting-room detector.
 - `target_stock_observer.py` — low-bandwidth Target availability observer.
 - `walmart_restock_scanner.py` — low-bandwidth Walmart restock scanner.
+- `walmart_queue_rank_tracker.mjs` — broad, low-bandwidth Walmart category and queue detector.
 - `monitor_walmart_pokemon.mjs` — legacy Node Walmart monitor.
 - `pokebot_drop_pusher.py` — reusable Supabase drop publishing module.
 

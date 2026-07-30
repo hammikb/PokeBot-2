@@ -245,6 +245,9 @@ export function registerIpcHandlers({
     if (key === 'pokemonCenterAutoJoin') {
       return taskManager.setPokemonCenterAutoJoin(value === true)
     }
+    if (key === 'walmartJoinAllQueues') {
+      return taskManager.setWalmartJoinAllQueues(value === true)
+    }
     return true
   })
 

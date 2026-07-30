@@ -17,6 +17,11 @@ import { JsonDb } from '../../../src/main/db.js'
 function makeFakeSource() {
   const source = new EventEmitter()
   source.addProduct = vi.fn(async () => ({ subscribed: true, productId: 'prod-1' }))
+  source.subscribeWalmartQueueFeed = vi.fn(async () => ({
+    subscribed: true,
+    topic: 'drops:retailer:walmart:queues'
+  }))
+  source.unsubscribeWalmartQueueFeed = vi.fn(async () => {})
   source.unsubscribe = vi.fn(async () => {})
   source.releaseChannel = vi.fn(async () => {})
   source.stop = vi.fn(async () => {})
@@ -74,6 +79,93 @@ function makeManager() {
 }
 
 describe('TaskManager central monitoring', () => {
+  it('joins every Walmart queue feed item with the first active Walmart account', async () => {
+    const source = makeFakeSource()
+    const queueJoiner = Object.assign(new EventEmitter(), {
+      start: vi.fn(),
+      stop: vi.fn(async () => {})
+    })
+    const walmartAccount = {
+      id: 'walmart-account-1',
+      name: 'Primary Walmart',
+      retailer: 'walmart',
+      status: 'active',
+      profile_path: 'C:/profiles/walmart-account-1'
+    }
+    const accountManager = {
+      getAll: vi.fn(() => [walmartAccount]),
+      getDecrypted: vi.fn(() => ({ ...walmartAccount, password: 'secret' }))
+    }
+    const manager = new TaskManager({
+      accountManager,
+      notificationEngine: { fire: vi.fn() },
+      browserPool: {},
+      getDb: () => makeStubDb(),
+      getSettings: () => ({}),
+      createSupabaseSource: async () => source,
+      queueJoiner
+    })
+
+    await expect(manager.setWalmartJoinAllQueues(true)).resolves.toEqual({
+      enabled: true,
+      connected: true
+    })
+    expect(source.subscribeWalmartQueueFeed).toHaveBeenCalledOnce()
+
+    source.emit('drop', {
+      retailer: 'walmart',
+      productId: 'prod-walmart-1',
+      productKey: '19965460207',
+      productName: 'Destined Rivals Elite Trainer Box',
+      productUrl: 'https://www.walmart.com/ip/19965460207',
+      dropType: 'queue_open'
+    })
+
+    await vi.waitFor(() => expect(queueJoiner.start).toHaveBeenCalledOnce())
+    expect(queueJoiner.start).toHaveBeenCalledWith('walmart-auto-queue:prod-walmart-1', {
+      productUrl: 'https://www.walmart.com/ip/19965460207',
+      label: 'Destined Rivals Elite Trainer Box',
+      account: expect.objectContaining({ id: 'walmart-account-1' })
+    })
+
+    await manager.setWalmartJoinAllQueues(false)
+    expect(source.unsubscribeWalmartQueueFeed).toHaveBeenCalledOnce()
+    expect(queueJoiner.stop).toHaveBeenCalledWith('walmart-auto-queue:prod-walmart-1')
+  })
+
+  it('does not join a global Walmart queue without a configured Walmart account', async () => {
+    const source = makeFakeSource()
+    const queueJoiner = Object.assign(new EventEmitter(), {
+      start: vi.fn(),
+      stop: vi.fn(async () => {})
+    })
+    const manager = new TaskManager({
+      accountManager: { getAll: vi.fn(() => []), getDecrypted: vi.fn() },
+      notificationEngine: { fire: vi.fn() },
+      browserPool: {},
+      getDb: () => makeStubDb(),
+      getSettings: () => ({}),
+      createSupabaseSource: async () => source,
+      queueJoiner
+    })
+    const notices = []
+    manager.on('drop', (event) => notices.push(event))
+
+    await manager.setWalmartJoinAllQueues(true)
+    source.emit('drop', {
+      retailer: 'walmart',
+      productId: 'prod-walmart-2',
+      productName: 'Walmart Queue',
+      productUrl: 'https://www.walmart.com/ip/2',
+      dropType: 'queue_open'
+    })
+
+    await vi.waitFor(() =>
+      expect(notices.some((event) => event.dropType === 'supabase_notice')).toBe(true)
+    )
+    expect(queueJoiner.start).not.toHaveBeenCalled()
+  })
+
   it('auto-joins the Pokemon Center queue without creating a task', async () => {
     const source = makeFakeSource()
     const pokemonCenterQueueJoiner = {

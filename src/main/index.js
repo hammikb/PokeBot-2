@@ -88,20 +88,26 @@ async function createMainWindow(encryptionKey) {
   ])
   authSessionManager.on('change', (state) => {
     mainWindow?.webContents?.send(IPC.AUTH_STATE_CHANGED, state)
-    taskManager?.handleAuthChange?.(state).catch((err) => {
-      logger.warn('TaskManager', 'Could not switch central monitoring account cleanly', {
-        error: err.message
+    Promise.resolve(taskManager?.handleAuthChange?.(state))
+      .then(async () => {
+        if (!state.authenticated) return
+        if (getSettings().pokemonCenterAutoJoin === true) {
+          await taskManager?.setPokemonCenterAutoJoin(true)
+        }
+        // TaskManager.handleAuthChange reconnects this feed itself. Calling it
+        // here only covers a manager created after the auth event was emitted.
+        if (
+          getSettings().walmartJoinAllQueues === true &&
+          !taskManager?.isWalmartJoinAllQueuesEnabled?.()
+        ) {
+          await taskManager?.setWalmartJoinAllQueues(true)
+        }
       })
-    })
-    if (state.authenticated) {
-      if (getSettings().pokemonCenterAutoJoin === true) {
-        taskManager?.setPokemonCenterAutoJoin(true).catch((err) => {
-          logger.warn('TaskManager', 'Could not reconnect Pokemon Center auto-join', {
-            error: err.message
-          })
+      .catch((err) => {
+        logger.warn('TaskManager', 'Could not switch central monitoring account cleanly', {
+          error: err.message
         })
-      }
-    }
+      })
   })
   authSessionManager.on('realtime-heartbeat', (status) => {
     taskManager?.handleRealtimeHeartbeat?.(status)
@@ -144,6 +150,13 @@ async function createMainWindow(encryptionKey) {
   if (settings.pokemonCenterAutoJoin === true) {
     taskManager.setPokemonCenterAutoJoin(true).catch((err) => {
       logger.warn('TaskManager', 'Could not resume Pokemon Center auto-join', {
+        error: err.message
+      })
+    })
+  }
+  if (settings.walmartJoinAllQueues === true) {
+    taskManager.setWalmartJoinAllQueues(true).catch((err) => {
+      logger.warn('TaskManager', 'Could not resume Walmart join-all-queues', {
         error: err.message
       })
     })

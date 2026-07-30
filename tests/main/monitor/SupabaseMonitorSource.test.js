@@ -5,6 +5,7 @@ import { SupabaseMonitorSource } from '../../../src/main/monitor/SupabaseMonitor
 // fire a broadcast into the registered handler.
 function makeFakeClient({
   product,
+  productById = null,
   refetchResult = product,
   userId = 'user-1',
   userError = null,
@@ -28,20 +29,27 @@ function makeFakeClient({
   const client = {
     from: (table) => {
       if (table === 'products') {
-        return {
-          select: () => ({
-            match: () => ({
-              maybeSingle: async () => {
-                selectCallCount += 1
-                // First lookup returns `product`; a second lookup (the race-recovery
-                // re-fetch after a 23505) returns `refetchResult`.
-                return {
-                  data: selectCallCount === 1 ? product : refetchResult,
-                  error: productLookupError
-                }
+        const productSelection = () => ({
+          match: () => ({
+            maybeSingle: async () => {
+              selectCallCount += 1
+              // First lookup returns `product`; a second lookup (the race-recovery
+              // re-fetch after a 23505) returns `refetchResult`.
+              return {
+                data: selectCallCount === 1 ? product : refetchResult,
+                error: productLookupError
               }
-            })
+            }
           }),
+          eq: () => ({
+            maybeSingle: async () => ({
+              data: productById,
+              error: productLookupError
+            })
+          })
+        })
+        return {
+          select: productSelection,
           insert: (row) => {
             calls.insertCalls.push({ row })
             return { select: () => ({ single: async () => insertResult }) }
@@ -72,6 +80,8 @@ function makeFakeClient({
                   .filter(
                     (row) =>
                       (!filters.product_id || row.product_id === filters.product_id) &&
+                      (!filters.retailer || row.retailer === filters.retailer) &&
+                      (!filters.drop_type || row.drop_type === filters.drop_type) &&
                       (!filters.created_at_gte || row.created_at >= filters.created_at_gte)
                   )
                   .slice(0, limit)
@@ -154,6 +164,54 @@ describe('SupabaseMonitorSource', () => {
     })
     expect(calls.channels[0].name).toBe('drops:product:prod-1')
     expect(calls.channels[0].opts).toEqual({ config: { private: true } })
+  })
+
+  it('subscribes to the private Walmart queue feed, hydrates products, and deduplicates alerts', async () => {
+    const productById = {
+      product_url: 'https://www.walmart.com/ip/19965460207',
+      product_key: '19965460207',
+      name: 'Destined Rivals Elite Trainer Box'
+    }
+    const { client, calls, fireDrop } = makeFakeClient({
+      product: SEED,
+      productById
+    })
+    const source = new SupabaseMonitorSource({ client })
+    const drops = []
+    source.on('drop', (event) => drops.push(event))
+
+    await expect(source.subscribeWalmartQueueFeed()).resolves.toEqual({
+      subscribed: true,
+      topic: 'drops:retailer:walmart:queues'
+    })
+    expect(calls.channels[0].name).toBe('drops:retailer:walmart:queues')
+    expect(calls.channels[0].opts).toEqual({ config: { private: true } })
+
+    const payload = {
+      id: 'queue-drop-1',
+      product_id: 'prod-walmart-1',
+      retailer: 'walmart',
+      name: 'Destined Rivals Elite Trainer Box',
+      price: 65,
+      drop_type: 'queue_open',
+      created_at: '2026-07-30T01:19:31.119Z'
+    }
+    fireDrop(payload)
+    fireDrop(payload)
+
+    await vi.waitFor(() => expect(drops).toHaveLength(1))
+    expect(drops[0]).toMatchObject({
+      retailer: 'walmart',
+      productName: 'Destined Rivals Elite Trainer Box',
+      productUrl: 'https://www.walmart.com/ip/19965460207',
+      productKey: '19965460207',
+      dropType: 'queue_open',
+      productId: 'prod-walmart-1',
+      eventId: 'queue-drop-1'
+    })
+
+    await source.unsubscribeWalmartQueueFeed()
+    expect(calls.removed).toBe(1)
   })
 
   it('fails startup when the authenticated subscription cannot be proven', async () => {

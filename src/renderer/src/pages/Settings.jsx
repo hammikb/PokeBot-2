@@ -53,6 +53,48 @@ export default function Settings() {
         </div>
       </div>
 
+      <div className="border border-gray-800 rounded-lg p-3 bg-[#0d0d0f]">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <div className="text-gray-300 uppercase tracking-wider text-sm">
+              Join All Walmart Queues
+            </div>
+            <div className="text-gray-600 text-sm mt-1">
+              Automatically opens every Walmart queue reported by the Pi using your first active
+              Walmart account. Repeated alerts for the same item are ignored.
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={settings.walmartJoinAllQueues === true}
+            onClick={() =>
+              saveSetting('walmartJoinAllQueues', settings.walmartJoinAllQueues !== true)
+            }
+            className={`relative w-12 h-7 rounded-full shrink-0 transition-colors ${
+              settings.walmartJoinAllQueues === true ? 'bg-red-600' : 'bg-gray-700'
+            }`}
+          >
+            <span
+              className={`pointer-events-none absolute left-0 top-1 w-5 h-5 bg-white rounded-full transition-transform ${
+                settings.walmartJoinAllQueues === true ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+            <span className="sr-only">Toggle automatic Walmart queue joining</span>
+          </button>
+        </div>
+        <div className="text-xs mt-2 text-gray-500">
+          Current:{' '}
+          {settings.walmartJoinAllQueues === true
+            ? 'Armed for every detected Walmart queue'
+            : 'Only queue-enabled product tasks will join'}
+        </div>
+        <div className="text-xs mt-1 text-amber-500/80">
+          Newly discovered items are held for manual checkout. Existing auto-checkout tasks keep
+          their configured checkout behavior.
+        </div>
+      </div>
+
       <div>
         <label className="text-gray-500 uppercase tracking-wider text-sm block mb-1.5">
           Pokemon Center Queue Browser
