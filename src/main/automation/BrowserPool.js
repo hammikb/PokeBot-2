@@ -2,6 +2,7 @@ import { launchPersistentContext } from 'cloakbrowser'
 import { mkdirSync } from 'fs'
 import { createModuleLogger } from '../utils/logger.js'
 import { buildCloakBrowserOptions, redactProxyUrl } from './cloakBrowserConfig.js'
+import { isCaptchaPresent } from './captcha.js'
 
 const log = createModuleLogger('BrowserPool')
 const DEFAULT_TIMEOUT = 60 * 60 * 1000 // 60 minutes
@@ -9,6 +10,11 @@ const HEALTH_CHECK_INTERVAL = 5 * 60 * 1000 // 5 minutes
 const DEFAULT_CLOSE_TIMEOUT_MS = 10_000
 
 const SHAPE_COOKIE_NAMES = ['_shapes', 'shape', '_sfid', '_sctr', '_sdid']
+// ~25 min with jitter: comfortably inside Akamai's ~1-2h sensor cookie lifetime, and
+// jittered so repeated touches never land on a fixed machine-looking cadence.
+const KEEPALIVE_BASE_MS = 22 * 60 * 1000
+const KEEPALIVE_JITTER_MS = 7 * 60 * 1000
+
 const RETAILER_HOME = {
   target: 'https://www.target.com/',
   walmart: 'https://www.walmart.com/',
@@ -22,13 +28,18 @@ export class BrowserPool {
     contextTimeout = DEFAULT_TIMEOUT,
     setupWarmupMs = 1500,
     capacityWaitMs = 20_000,
-    closeTimeoutMs = DEFAULT_CLOSE_TIMEOUT_MS
+    closeTimeoutMs = DEFAULT_CLOSE_TIMEOUT_MS,
+    // Called with { accountId, retailer, reason } the first time a keepalive sees a
+    // block. Lets the caller trip its circuit breaker without this pool importing one.
+    onBlocked = null
   } = {}) {
     this._maxConcurrent = maxConcurrent
     this._contextTimeout = contextTimeout
     this._setupWarmupMs = setupWarmupMs
     this._capacityWaitMs = capacityWaitMs
     this._closeTimeoutMs = Math.max(100, Number(closeTimeoutMs) || DEFAULT_CLOSE_TIMEOUT_MS)
+    this._onBlocked = onBlocked
+    this._keepalive = new Map()
     this._active = new Map()
     this._pending = new Map()
     this._pendingProxy = new Map()
@@ -120,7 +131,9 @@ export class BrowserPool {
   async pin(accountId, options) {
     this._pinned.add(accountId)
     try {
-      return await this.launch(accountId, options)
+      const context = await this.launch(accountId, options)
+      this._startKeepalive(accountId, options?.retailer)
+      return context
     } catch (err) {
       this._pinned.delete(accountId)
       throw err
@@ -129,8 +142,87 @@ export class BrowserPool {
 
   async unpin(accountId, { close = false } = {}) {
     this._pinned.delete(accountId)
+    this._stopKeepalive(accountId)
     if (close) {
       await this.close(accountId)
+    }
+  }
+
+  // A pinned context makes no requests while idle, so it is invisible to the retailer —
+  // but its Akamai sensor cookies age out in ~1-2h, and re-validating them mid-drop is
+  // exactly when the latency is unaffordable. A slow jittered touch keeps them fresh.
+  _startKeepalive(accountId, retailer) {
+    if (!retailer || !RETAILER_HOME[retailer]) return
+    this._stopKeepalive(accountId)
+    const delay = KEEPALIVE_BASE_MS + Math.floor(Math.random() * KEEPALIVE_JITTER_MS)
+    const timer = setTimeout(() => {
+      this._keepaliveTick(accountId, retailer).catch((err) => {
+        log.warn('Keepalive tick failed', { accountId, retailer, error: err.message })
+        // A transient nav failure is not a block; keep the rhythm rather than
+        // tearing down a healthy warm context.
+        if (this._pinned.has(accountId)) this._startKeepalive(accountId, retailer)
+      })
+    }, delay)
+    if (typeof timer.unref === 'function') timer.unref()
+    this._keepalive.set(accountId, timer)
+  }
+
+  _stopKeepalive(accountId) {
+    const timer = this._keepalive.get(accountId)
+    if (timer) clearTimeout(timer)
+    this._keepalive.delete(accountId)
+  }
+
+  async _keepaliveTick(accountId, retailer) {
+    const context = this._active.get(accountId)
+    if (!context || !this._pinned.has(accountId)) return this._stopKeepalive(accountId)
+
+    // Never open a maintenance page while a checkout (or a user-controlled page)
+    // is active. A challenge response on the maintenance request must not tear
+    // down an in-flight cart or replace the page the user is working in.
+    const openPages = (context.pages?.() || []).filter(
+      (page) => typeof page.isClosed !== 'function' || !page.isClosed()
+    )
+    if (openPages.length > 0) {
+      this._startKeepalive(accountId, retailer)
+      return
+    }
+
+    const page = await context.newPage()
+    try {
+      const response = await page.goto(RETAILER_HOME[retailer], {
+        waitUntil: 'domcontentloaded',
+        timeout: 30_000
+      })
+      const status = response?.status() ?? 0
+      const reason =
+        status === 403 || status === 429
+          ? `HTTP ${status}`
+          : (await isCaptchaPresent(page).catch(() => false))
+            ? 'security challenge'
+            : null
+
+      if (reason) {
+        // Hard stop. Every further request after a block deepens the penalty, so we
+        // do not retry, do not reschedule, and drop the pin so nothing reuses this
+        // session until a human looks at it.
+        log.error('Keepalive detected a block; stopping keepalive and releasing the pin', {
+          accountId,
+          retailer,
+          reason
+        })
+        this._stopKeepalive(accountId)
+        this._pinned.delete(accountId)
+        await page.close().catch(() => {})
+        await this.close(accountId).catch(() => {})
+        this._onBlocked?.({ accountId, retailer, reason })
+        return
+      }
+
+      this._updateActivity(accountId)
+      this._startKeepalive(accountId, retailer)
+    } finally {
+      await page.close().catch(() => {})
     }
   }
 
@@ -292,6 +384,7 @@ export class BrowserPool {
       clearInterval(this._healthCheckTimer)
       this._healthCheckTimer = null
     }
+    for (const accountId of [...this._keepalive.keys()]) this._stopKeepalive(accountId)
     this._pinned.clear()
 
     for (const waiter of this._capacityWaiters.splice(0)) {

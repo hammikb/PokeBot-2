@@ -224,4 +224,84 @@ describe('BrowserPool', () => {
     expect(browser.close).toHaveBeenCalledOnce()
     expect(pool.getActiveCount()).toBe(0)
   })
+
+  describe('keepalive', () => {
+    // Builds a context whose keepalive navigation returns `status`, optionally with a
+    // captcha in the page, and lets the test drive the timer by hand.
+    function makePinnedPool({ status = 200, captcha = false, onBlocked } = {}) {
+      const page = {
+        goto: vi.fn(async () => ({ status: () => status })),
+        mouse: { move: vi.fn(async () => {}) },
+        close: vi.fn(async () => {}),
+        locator: vi.fn(() => ({
+          first: () => ({ isVisible: async () => captcha, count: async () => (captcha ? 1 : 0) })
+        })),
+        $: vi.fn(async () => (captcha ? {} : null)),
+        content: vi.fn(async () => (captcha ? '<html>press and hold</html>' : '<html>ok</html>')),
+        url: vi.fn(() => 'https://www.target.com/')
+      }
+      const context = makeContext({ open: true })
+      context.newPage = vi.fn(async () => page)
+      mocks.launchPersistentContext.mockReset()
+      mocks.launchPersistentContext.mockResolvedValue(context)
+      const pool = new BrowserPool({ setupWarmupMs: 0, onBlocked })
+      return { pool, context, page }
+    }
+
+    it('reschedules itself while the retailer answers normally', async () => {
+      const { pool } = makePinnedPool({ status: 200 })
+      await pool.pin('acct', { profilePath: 'C:/tmp/acct', proxy: '', retailer: 'target' })
+
+      await pool._keepaliveTick('acct', 'target')
+
+      expect(pool.isPinned('acct')).toBe(true)
+      expect(pool._keepalive.has('acct')).toBe(true)
+      await pool.closeAll()
+    })
+
+    it('stops dead on the first block instead of retrying into it', async () => {
+      const onBlocked = vi.fn()
+      const { pool } = makePinnedPool({ status: 429, onBlocked })
+      await pool.pin('acct', { profilePath: 'C:/tmp/acct', proxy: '', retailer: 'target' })
+
+      await pool._keepaliveTick('acct', 'target')
+
+      // No rescheduled timer, no pin, no live context: nothing can issue another
+      // request into a block that escalates with every request.
+      expect(pool._keepalive.has('acct')).toBe(false)
+      expect(pool.isPinned('acct')).toBe(false)
+      expect(pool.getActiveCount()).toBe(0)
+      expect(onBlocked).toHaveBeenCalledWith({
+        accountId: 'acct',
+        retailer: 'target',
+        reason: 'HTTP 429'
+      })
+    })
+
+    it('does not touch or close a pinned context while a page is active', async () => {
+      const { pool, context } = makePinnedPool({ status: 429 })
+      const checkoutPage = { isClosed: () => false }
+      context.pages = vi.fn(() => [checkoutPage])
+      await pool.pin('acct', { profilePath: 'C:/tmp/acct', proxy: '', retailer: 'target' })
+      context.newPage.mockClear()
+
+      await pool._keepaliveTick('acct', 'target')
+
+      expect(context.newPage).not.toHaveBeenCalled()
+      expect(pool.isPinned('acct')).toBe(true)
+      expect(pool.getActiveCount()).toBe(1)
+      await pool.closeAll()
+    })
+
+    it('unpinning cancels the keepalive so a stopped task stops touching the retailer', async () => {
+      const { pool } = makePinnedPool({ status: 200 })
+      await pool.pin('acct', { profilePath: 'C:/tmp/acct', proxy: '', retailer: 'target' })
+      expect(pool._keepalive.has('acct')).toBe(true)
+
+      await pool.unpin('acct', { close: true })
+
+      expect(pool._keepalive.has('acct')).toBe(false)
+      expect(pool.isPinned('acct')).toBe(false)
+    })
+  })
 })
