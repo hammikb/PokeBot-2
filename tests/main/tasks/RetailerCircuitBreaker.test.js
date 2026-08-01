@@ -69,4 +69,25 @@ describe('RetailerCircuitBreaker', () => {
     circuit.recordFailure('target', 'item is out of stock')
     expect(circuit.allow('target')).toEqual({ allowed: true })
   })
+
+  it('trip() opens on the very first confirmed block, ignoring the threshold', () => {
+    let now = 1000
+    const circuit = new RetailerCircuitBreaker({
+      threshold: 3,
+      cooldownMs: 5000,
+      now: () => now
+    })
+
+    // recordFailure would need 3 of these; a keepalive block is proof on its own, and
+    // the two extra requests it would take to reach the threshold are the exact
+    // requests that escalated 2026-07-17 from a soft fallback into lost carts.
+    circuit.recordFailure('target', 'HTTP 429')
+    expect(circuit.allow('target')).toEqual({ allowed: true })
+
+    circuit.trip('target', 'HTTP 429 (keepalive)')
+    expect(circuit.allow('target')).toMatchObject({ allowed: false })
+
+    now += 5001
+    expect(circuit.allow('target')).toMatchObject({ allowed: true, halfOpen: true })
+  })
 })

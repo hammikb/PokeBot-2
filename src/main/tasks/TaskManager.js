@@ -1492,6 +1492,19 @@ export class TaskManager extends EventEmitter {
     await this._pool.close(accountId)
   }
 
+  // Trip the retailer circuit from outside a checkout run (the keepalive). Uses the
+  // same classifier as a real checkout failure, so a 403/429/challenge opens the
+  // circuit and blocks checkouts for the cooldown instead of racing into the block.
+  reportRetailerBlocked(retailer, reason) {
+    if (!retailer) return null
+    const outcome = this._retailerCircuit.trip(retailer, reason)
+    log.error('Retailer reported blocked outside a checkout run; circuit opened', {
+      retailer,
+      reason
+    })
+    return outcome
+  }
+
   _retainTaskAccounts(task) {
     if (!FLOWS[task.retailer] || task.mode === 'alert-only' || !this._pool?.pin) return
     const accountIds = parseAccountIds(task.account_ids)
@@ -1506,9 +1519,10 @@ export class TaskManager extends EventEmitter {
       const account = this._accountManager.getDecrypted(accountId)
       if (!account?.profile_path) continue
 
-      // Only pre-warm when using a proxy — proxy connections are slow to
-      // establish and need Shape cookie hydration to beat Akamai bot detection.
-      if (!String(account.proxy || '').trim()) continue
+      // Pre-warm regardless of proxy. Proxied sessions need it most (slow connect plus
+      // Shape cookie hydration), but a direct session still pays ~3.8s of browser launch
+      // and ~1.7s of page load + sign-in verification at drop time, which is the bulk of
+      // the gap between a drop firing and the add-to-cart click.
 
       const startedAt = Date.now()
       this._pool

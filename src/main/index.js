@@ -57,7 +57,16 @@ async function createMainWindow(encryptionKey) {
   const shippingManager = new ShippingManager(getDb)
   const thumbnailCache = new ThumbnailCache()
   const settings = getSettings()
-  browserPool = new BrowserPool({ maxConcurrent: settings.maxConcurrent || 3 })
+  browserPool = new BrowserPool({
+    maxConcurrent: settings.maxConcurrent || 3,
+    // A keepalive that sees a block must stop the whole retailer, not just itself —
+    // requests made after the first block are what escalated the 2026-07-17 rate limit
+    // from a soft fallback into lost carts. taskManager is assigned further below; this
+    // only fires once a pinned context exists, which is well after that point.
+    onBlocked: ({ accountId, retailer, reason }) => {
+      taskManager?.reportRetailerBlocked?.(retailer, `${reason} (keepalive, ${accountId})`)
+    }
+  })
   const notificationEngine = new NotificationEngine()
   const profileWarmup = new ProfileWarmup(browserPool)
   queueJoiner = new QueueJoiner({ browserPool })

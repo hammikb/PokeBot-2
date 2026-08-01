@@ -56,6 +56,21 @@ export class RetailerCircuitBreaker {
     return { opened: Boolean(state.openedAt), classification, failures: state.failures.length }
   }
 
+  // Open immediately, skipping the failure threshold. For unambiguous blocks only:
+  // a bare homepage GET answered with 403/429/challenge is proof on its own, unlike a
+  // checkout failure that could just be inventory noise. Waiting for 3 of these would
+  // mean making two more requests into a block that gets worse with every request.
+  trip(retailer, reason = 'blocked') {
+    const state = this.states.get(retailer) || { failures: [] }
+    const now = this.now()
+    state.failures.push({ at: now, reason })
+    state.reason = reason
+    state.openedAt = now
+    state.halfOpenInFlight = false
+    this.states.set(retailer, state)
+    return { opened: true, reason }
+  }
+
   reset(retailer) {
     this.states.delete(retailer)
   }

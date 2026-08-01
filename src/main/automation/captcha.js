@@ -10,7 +10,7 @@ const CAPTCHA_SELECTORS = [
   '[data-sitekey]'
 ]
 
-async function isCaptchaPresent(page) {
+export async function isCaptchaPresent(page) {
   try {
     const presentInMainDocument = await page.evaluate((selectors) => {
       const pageText = document.body?.innerText?.toLowerCase() || ''
