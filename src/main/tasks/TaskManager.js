@@ -83,6 +83,7 @@ export class TaskManager extends EventEmitter {
     this._pokemonCenterQueueAlertedAt = 0
     this._walmartJoinAllQueuesEnabled = false
     this._walmartAutoQueueJobIds = new Set()
+    this._walmartQueueAccountId = null
     this._recoverUncertainAccountHolds()
 
     this._supabaseSource = null
@@ -650,6 +651,12 @@ export class TaskManager extends EventEmitter {
         [...this._walmartAutoQueueJobIds].map((id) => this._queueJoiner?.stop(id))
       )
       this._walmartAutoQueueJobIds.clear()
+      if (this._walmartQueueAccountId) {
+        await Promise.resolve(
+          this._pool?.unpin?.(this._walmartQueueAccountId, { close: true })
+        ).catch(() => {})
+        this._walmartQueueAccountId = null
+      }
       return { enabled: false, connected: false }
     }
 
@@ -661,6 +668,7 @@ export class TaskManager extends EventEmitter {
     try {
       const source = await this._getSupabaseSource()
       const result = await source.subscribeWalmartQueueFeed()
+      await this._warmWalmartQueueAccount()
       return { enabled: true, connected: result?.subscribed === true }
     } catch (error) {
       log.warn('Walmart join-all-queues is armed; connection will retry', {
@@ -672,6 +680,39 @@ export class TaskManager extends EventEmitter {
 
   isWalmartJoinAllQueuesEnabled() {
     return this._walmartJoinAllQueuesEnabled
+  }
+
+  async _warmWalmartQueueAccount() {
+    if (!this._pool?.pin) return false
+    const account = this._getWalmartQueueAccount()
+    if (!account?.id || !account.profile_path) return false
+    if (this._walmartQueueAccountId === account.id && this._pool.isPinned?.(account.id)) {
+      return true
+    }
+
+    if (this._walmartQueueAccountId && this._walmartQueueAccountId !== account.id) {
+      await Promise.resolve(
+        this._pool.unpin?.(this._walmartQueueAccountId, { close: true })
+      ).catch(() => {})
+      this._walmartQueueAccountId = null
+    }
+
+    try {
+      await this._pool.pin(account.id, {
+        profilePath: account.profile_path,
+        proxy: account.proxy,
+        retailer: 'walmart'
+      })
+      this._walmartQueueAccountId = account.id
+      log.info('Pre-warmed Walmart Join All Queues account', { accountId: account.id })
+      return true
+    } catch (error) {
+      log.warn('Could not pre-warm Walmart Join All Queues account; queue alerts will launch it on demand', {
+        accountId: account.id,
+        error: error.message
+      })
+      return false
+    }
   }
 
   clearAccountManualReview(accountId) {

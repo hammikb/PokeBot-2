@@ -99,7 +99,7 @@ describe('TaskManager central monitoring', () => {
     const manager = new TaskManager({
       accountManager,
       notificationEngine: { fire: vi.fn() },
-      browserPool: {},
+      browserPool: { pin: vi.fn(async () => ({})), unpin: vi.fn(async () => {}), isPinned: vi.fn(() => false) },
       getDb: () => makeStubDb(),
       getSettings: () => ({}),
       createSupabaseSource: async () => source,
@@ -111,6 +111,11 @@ describe('TaskManager central monitoring', () => {
       connected: true
     })
     expect(source.subscribeWalmartQueueFeed).toHaveBeenCalledOnce()
+    expect(manager._pool.pin).toHaveBeenCalledWith('walmart-account-1', {
+      profilePath: 'C:/profiles/walmart-account-1',
+      proxy: undefined,
+      retailer: 'walmart'
+    })
 
     source.emit('drop', {
       retailer: 'walmart',
@@ -131,6 +136,7 @@ describe('TaskManager central monitoring', () => {
     await manager.setWalmartJoinAllQueues(false)
     expect(source.unsubscribeWalmartQueueFeed).toHaveBeenCalledOnce()
     expect(queueJoiner.stop).toHaveBeenCalledWith('walmart-auto-queue:prod-walmart-1')
+    expect(manager._pool.unpin).toHaveBeenCalledWith('walmart-account-1', { close: true })
   })
 
   it('does not join a global Walmart queue without a configured Walmart account', async () => {
