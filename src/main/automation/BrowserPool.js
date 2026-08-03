@@ -40,6 +40,7 @@ export class BrowserPool {
     this._closeTimeoutMs = Math.max(100, Number(closeTimeoutMs) || DEFAULT_CLOSE_TIMEOUT_MS)
     this._onBlocked = onBlocked
     this._keepalive = new Map()
+    this._warmPages = new Map()
     this._active = new Map()
     this._pending = new Map()
     this._pendingProxy = new Map()
@@ -143,6 +144,9 @@ export class BrowserPool {
   async unpin(accountId, { close = false } = {}) {
     this._pinned.delete(accountId)
     this._stopKeepalive(accountId)
+    const warmPage = this._warmPages.get(accountId)
+    this._warmPages.delete(accountId)
+    await Promise.resolve(warmPage?.close?.()).catch(() => {})
     if (close) {
       await this.close(accountId)
     }
@@ -180,15 +184,17 @@ export class BrowserPool {
     // Never open a maintenance page while a checkout (or a user-controlled page)
     // is active. A challenge response on the maintenance request must not tear
     // down an in-flight cart or replace the page the user is working in.
+    const warmPage = this._warmPages.get(accountId)
     const openPages = (context.pages?.() || []).filter(
-      (page) => typeof page.isClosed !== 'function' || !page.isClosed()
+      (page) => page !== warmPage && (typeof page.isClosed !== 'function' || !page.isClosed())
     )
     if (openPages.length > 0) {
       this._startKeepalive(accountId, retailer)
       return
     }
 
-    const page = await context.newPage()
+    const page = warmPage || (await context.newPage())
+    const ownsPage = page !== warmPage
     try {
       const response = await page.goto(RETAILER_HOME[retailer], {
         waitUntil: 'domcontentloaded',
@@ -213,7 +219,7 @@ export class BrowserPool {
         })
         this._stopKeepalive(accountId)
         this._pinned.delete(accountId)
-        await page.close().catch(() => {})
+        if (ownsPage) await page.close().catch(() => {})
         await this.close(accountId).catch(() => {})
         this._onBlocked?.({ accountId, retailer, reason })
         return
@@ -222,7 +228,7 @@ export class BrowserPool {
       this._updateActivity(accountId)
       this._startKeepalive(accountId, retailer)
     } finally {
-      await page.close().catch(() => {})
+      if (ownsPage) await page.close().catch(() => {})
     }
   }
 
@@ -270,6 +276,7 @@ export class BrowserPool {
       const warmupUrl = RETAILER_HOME[retailer]
       if (warmupUrl) {
         const setupPage = await context.newPage()
+        const keepWarmPage = this._pinned.has(accountId)
         try {
           log.info('Preparing retailer origin', { accountId, retailer })
           await setupPage.goto(warmupUrl, {
@@ -286,7 +293,8 @@ export class BrowserPool {
             error: navErr.message
           })
         } finally {
-          await setupPage.close().catch(() => {})
+          if (keepWarmPage) this._warmPages.set(accountId, setupPage)
+          else await setupPage.close().catch(() => {})
         }
       }
 
@@ -302,6 +310,7 @@ export class BrowserPool {
           this._proxyByAccount.delete(accountId)
           this._retailerByAccount.delete(accountId)
           this._downloadsByAccount.delete(accountId)
+          this._warmPages.delete(accountId)
           this._drainCapacityWaiters()
           log.info('Browser context closed', { accountId })
         }
@@ -343,6 +352,7 @@ export class BrowserPool {
   async close(accountId) {
     const ctx = this._active.get(accountId)
     if (ctx) {
+      this._warmPages.delete(accountId)
       const downloads = [...(this._downloadsByAccount.get(accountId) || [])]
       try {
         await Promise.allSettled(downloads.map((download) => download.cancel?.()))
@@ -385,6 +395,7 @@ export class BrowserPool {
       this._healthCheckTimer = null
     }
     for (const accountId of [...this._keepalive.keys()]) this._stopKeepalive(accountId)
+    this._warmPages.clear()
     this._pinned.clear()
 
     for (const waiter of this._capacityWaiters.splice(0)) {

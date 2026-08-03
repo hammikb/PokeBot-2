@@ -297,10 +297,12 @@ describe('BrowserPool', () => {
       const { pool } = makePinnedPool({ status: 200 })
       await pool.pin('acct', { profilePath: 'C:/tmp/acct', proxy: '', retailer: 'target' })
       expect(pool._keepalive.has('acct')).toBe(true)
+      expect(pool._warmPages.has('acct')).toBe(true)
 
       await pool.unpin('acct', { close: true })
 
       expect(pool._keepalive.has('acct')).toBe(false)
+      expect(pool._warmPages.has('acct')).toBe(false)
       expect(pool.isPinned('acct')).toBe(false)
     })
   })
