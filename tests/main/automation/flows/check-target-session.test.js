@@ -5,6 +5,11 @@ vi.mock('../../../../src/main/automation/captcha.js', () => ({
   waitForCaptchaIfNeeded: vi.fn()
 }))
 
+vi.mock('../../../../src/main/automation/akamaiSensor.js', () => ({
+  validateTargetSession: vi.fn().mockResolvedValue({ valid: true, status: 200 }),
+  regenerateTargetSensorData: vi.fn().mockResolvedValue({ success: true, abckPresent: true })
+}))
+
 beforeEach(() => vi.resetAllMocks())
 
 function makePage({ visibleSelectors = new Set() } = {}) {

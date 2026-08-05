@@ -29,10 +29,46 @@ export async function fillCheckoutPayment(context, payment, onStep = () => {}) {
     onStep(
       `Filling saved ${field === 'cvv' ? 'CVV' : field === 'expiry' ? 'expiration' : 'card number'}`
     )
-    await target.fill(String(values[field]))
+
+    if (field === 'cvv') {
+      await setFieldValueWithEvents(target, String(values[field]))
+    } else {
+      await target.fill(String(values[field]))
+    }
     filled.push(field)
   }
   return { filled, missing }
+}
+
+export async function setFieldValueWithEvents(locator, value) {
+  const page = locator.page?.() || locator
+  const selector = locator._selector || null
+
+  if (selector) {
+    await page.evaluate(
+      ({ selector, value }) => {
+        const input = document.querySelector(selector)
+        if (!input) return false
+
+        const nativeSetter = Object.getOwnPropertyDescriptor(
+          window.HTMLInputElement.prototype,
+          'value'
+        )?.set
+        if (nativeSetter) {
+          nativeSetter.call(input, value)
+        } else {
+          input.value = value
+        }
+
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+        input.dispatchEvent(new Event('change', { bubbles: true }))
+        return true
+      },
+      { selector, value: String(value) }
+    )
+  } else {
+    await locator.fill(String(value))
+  }
 }
 
 export async function findVisibleField(contextOrPage, selector) {

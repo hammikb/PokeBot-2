@@ -147,6 +147,11 @@ export class TargetPageCoordinator {
             findVisibleText(/^(out of stock|sold out)$/i) ||
             document.querySelector('[data-test*="outOfStock" i], [data-test*="soldOut" i]')
           ),
+          errorModal: Boolean(
+            findVisibleText(
+              /out of stock|sold out|payment declined|risk review|could not complete your order|temporary issue/i
+            )
+          ),
           challenge: Boolean(
             [
               ...document.querySelectorAll(

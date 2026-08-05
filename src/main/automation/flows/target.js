@@ -7,6 +7,8 @@ import { humanDelay } from './checkout-utils.js'
 import { createModuleLogger } from '../../utils/logger.js'
 import { parseDisplayedPrice } from '../CheckoutSafety.js'
 import { validateTargetCartForCheckout } from './target/TargetCheckoutSafety.js'
+import { attemptTargetQueueBypass, isTargetQueueActive } from '../targetQueueBypass.js'
+import { validateTargetSession } from '../akamaiSensor.js'
 
 const log = createModuleLogger('TargetFlow')
 const TARGET_CART_API_COOLDOWN_MS = 10 * 60 * 1000
@@ -49,7 +51,10 @@ export async function runTargetFlow(
     accountId = null // [TARGET] Pass the account ID for Shape tracking
   }
 ) {
-  const page = await context.newPage()
+  const page =
+    browserPool && accountId && typeof browserPool.getCheckoutPage === 'function'
+      ? await browserPool.getCheckoutPage(accountId, context)
+      : await context.newPage()
   const coordinator = await TargetPageCoordinator.attach(page)
   onStep('Target live page coordinator active')
 
@@ -131,6 +136,16 @@ export async function runTargetFlow(
     await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
     onMilestone('product_opened', useApi ? 'Target cart origin loaded' : 'Target product loaded')
 
+    // Attempt queue bypass if Target's virtual waiting room is active.
+    // The queue often only gatekeeps the product page or add-to-cart; a
+    // pre-built cart can still be checked out via direct links.
+    if (await isTargetQueueActive(page)) {
+      const bypass = await attemptTargetQueueBypass(page, { onStep })
+      if (bypass.bypassed) {
+        onMilestone('queue_bypassed', `Target queue bypassed via ${bypass.method}`)
+      }
+    }
+
     // Check if signed in by looking for account indicator
     onStep('Checking Target sign-in status')
 
@@ -157,6 +172,22 @@ export async function runTargetFlow(
     onStep('Signed in to Target')
     await humanDelay(100, 300)
     onMilestone('session_checked', 'Target session verified')
+
+    // Validate the Akamai sensor data by probing a protected endpoint.
+    // A present _abck cookie is not enough — it must be valid for the
+    // current fingerprint. If the probe returns a challenge, the cart
+    // API will 403, so we surface a clear warning.
+    const sessionValidation = await validateTargetSession(page, {
+      endpoint: 'https://www.target.com/co-cart'
+    })
+    if (!sessionValidation.valid) {
+      onStep('Target session validation warning - Akamai sensor data may be stale')
+      log.warn('Target session failed Akamai validation before cart operations', {
+        status: sessionValidation.status,
+        challengeDetected: sessionValidation.challengeDetected,
+        abckPresent: sessionValidation.abckPresent
+      })
+    }
 
     if (useApi) {
       cartStrategyActual = 'api_attempted'
@@ -1192,7 +1223,16 @@ async function isTargetSignedIn(page) {
     const signedInIndicators = page.locator(
       '[data-test="accountNav-signedIn"], [data-test="@web/AccountLink"][aria-label*="Hi,"], button:has-text("Hi,"), span:has-text("Hi,")'
     )
-    if ((await signedInIndicators.count()) > 0) return true
+    const count = await signedInIndicators.count()
+    for (let index = 0; index < count; index += 1) {
+      if (
+        await signedInIndicators
+          .nth(index)
+          .isVisible()
+          .catch(() => false)
+      )
+        return true
+    }
   } catch {
     // Ignore and fall through to the cookie check.
   }
@@ -1290,12 +1330,63 @@ async function browserAddToCart(
   if (!(await claimTargetAction(coordinator, 'add-to-cart', 1500))) {
     throw new Error('Target Add to cart action is already in progress')
   }
+  const cartResponsePromise =
+    typeof page.waitForResponse !== 'function'
+      ? Promise.resolve(null)
+      : page
+          .waitForResponse(
+            (response) => {
+              const url = response.url()
+              return (
+                /target\.com/i.test(url) &&
+                /cart|checkout/i.test(url) &&
+                ['POST', 'PUT', 'PATCH'].includes(response.request().method())
+              )
+            },
+            { timeout: 1500 }
+          )
+          .catch(() => null)
   await addToCartBtn.click({ timeout: 5000 })
+  const cartResponse = await cartResponsePromise
+  if (cartResponse) {
+    onStep(`Target Add to cart response: HTTP ${cartResponse.status()}`)
+    log.info('Target browser cart response captured', {
+      status: cartResponse.status(),
+      url: cartResponse.url()
+    })
+  } else {
+    onStep('Target Add to cart response was not observed; verifying the cart directly')
+  }
   await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
 
-  // Skip /co-cart entirely — go straight to /checkout. The checkout page shows
-  // the cart items and we verify the TCIN there. Saves 1-2 seconds on page load.
-  onStep('Going straight to checkout (skipping cart page)')
+  // Confirm the requested TCIN before opening checkout. A click can look
+  // successful while Target drops the item or loses the session during a drop.
+  const tcin = TargetApiClient.extractTcin(productUrl)
+  if (tcin) {
+    onStep('Verifying the item was added to the Target cart')
+    await page.goto('https://www.target.com/cart', {
+      waitUntil: navigationWaitUntil,
+      timeout: 30000
+    })
+    await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
+
+    if (!(await isTargetSignedIn(page))) {
+      throw new Error('Target session was lost after adding the item to cart')
+    }
+
+    const deadline = Date.now() + 5000
+    let cartState = { present: false, quantity: null }
+    while (Date.now() < deadline) {
+      cartState = await readTargetCartItemState(page, tcin)
+      if (cartState.present) break
+      await page.waitForTimeout(250)
+    }
+    if (!cartState.present) {
+      throw new Error('Target browser add-to-cart was not confirmed')
+    }
+  }
+
+  onStep('Opening Target checkout after cart confirmation')
   await page.goto('https://www.target.com/checkout', {
     waitUntil: 'domcontentloaded',
     timeout: 30000

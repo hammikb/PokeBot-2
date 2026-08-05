@@ -6,6 +6,7 @@ import {
   enableFastNavigation,
   waitForSignInOrProfile
 } from './target-page-utils.js'
+import { validateTargetSession, regenerateTargetSensorData } from '../akamaiSensor.js'
 
 const ACCOUNT_URL = 'https://www.target.com/account?prehydrateClick=true'
 
@@ -26,11 +27,41 @@ export async function checkTargetSession(
     onStep(`Target session check result: ${state}`)
 
     if (state === 'profile') {
+      // Validate the Akamai sensor data by probing a protected endpoint.
+      // A present _abck cookie is not enough — it must be valid for the
+      // current fingerprint. If the probe returns a challenge, regenerate.
+      onStep('Validating Target session against protected endpoint')
+      const validation = await validateTargetSession(page, {
+        endpoint: 'https://www.target.com/account?prehydrateClick=true'
+      })
+
+      if (!validation.valid) {
+        onStep('Target session validation failed - regenerating sensor data')
+        const regenerated = await regenerateTargetSensorData(page, {
+          endpoint: 'https://www.target.com/co-cart',
+          timeoutMs: 15000
+        })
+
+        if (!regenerated.success) {
+          return {
+            success: false,
+            loggedIn: true,
+            sessionValid: false,
+            screenshotPath,
+            message:
+              'Target profile is signed in but the session failed Akamai validation. Sensor regeneration was unsuccessful.'
+          }
+        }
+
+        onStep('Target sensor data regenerated successfully')
+      }
+
       return {
         success: true,
         loggedIn: true,
+        sessionValid: true,
         screenshotPath,
-        message: 'Target profile is confirmed signed in.'
+        message: 'Target profile is confirmed signed in with a valid session.'
       }
     }
 

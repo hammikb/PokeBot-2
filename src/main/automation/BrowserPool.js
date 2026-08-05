@@ -3,6 +3,7 @@ import { mkdirSync } from 'fs'
 import { createModuleLogger } from '../utils/logger.js'
 import { buildCloakBrowserOptions, redactProxyUrl } from './cloakBrowserConfig.js'
 import { isCaptchaPresent } from './captcha.js'
+import { regenerateTargetSensorData, hasAbckCookie } from './akamaiSensor.js'
 
 const log = createModuleLogger('BrowserPool')
 const DEFAULT_TIMEOUT = 60 * 60 * 1000 // 60 minutes
@@ -41,6 +42,7 @@ export class BrowserPool {
     this._onBlocked = onBlocked
     this._keepalive = new Map()
     this._warmPages = new Map()
+    this._checkoutPages = new Map()
     this._active = new Map()
     this._pending = new Map()
     this._pendingProxy = new Map()
@@ -80,7 +82,14 @@ export class BrowserPool {
 
   async launch(
     accountId,
-    { profilePath, proxy, retailer = null, priority = 0, waitTimeoutMs = this._capacityWaitMs }
+    {
+      profilePath,
+      proxy,
+      retailer = null,
+      warmupUrl = null,
+      priority = 0,
+      waitTimeoutMs = this._capacityWaitMs
+    }
   ) {
     const requestedProxy = buildProxyUrl(proxy)
     if (this._active.has(accountId)) {
@@ -110,7 +119,7 @@ export class BrowserPool {
     const pending = (async () => {
       const reservation = await this._waitForCapacity(accountId, priority, waitTimeoutMs)
       try {
-        return await this._launchNew(accountId, { profilePath, proxy, retailer })
+        return await this._launchNew(accountId, { profilePath, proxy, retailer, warmupUrl })
       } finally {
         this._capacityReservations.delete(reservation)
         this._drainCapacityWaiters()
@@ -139,6 +148,66 @@ export class BrowserPool {
       this._pinned.delete(accountId)
       throw err
     }
+  }
+
+  /**
+   * Return the persistent page reserved for an account's checkout flow.
+   * Pinned accounts reuse this page across attempts so the retailer session,
+   * cookies, and page-level state survive a failed add-to-cart attempt.
+   */
+  async getCheckoutPage(accountId, context) {
+    const existing = this._checkoutPages.get(accountId)
+    if (existing && !existing.isClosed?.()) return existing
+    this._checkoutPages.delete(accountId)
+
+    const warmPage = this._warmPages.get(accountId)
+    if (warmPage && !warmPage.isClosed?.()) this._warmPages.delete(accountId)
+    const page = warmPage || (await context.newPage())
+    this._checkoutPages.set(accountId, page)
+    page.once?.('close', () => {
+      if (this._checkoutPages.get(accountId) === page) this._checkoutPages.delete(accountId)
+    })
+    return page
+  }
+
+  /**
+   * Regenerate Akamai sensor data for a Target session.
+   *
+   * The `_abck` cookie is bound to a specific browser context and must be
+   * recomputed on each session claim. This navigates the checkout page to a
+   * protected endpoint so Target's own JS re-runs the sensor generation.
+   *
+   * @param {string} accountId
+   * @param {import('playwright').Page} page
+   * @returns {Promise<{success: boolean, abckPresent: boolean, status: number|null}>}
+   */
+  async regenerateTargetSession(accountId, page) {
+    const retailer = this._retailerByAccount.get(accountId)
+    if (retailer !== 'target') {
+      return { success: false, abckPresent: false, status: null, reason: 'not-target' }
+    }
+
+    // If the _abck cookie is already present and fresh, skip the navigation.
+    // The keepalive already touches the origin periodically.
+    if (await hasAbckCookie(page)) {
+      return { success: true, abckPresent: true, status: 200, reason: 'already-fresh' }
+    }
+
+    log.info('Regenerating Target Akamai sensor data on session claim', { accountId })
+    return regenerateTargetSensorData(page, {
+      endpoint: 'https://www.target.com/co-cart',
+      timeoutMs: 15000
+    })
+  }
+
+  async focusCheckoutPage(accountId) {
+    const page = this._checkoutPages.get(accountId)
+    if (!page || page.isClosed?.()) {
+      this._checkoutPages.delete(accountId)
+      return false
+    }
+    await page.bringToFront?.().catch(() => {})
+    return true
   }
 
   async unpin(accountId, { close = false } = {}) {
@@ -236,7 +305,7 @@ export class BrowserPool {
     return this._pinned.has(accountId)
   }
 
-  async _launchNew(accountId, { profilePath, proxy, retailer }) {
+  async _launchNew(accountId, { profilePath, proxy, retailer, warmupUrl = null }) {
     try {
       mkdirSync(profilePath, { recursive: true })
     } catch (err) {
@@ -273,13 +342,13 @@ export class BrowserPool {
       const context = await launchPersistentContext(contextOptions)
       this._trackContextDownloads(accountId, context)
 
-      const warmupUrl = RETAILER_HOME[retailer]
-      if (warmupUrl) {
+      const originWarmupUrl = warmupUrl || RETAILER_HOME[retailer]
+      if (originWarmupUrl) {
         const setupPage = await context.newPage()
         const keepWarmPage = this._pinned.has(accountId)
         try {
           log.info('Preparing retailer origin', { accountId, retailer })
-          await setupPage.goto(warmupUrl, {
+          await setupPage.goto(originWarmupUrl, {
             waitUntil: 'domcontentloaded',
             timeout: 30_000
           })
@@ -311,6 +380,7 @@ export class BrowserPool {
           this._retailerByAccount.delete(accountId)
           this._downloadsByAccount.delete(accountId)
           this._warmPages.delete(accountId)
+          this._checkoutPages.delete(accountId)
           this._drainCapacityWaiters()
           log.info('Browser context closed', { accountId })
         }
@@ -353,6 +423,7 @@ export class BrowserPool {
     const ctx = this._active.get(accountId)
     if (ctx) {
       this._warmPages.delete(accountId)
+      this._checkoutPages.delete(accountId)
       const downloads = [...(this._downloadsByAccount.get(accountId) || [])]
       try {
         await Promise.allSettled(downloads.map((download) => download.cancel?.()))

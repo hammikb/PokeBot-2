@@ -3,34 +3,55 @@ import { mkdir, writeFile } from 'fs/promises'
 import { dirname, join } from 'path'
 
 const MAX_NETWORK_EVENTS = 50
+const SLOW_RESPONSE_THRESHOLD_MS = 800
 
 export async function startCheckoutDiagnostics(
   page,
   { retailer = 'retailer', accountName = 'account', taskId = 'checkout', tracePath = null } = {}
 ) {
   const networkEvents = []
+  const requestTimings = new Map()
   const record = (event) => {
     networkEvents.push({ at: new Date().toISOString(), ...event })
     if (networkEvents.length > MAX_NETWORK_EVENTS) networkEvents.shift()
   }
+  const onRequest = (request) => {
+    requestTimings.set(request, { startedAt: Date.now() })
+  }
   const onResponse = (response) => {
-    if (response.status() >= 400) {
+    const request = response.request()
+    const timing = requestTimings.get(request)
+    const durationMs = timing ? Date.now() - timing.startedAt : null
+    requestTimings.delete(request)
+
+    const url = response.url()
+    const isCartOrCheckout = /cart|checkout/i.test(url)
+    const isSlow = durationMs !== null && durationMs > SLOW_RESPONSE_THRESHOLD_MS
+
+    if (response.status() >= 400 || (isCartOrCheckout && (isSlow || response.status() >= 300))) {
       record({
         type: 'response',
         status: response.status(),
-        method: response.request().method(),
-        url: safeUrl(response.url())
+        method: request.method(),
+        url: safeUrl(url),
+        durationMs,
+        slow: isSlow
       })
     }
   }
   const onRequestFailed = (request) => {
+    const timing = requestTimings.get(request)
+    const durationMs = timing ? Date.now() - timing.startedAt : null
+    requestTimings.delete(request)
     record({
       type: 'request-failed',
       method: request.method(),
       url: safeUrl(request.url()),
-      error: request.failure()?.errorText || 'request failed'
+      error: request.failure()?.errorText || 'request failed',
+      durationMs
     })
   }
+  page.on?.('request', onRequest)
   page.on?.('response', onResponse)
   page.on?.('requestfailed', onRequestFailed)
 
@@ -60,6 +81,7 @@ export async function startCheckoutDiagnostics(
       return diagnosticsPath
     },
     dispose() {
+      page.off?.('request', onRequest)
       page.off?.('response', onResponse)
       page.off?.('requestfailed', onRequestFailed)
     }
