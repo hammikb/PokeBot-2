@@ -10,7 +10,7 @@ vi.mock('../../../../src/main/automation/akamaiSensor.js', () => ({
   regenerateTargetSensorData: vi.fn().mockResolvedValue({ success: true, abckPresent: true })
 }))
 
-beforeEach(() => vi.resetAllMocks())
+beforeEach(() => vi.clearAllMocks())
 
 function makePage({ visibleSelectors = new Set() } = {}) {
   const page = {
@@ -93,7 +93,7 @@ describe('checkTargetSession', () => {
     expect(result).toMatchObject({
       success: true,
       loggedIn: true,
-      message: 'Target profile is confirmed signed in.'
+      message: 'Target profile is confirmed signed in with a valid session.'
     })
     expect(page.navigations).toContain('https://www.target.com/account?prehydrateClick=true')
   })
