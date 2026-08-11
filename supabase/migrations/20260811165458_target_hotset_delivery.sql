@@ -1,0 +1,2 @@
+-- Created with apply_patch after Supabase CLI 2.113.0 failed with
+-- LegacyMigrationNewWriteError on the existing OneDrive migrations directory.

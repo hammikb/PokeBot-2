@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-11
 
-**Status:** Amended after drop analytics review; awaiting written-spec review
+**Status:** Approved after written-spec review; Context7-verified reconnect amendment
 
 **Systems:** PokeBot 2 Electron client, Supabase project (`jbnnouwhesexfllninwb`),
 PokeAlert web, and Raspberry Pi worker `pokebot-worker`
@@ -224,18 +224,20 @@ traffic. No automatic release-calendar scraper is introduced in this change.
 
 ### 6. Single-owner Realtime recovery
 
-`SupabaseMonitorSource` becomes the only owner of per-channel reconnection.
-Every channel has a generation token; status callbacks from intentionally
-removed or superseded generations are ignored. Unexpected interruptions use
-bounded exponential backoff with jitter and reset the attempt counter only after
+The installed `supabase-js` client remains the primary owner of automatic
+channel reconnection. Remove the competing fixed 1.5-second manual reconnect
+timer. Every channel has a generation token; status callbacks from intentionally
+removed or superseded generations are ignored. A channel is healthy only after
 `SUBSCRIBED` plus successful durable catch-up.
 
 The task manager heartbeat no longer destroys and recreates the authenticated
-source for ordinary channel interruptions. It requests one debounced source
-recovery sweep, and only an authentication change or explicit shutdown replaces
-the whole source. Existing table catch-up remains the loss-recovery mechanism;
-Realtime replay is not substituted because its retained batch is more limited
-than the current durable table query.
+source for ordinary channel interruptions. If the library has not recovered an
+interrupted current-generation channel after 30 seconds, it requests one
+debounced recovery sweep for only the still-unhealthy channels. Only an
+authentication change or explicit shutdown replaces the whole source. Existing
+table catch-up remains the loss-recovery mechanism; Realtime replay is not
+substituted because its retained batch is more limited than the current durable
+table query.
 
 ### 7. Electron desktop-notification evidence
 
@@ -287,7 +289,8 @@ creating a real checkout.
   a later restock receives a new `source_event_id`, while the existing database
   trigger decides whether it belongs to the current five-minute checkout cycle.
 - **Realtime channel intentionally removed:** its stale `CLOSED` callback is
-  ignored by generation, so it cannot start a reconnect loop.
+  ignored by generation, so it cannot compete with the client's automatic
+  reconnection or start a reconnect loop.
 - **Inventory feed unavailable during checkout:** fall back to the existing
   120-second deadline; never assume indefinite stock.
 - **Release override missing or invalid:** retain the normal schedule and report
