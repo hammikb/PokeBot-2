@@ -1545,11 +1545,11 @@ async function confirmRequestedTargetCartItem(
   tcin,
   { notificationEngine, dropEvent, coordinator = null }
 ) {
-  const initialState = await waitForTargetCartState(page, tcin, 2500, coordinator)
-  if (initialState.present && Number.isInteger(initialState.quantity)) return initialState
-
   const url = page.url?.() || ''
-  if (!/target\.com\/(co-cart|cart)/i.test(url)) {
+  if (/target\.com\/(co-cart|cart)/i.test(url)) {
+    const initialState = await waitForTargetCartState(page, tcin, 2500, coordinator)
+    if (initialState.present && Number.isInteger(initialState.quantity)) return initialState
+  } else {
     await page.goto('https://www.target.com/co-cart', {
       waitUntil: 'domcontentloaded',
       timeout: 30000

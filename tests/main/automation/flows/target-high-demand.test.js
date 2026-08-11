@@ -127,6 +127,7 @@ describe('Target high-demand checkout submission', () => {
     const statuses = [429, 200]
     const callOrder = []
     let resolveResponse
+    let currentUrl = 'https://www.target.com/p/test-product/-/A-123456'
     const click = vi.fn(() => {
       const status = statuses.shift()
       callOrder.push('clicked')
@@ -144,8 +145,10 @@ describe('Target high-demand checkout submission', () => {
     })
     const page = {
       frames: () => [],
-      url: () => 'https://www.target.com/p/test-product/-/A-123456',
-      goto: vi.fn(async () => {}),
+      url: () => currentUrl,
+      goto: vi.fn(async (url) => {
+        currentUrl = url
+      }),
       waitForTimeout: vi.fn(async () => {}),
       waitForResponse: vi.fn(() => {
         callOrder.push('armed')
@@ -192,6 +195,10 @@ describe('Target high-demand checkout submission', () => {
       'https://www.target.com/p/test-product/-/A-123456',
       expect.anything()
     )
+    expect(page.goto).toHaveBeenCalledWith('https://www.target.com/co-cart', {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000
+    })
     expect(page.waitForTimeout).toHaveBeenCalledWith(1500)
     expect(
       page.waitForTimeout.mock.calls.some(([delay]) => delay >= 3000 && delay <= 6000)
