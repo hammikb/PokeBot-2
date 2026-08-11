@@ -91,4 +91,11 @@ describe('TargetCartPolicy', () => {
     )
     expect(TargetCartBudgetError.prototype).toBeInstanceOf(Error)
   })
+
+  it('rejects a delay that lands exactly on the deadline', () => {
+    const budget = new TargetCartBudget({ startedAt: 1000 })
+    expect(() => budget.assertDelayFits(120000, 1000)).toThrowError(
+      expect.objectContaining({ code: 'deadline' })
+    )
+  })
 })

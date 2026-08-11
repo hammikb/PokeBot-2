@@ -54,6 +54,13 @@ export class TargetCartBudget {
     }
   }
 
+  assertDelayFits(delayMs, nowMs) {
+    this.assertTimeRemaining(nowMs)
+    if (nowMs + Math.max(0, delayMs) - this.startedAt >= this.policy.deadlineMs) {
+      throw new TargetCartBudgetError('deadline', this.snapshot(nowMs))
+    }
+  }
+
   authorizeClick(retryKind, nowMs) {
     this.assertTimeRemaining(nowMs)
     if (retryKind !== null) {
