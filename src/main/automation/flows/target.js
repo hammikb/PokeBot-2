@@ -1330,20 +1330,21 @@ export async function browserAddToCart(
     await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
   }
 
-  // Handle quantity if buyLimit > 1
-
+  const tcin = TargetApiClient.extractTcin(productUrl)
   onStep('Waiting for Target fulfillment to finish loading')
   await waitForTargetAddToCartReady(page, {
     onStep,
     notificationEngine,
     dropEvent,
-    coordinator
+    coordinator,
+    tcin
   })
   onMilestone('availability_ready', 'Target fulfillment and Add to cart controls ready')
 
   // Target often renders quantity only after fulfillment settles. Selecting it
   // before hydration silently did nothing during live drops.
-  if (buyLimit > 1) {
+  const selectRequestedQuantity = async () => {
+    if (buyLimit <= 1) return
     onStep(`Setting quantity to ${buyLimit}`)
     const quantitySelect = page.locator('select[data-test="@web/QuantitySelector"]')
     if ((await quantitySelect.count()) > 0) {
@@ -1354,12 +1355,13 @@ export async function browserAddToCart(
         notificationEngine,
         dropEvent,
         coordinator,
-        timeoutMs: 3000
+        timeoutMs: 3000,
+        tcin
       })
     }
   }
+  await selectRequestedQuantity()
 
-  const tcin = TargetApiClient.extractTcin(productUrl)
   return runTargetCartAttempt({
     tcin,
     requestedQuantity: buyLimit,
@@ -1397,6 +1399,16 @@ export async function browserAddToCart(
         await page.locator('body').waitFor({ state: 'attached', timeout: 5000 })
       }
       await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
+      await waitForTargetAddToCartReady(page, {
+        onStep,
+        notificationEngine,
+        dropEvent,
+        coordinator,
+        timeoutMs: 5000,
+        pollMs: 100,
+        tcin
+      })
+      await selectRequestedQuantity()
     },
     isProductPageValid: async () => /target\.com\/p\//i.test(page.url?.() || ''),
     onEvent: (event) => {

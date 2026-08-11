@@ -71,6 +71,7 @@ function locator({
   click = () => {},
   count = () => 0,
   fill = () => {},
+  selectOption = () => {},
   child
 } = {}) {
   return {
@@ -98,6 +99,9 @@ function locator({
     async check() {},
     async fill(value) {
       return fill(value)
+    },
+    async selectOption(value) {
+      return selectOption(value)
     }
   }
 }
@@ -211,6 +215,72 @@ describe('Target high-demand checkout submission', () => {
       retryCount: 1,
       reloadCount: 0
     })
+  })
+
+  it('reselects the requested quantity after a no-response product reload', async () => {
+    const outcomes = [null, null, null, null, null, 200]
+    let currentUrl = 'https://www.target.com/p/test-product/-/A-123456'
+    const click = vi.fn(async () => {})
+    const selectOption = vi.fn(async () => {})
+    const addButton = locator({ isVisible: () => true, isDisabled: () => false, click })
+    const quantity = locator({ count: () => 1, selectOption })
+    const page = {
+      frames: () => [],
+      url: () => currentUrl,
+      goto: vi.fn(async (url) => {
+        currentUrl = url
+      }),
+      waitForTimeout: vi.fn(async () => {}),
+      waitForResponse: vi.fn(async () => {
+        const status = outcomes.shift()
+        if (status === null) return null
+        return {
+          status: () => status,
+          url: () => 'https://carts.target.com/web_checkouts/v1/cart_items',
+          request: () => ({ method: () => 'POST' }),
+          headers: () => ({})
+        }
+      }),
+      evaluate: vi.fn(async () => ({
+        present: true,
+        quantity: 2,
+        unitPrice: 129.99,
+        source: 'item-control'
+      })),
+      content: vi.fn(async () => ''),
+      context: vi.fn(() => ({
+        cookies: vi.fn(async () => [{ name: 'accessToken', value: 'x'.repeat(32) }])
+      })),
+      locator: vi.fn((selector) => {
+        if (selector === 'select[data-test="@web/QuantitySelector"]') return quantity
+        if (selector.includes('Add to cart')) return addButton
+        if (selector.includes('fulfillment')) return locator({ isVisible: () => false })
+        if (selector.includes('Out of stock') || selector.includes('text=/')) {
+          return locator({ isVisible: () => false })
+        }
+        return locator()
+      })
+    }
+
+    const result = await browserAddToCart(
+      page,
+      'https://www.target.com/p/test-product/-/A-123456',
+      2,
+      vi.fn(),
+      null,
+      {},
+      null,
+      vi.fn()
+    )
+
+    expect(result).toMatchObject({ quantity: 2, reloadCount: 1 })
+    expect(page.goto).toHaveBeenCalledWith(
+      'https://www.target.com/p/test-product/-/A-123456',
+      expect.anything()
+    )
+    expect(selectOption).toHaveBeenCalledTimes(2)
+    expect(selectOption).toHaveBeenNthCalledWith(1, { value: '2' })
+    expect(selectOption).toHaveBeenNthCalledWith(2, { value: '2' })
   })
 
   it('holds the current checkout page without reloading when Target shows high demand', async () => {
