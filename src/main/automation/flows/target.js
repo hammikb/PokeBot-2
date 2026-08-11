@@ -8,6 +8,7 @@ import { createModuleLogger } from '../../utils/logger.js'
 import { parseDisplayedPrice } from '../CheckoutSafety.js'
 import { validateTargetCartForCheckout } from './target/TargetCheckoutSafety.js'
 import { runTargetCartAttempt } from './target/TargetCartAttemptController.js'
+import { resolveTargetCartState } from './target/TargetCartEvidence.js'
 import { TARGET_CART_STRATEGY } from './target/TargetCartPolicy.js'
 import {
   TRANSIENT_CART_DIALOG_SELECTOR,
@@ -92,6 +93,7 @@ export async function runTargetFlow(
   let cartStrategyActual = 'not_reached'
   let cartFallbackReason = null
   let cartQuantityActual = null
+  let cartEvidence = null
   const navigationWaitUntil = targetCommitNavigationEnabled ? 'commit' : 'domcontentloaded'
   const withCartExecution = (result) => ({
     ...result,
@@ -297,7 +299,7 @@ export async function runTargetFlow(
             cartStrategyActual = 'browser_fallback'
             cartFallbackReason = 'purchase_limit_item_missing'
             onStep('Requested item is not in cart - trying the product page instead')
-            await browserAddToCart(
+            cartEvidence = await browserAddToCart(
               page,
               productUrl,
               buyLimit,
@@ -329,7 +331,7 @@ export async function runTargetFlow(
               tcin,
               error: result.error
             })
-            await browserAddToCart(
+            cartEvidence = await browserAddToCart(
               page,
               productUrl,
               buyLimit,
@@ -346,7 +348,7 @@ export async function runTargetFlow(
           cartFallbackReason = 'api_error'
           onStep('API failed, using browser fallback')
           log.warn('Browser-based API failed, falling back to clicking', { error: result.error })
-          await browserAddToCart(
+          cartEvidence = await browserAddToCart(
             page,
             productUrl,
             buyLimit,
@@ -366,7 +368,7 @@ export async function runTargetFlow(
       }
     } else {
       // Fallback to browser automation
-      await browserAddToCart(
+      cartEvidence = await browserAddToCart(
         page,
         productUrl,
         buyLimit,
@@ -383,10 +385,14 @@ export async function runTargetFlow(
     // toast or HTTP 2xx alone can be stale during a drop and must not start checkout.
     if (tcin) {
       onStep('Confirming the requested item is in the cart')
-      const cartState = await confirmRequestedTargetCartItem(page, tcin, {
-        notificationEngine,
-        dropEvent,
-        coordinator
+      const cartState = await resolveTargetCartState({
+        cartEvidence,
+        confirmCart: () =>
+          confirmRequestedTargetCartItem(page, tcin, {
+            notificationEngine,
+            dropEvent,
+            coordinator
+          })
       })
       const safety = validateTargetCartForCheckout({ tcin, cartState, buyLimit, maxPrice })
       cartQuantityActual = safety.quantity
