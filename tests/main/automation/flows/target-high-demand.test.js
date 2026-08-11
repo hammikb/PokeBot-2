@@ -5,6 +5,7 @@ vi.mock('../../../../src/main/automation/captcha.js', () => ({
 }))
 
 import {
+  browserAddToCart,
   enableTargetCheckoutLiteMode,
   fillTargetCardVerification,
   getVisibleTargetAddToCartButton,
@@ -122,6 +123,89 @@ function makeGenericErrorPage() {
 }
 
 describe('Target high-demand checkout submission', () => {
+  it('retries a 429 Add to cart response on the same warm product page', async () => {
+    const statuses = [429, 200]
+    const callOrder = []
+    let resolveResponse
+    const click = vi.fn(() => {
+      const status = statuses.shift()
+      callOrder.push('clicked')
+      resolveResponse?.({
+        status: () => status,
+        url: () => 'https://carts.target.com/web_checkouts/v1/cart_items',
+        request: () => ({ method: () => 'POST' }),
+        headers: () => ({})
+      })
+    })
+    const addButton = locator({
+      isVisible: () => true,
+      isDisabled: () => false,
+      click
+    })
+    const page = {
+      frames: () => [],
+      url: () => 'https://www.target.com/p/test-product/-/A-123456',
+      goto: vi.fn(async () => {}),
+      waitForTimeout: vi.fn(async () => {}),
+      waitForResponse: vi.fn(() => {
+        callOrder.push('armed')
+        return new Promise((resolve) => {
+          resolveResponse = resolve
+        })
+      }),
+      evaluate: vi.fn(async () => ({
+        present: true,
+        quantity: 1,
+        unitPrice: 19.99,
+        source: 'item-control'
+      })),
+      content: vi.fn(async () => ''),
+      context: vi.fn(() => ({
+        cookies: vi.fn(async () => [{ name: 'accessToken', value: 'x'.repeat(32) }])
+      })),
+      locator: vi.fn((selector) => {
+        if (selector.includes('Add to cart')) return addButton
+        if (selector.includes('fulfillment')) return locator({ isVisible: () => false })
+        if (selector.includes('High-demand item')) return locator({ isVisible: () => false })
+        if (selector.includes('Out of stock') || selector.includes('text=/')) {
+          return locator({ isVisible: () => false })
+        }
+        return locator()
+      })
+    }
+    const onStep = vi.fn()
+
+    const result = await browserAddToCart(
+      page,
+      'https://www.target.com/p/test-product/-/A-123456',
+      1,
+      onStep,
+      null,
+      {},
+      null,
+      vi.fn()
+    )
+
+    expect(click).toHaveBeenCalledTimes(2)
+    expect(callOrder.slice(0, 2)).toEqual(['armed', 'clicked'])
+    expect(page.goto).not.toHaveBeenCalledWith(
+      'https://www.target.com/p/test-product/-/A-123456',
+      expect.anything()
+    )
+    expect(page.waitForTimeout).toHaveBeenCalledWith(1500)
+    expect(
+      page.waitForTimeout.mock.calls.some(([delay]) => delay >= 3000 && delay <= 6000)
+    ).toBe(false)
+    expect(result).toMatchObject({
+      tcin: '123456',
+      quantity: 1,
+      mutationStatus: 200,
+      clickCount: 2,
+      retryCount: 1,
+      reloadCount: 0
+    })
+  })
+
   it('holds the current checkout page without reloading when Target shows high demand', async () => {
     const state = { highDemand: true }
     const page = {
@@ -266,6 +350,40 @@ describe('Target high-demand checkout submission', () => {
       })
     ).resolves.toBe(addButton)
     expect(page.waitForTimeout).toHaveBeenCalled()
+  })
+
+  it('uses the 100 ms coordinator cadence while waiting for Add to cart', async () => {
+    const state = { disabled: true }
+    const addButton = locator({
+      isVisible: () => true,
+      isDisabled: () => state.disabled
+    })
+    const coordinator = {
+      signalState: vi.fn(async () => ({ scan: 1 })),
+      waitForNextScan: vi.fn(async () => {
+        state.disabled = false
+      })
+    }
+    const page = {
+      frames: () => [],
+      locator: vi.fn((selector) => {
+        if (selector.includes('Add to cart')) return addButton
+        if (selector.includes('fulfillment')) return locator({ isVisible: () => false })
+        return locator({ count: () => 0 })
+      })
+    }
+
+    await expect(
+      waitForTargetAddToCartReady(page, {
+        timeoutMs: 1000,
+        pollMs: 100,
+        coordinator,
+        onStep: vi.fn(),
+        notificationEngine: null,
+        dropEvent: {}
+      })
+    ).resolves.toBe(addButton)
+    expect(coordinator.waitForNextScan).toHaveBeenCalledWith(expect.anything(), 100)
   })
 
   it('classifies a settled out-of-stock PDP before hidden background challenge frames', async () => {

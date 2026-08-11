@@ -7,8 +7,19 @@ import { humanDelay } from './checkout-utils.js'
 import { createModuleLogger } from '../../utils/logger.js'
 import { parseDisplayedPrice } from '../CheckoutSafety.js'
 import { validateTargetCartForCheckout } from './target/TargetCheckoutSafety.js'
+import { runTargetCartAttempt } from './target/TargetCartAttemptController.js'
+import { TARGET_CART_STRATEGY } from './target/TargetCartPolicy.js'
+import {
+  TRANSIENT_CART_DIALOG_SELECTOR,
+  clickAndObserveTargetCart,
+  dismissVisibleTargetCartTransient,
+  getTargetProbableCartEvidence,
+  getVisibleTargetAddToCartButton
+} from './target/TargetCartSignals.js'
 import { attemptTargetQueueBypass, isTargetQueueActive } from '../targetQueueBypass.js'
 import { validateTargetSession } from '../akamaiSensor.js'
+
+export { getVisibleTargetAddToCartButton } from './target/TargetCartSignals.js'
 
 const log = createModuleLogger('TargetFlow')
 const TARGET_CART_API_COOLDOWN_MS = 10 * 60 * 1000
@@ -93,7 +104,14 @@ export async function runTargetFlow(
   try {
     // Extract TCIN from URL for API operations
     const tcin = TargetApiClient.extractTcin(productUrl)
-    const useApi = tcin !== null && useTargetCartApi && !isTargetCartApiCoolingDown(accountId)
+    const useApi =
+      TARGET_CART_STRATEGY === 'api' &&
+      tcin !== null &&
+      useTargetCartApi &&
+      !isTargetCartApiCoolingDown(accountId)
+    if (useTargetCartApi && TARGET_CART_STRATEGY !== 'api') {
+      log.info('Target cart API setting ignored by browser-only production checkout')
+    }
 
     // In API mode we don't need the product page at all — the cart API only needs a
     // `*.target.com` origin (for cookies + CORS) plus the tcin. Navigating straight to the
@@ -193,7 +211,12 @@ export async function runTargetFlow(
       cartStrategyActual = 'api_attempted'
     } else if (useTargetCartApi) {
       cartStrategyActual = 'browser_fallback'
-      cartFallbackReason = tcin === null ? 'missing_product_id' : 'api_cooldown'
+      cartFallbackReason =
+        TARGET_CART_STRATEGY === 'browser'
+          ? 'browser_only_strategy'
+          : tcin === null
+            ? 'missing_product_id'
+            : 'api_cooldown'
     } else {
       cartStrategyActual = 'browser'
     }
@@ -839,10 +862,17 @@ async function dismissTargetCheckoutDialog(page) {
   const dialog = page.locator(CHECKOUT_DIALOG_SELECTOR).first()
   const closeButton = dialog
     .locator(
-      'button:has-text("Ok"), button:has-text("Try again"), button:has-text("Continue"), button[aria-label="close" i], button:has-text("Close")'
+      'button:has-text("Ok"), button:has-text("Okay"), button:has-text("Got it"), button:has-text("Dismiss"), button:has-text("Keep shopping"), button:has-text("Try again"), button:has-text("Continue"), button[aria-label="close" i], button[aria-label*="dismiss" i], button[data-test*="close" i], button:has-text("Close")'
     )
     .first()
-  await closeButton.click({ timeout: 5000 }).catch(() => {})
+  await closeButton.click({ timeout: 5000 }).catch(async () => {
+    // Some Target modal versions expose no text label but still honor Escape.
+    // Only send it while a matching dialog is visible; never use it as a broad
+    // page reset because that can discard checkout form state.
+    if (await dialog.isVisible().catch(() => false)) {
+      await dialog.press?.('Escape').catch?.(() => {})
+    }
+  })
 }
 
 async function isTargetPaymentVerificationVisible(page) {
@@ -1272,7 +1302,7 @@ async function isTargetSignedIn(page) {
 /**
  * Browser-based add to cart (fallback method)
  */
-async function browserAddToCart(
+export async function browserAddToCart(
   page,
   productUrl,
   buyLimit,
@@ -1297,7 +1327,7 @@ async function browserAddToCart(
   // Handle quantity if buyLimit > 1
 
   onStep('Waiting for Target fulfillment to finish loading')
-  let addToCartBtn = await waitForTargetAddToCartReady(page, {
+  await waitForTargetAddToCartReady(page, {
     onStep,
     notificationEngine,
     dropEvent,
@@ -1313,7 +1343,7 @@ async function browserAddToCart(
     if ((await quantitySelect.count()) > 0) {
       await quantitySelect.selectOption({ value: String(buyLimit) })
       await page.waitForTimeout(250)
-      addToCartBtn = await waitForTargetAddToCartReady(page, {
+      await waitForTargetAddToCartReady(page, {
         onStep,
         notificationEngine,
         dropEvent,
@@ -1323,83 +1353,64 @@ async function browserAddToCart(
     }
   }
 
-  onStep('Adding to cart (browser method)')
-  await humanDelay(100, 300)
-  onMilestone('cart_attempted', `Target browser cart requested quantity ${buyLimit}`)
-
-  if (!(await claimTargetAction(coordinator, 'add-to-cart', 1500))) {
-    throw new Error('Target Add to cart action is already in progress')
-  }
-  const cartResponsePromise =
-    typeof page.waitForResponse !== 'function'
-      ? Promise.resolve(null)
-      : page
-          .waitForResponse(
-            (response) => {
-              const url = response.url()
-              return (
-                /target\.com/i.test(url) &&
-                /cart|checkout/i.test(url) &&
-                ['POST', 'PUT', 'PATCH'].includes(response.request().method())
-              )
-            },
-            { timeout: 1500 }
-          )
-          .catch(() => null)
-  await addToCartBtn.click({ timeout: 5000 })
-  const cartResponse = await cartResponsePromise
-  if (cartResponse) {
-    onStep(`Target Add to cart response: HTTP ${cartResponse.status()}`)
-    log.info('Target browser cart response captured', {
-      status: cartResponse.status(),
-      url: cartResponse.url()
-    })
-  } else {
-    onStep('Target Add to cart response was not observed; verifying the cart directly')
-  }
-  await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
-
-  // Confirm the requested TCIN before opening checkout. A click can look
-  // successful while Target drops the item or loses the session during a drop.
   const tcin = TargetApiClient.extractTcin(productUrl)
-  if (tcin) {
-    onStep('Verifying the item was added to the Target cart')
-    await page.goto('https://www.target.com/cart', {
-      waitUntil: navigationWaitUntil,
-      timeout: 30000
-    })
-    await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
-
-    if (!(await isTargetSignedIn(page))) {
-      throw new Error('Target session was lost after adding the item to cart')
+  return runTargetCartAttempt({
+    tcin,
+    requestedQuantity: buyLimit,
+    productUrl,
+    sleep: (ms) => page.waitForTimeout(ms),
+    acquireButton: ({ pollMs }) =>
+      waitForTargetAddToCartReady(page, {
+        onStep,
+        notificationEngine,
+        dropEvent,
+        coordinator,
+        timeoutMs: 5000,
+        pollMs,
+        tcin
+      }),
+    getProbableEvidence: () => getTargetProbableCartEvidence(page, tcin),
+    clickAndObserve: (button, { outcomeMs }) =>
+      clickAndObserveTargetCart({ page, button, tcin, outcomeMs }),
+    verifyCart: async () => {
+      onStep('Verifying the requested item in the Target cart')
+      const cartState = await confirmRequestedTargetCartItem(page, tcin, {
+        notificationEngine,
+        dropEvent,
+        coordinator
+      })
+      if (!(await isTargetSignedIn(page))) {
+        throw new Error('Target session was lost after adding the item to cart')
+      }
+      return cartState
+    },
+    dismissTransient: () => dismissVisibleTargetCartTransient(page),
+    restoreProduct: async () => {
+      await page.goto(productUrl, { waitUntil: navigationWaitUntil, timeout: 30000 })
+      if (navigationWaitUntil === 'commit') {
+        await page.locator('body').waitFor({ state: 'attached', timeout: 5000 })
+      }
+      await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
+    },
+    isProductPageValid: async () => /target\.com\/p\//i.test(page.url?.() || ''),
+    onEvent: (event) => {
+      log.info('Target cart attempt event', event)
+      if (event.state === 'cart_response_wait') {
+        onStep(
+          event.clickCount === 1
+            ? 'Adding to cart (browser method)'
+            : `Retrying Target Add to cart on the warm product page (attempt ${event.clickCount})`
+        )
+        onMilestone('cart_attempted', `Target browser cart requested quantity ${buyLimit}`)
+      } else if (event.state === 'rate_limited') {
+        onStep(`Target rate limited Add to cart; retrying in ${(event.delayMs / 1000).toFixed(1)}s`)
+      } else if (event.state === 'transient_recovery') {
+        onStep('Target cart notice cleared; retrying in 0.4s')
+      } else if (event.state === 'reloading_product') {
+        onStep(`Reloading the Target product page (${event.reason})`)
+      }
     }
-
-    const deadline = Date.now() + 5000
-    let cartState = { present: false, quantity: null }
-    while (Date.now() < deadline) {
-      cartState = await readTargetCartItemState(page, tcin)
-      if (cartState.present) break
-      await page.waitForTimeout(250)
-    }
-    if (!cartState.present) {
-      throw new Error('Target browser add-to-cart was not confirmed')
-    }
-  }
-
-  onStep('Opening Target checkout after cart confirmation')
-  await page.goto('https://www.target.com/checkout', {
-    waitUntil: 'domcontentloaded',
-    timeout: 30000
   })
-  await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
-}
-
-export function getVisibleTargetAddToCartButton(page) {
-  return page
-    .locator(
-      'button[data-test="@web/AddToCartButton"]:visible, button[data-test="orderPickupButton"]:visible, button:visible:has-text("Add to cart")'
-    )
-    .first()
 }
 
 export async function waitForTargetAddToCartReady(
@@ -1410,7 +1421,8 @@ export async function waitForTargetAddToCartReady(
     dropEvent = {},
     coordinator = null,
     timeoutMs = 15000,
-    pollMs = 150
+    pollMs = 100,
+    tcin = null
   } = {}
 ) {
   const deadline = Date.now() + timeoutMs
@@ -1418,7 +1430,21 @@ export async function waitForTargetAddToCartReady(
   let sawLoading = false
 
   while (Date.now() < deadline) {
-    const addToCartBtn = getVisibleTargetAddToCartButton(page)
+    // A high-demand notice can remain over the PDP after a previous attempt.
+    // Clear the visible modal before deciding that Add to cart is unavailable.
+    if (
+      await page
+        .locator(TRANSIENT_CART_DIALOG_SELECTOR)
+        .first()
+        .isVisible()
+        .catch(() => false)
+    ) {
+      onStep('Target high-demand notice detected - dismissing before Add to cart')
+      await dismissVisibleTargetCartTransient(page)
+      await page.waitForTimeout(100)
+    }
+
+    const addToCartBtn = getVisibleTargetAddToCartButton(page, tcin)
     const visible = await addToCartBtn.isVisible().catch(() => false)
     if (visible && !(await addToCartBtn.isDisabled().catch(() => true))) return addToCartBtn
 
@@ -1441,7 +1467,7 @@ export async function waitForTargetAddToCartReady(
     }
 
     const snapshot = await coordinator?.signalState()
-    await waitForTargetSignal(page, coordinator, snapshot, Math.max(pollMs, 3000))
+    await waitForTargetSignal(page, coordinator, snapshot, pollMs)
   }
 
   if (challengeReported) {
@@ -1521,10 +1547,6 @@ async function confirmRequestedTargetCartItem(
     await page.goto('https://www.target.com/co-cart', {
       waitUntil: 'domcontentloaded',
       timeout: 30000
-    })
-  } else {
-    await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch((err) => {
-      if (!/ERR_ABORTED/i.test(String(err?.message || ''))) throw err
     })
   }
 
