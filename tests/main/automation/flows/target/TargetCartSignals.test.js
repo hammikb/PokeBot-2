@@ -97,7 +97,7 @@ describe('TargetCartSignals', () => {
   it('dismisses only visible cart transients through passive controls', async () => {
     const click = vi.fn(async () => {})
     const child = { first: () => ({ click }) }
-    const visibleDialog = { locator: vi.fn(() => child) }
+    const visibleDialog = { isVisible: vi.fn(async () => true), locator: vi.fn(() => child) }
     const dialog = { first: () => visibleDialog }
     const page = { locator: vi.fn(() => dialog) }
 
@@ -110,6 +110,20 @@ describe('TargetCartSignals', () => {
     expect(buttonSelector).not.toContain('Try again')
     expect(buttonSelector).not.toContain('Continue')
     expect(click).toHaveBeenCalledWith({ timeout: 750 })
+  })
+
+  it('does not wait for a close button when no cart transient is visible', async () => {
+    const click = vi.fn(async () => {})
+    const hiddenDialog = {
+      isVisible: vi.fn(async () => false),
+      locator: vi.fn(() => ({ first: () => ({ click }) }))
+    }
+    const page = { locator: vi.fn(() => ({ first: () => hiddenDialog })) }
+
+    await expect(dismissVisibleTargetCartTransient(page)).resolves.toBe(false)
+
+    expect(hiddenDialog.locator).not.toHaveBeenCalled()
+    expect(click).not.toHaveBeenCalled()
   })
 
   it.each([

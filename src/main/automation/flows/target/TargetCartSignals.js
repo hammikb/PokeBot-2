@@ -56,13 +56,14 @@ export async function getTargetProbableCartEvidence(page, tcin) {
 
 export async function dismissVisibleTargetCartTransient(page) {
   const dialog = page.locator(TRANSIENT_CART_DIALOG_SELECTOR).first()
+  if (!(await dialog.isVisible().catch(() => false))) return false
   const closeButton = dialog.locator(PASSIVE_DISMISS_SELECTOR).first()
   const clicked = await closeButton
     .click({ timeout: 750 })
     .then(() => true)
     .catch(() => false)
 
-  if (!clicked && (await dialog.isVisible?.().catch?.(() => false))) {
+  if (!clicked && (await dialog.isVisible().catch(() => false))) {
     await dialog.press?.('Escape').catch?.(() => {})
   }
   return clicked
