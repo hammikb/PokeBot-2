@@ -132,6 +132,89 @@ describe('runTargetCartAttempt', () => {
   })
 
   it.each([
+    [{ kind: 'session-error', status: 401, evidence: null }, /HTTP 401/],
+    [{ kind: 'session-error', status: 403, evidence: null }, /HTTP 403/]
+  ])('terminates session failures without another click', async (outcome, message) => {
+    const h = harness([outcome])
+    await expect(runTargetCartAttempt(h.options)).rejects.toThrow(message)
+    expect(h.options.clickAndObserve).toHaveBeenCalledTimes(1)
+  })
+
+  it('terminates after 30 additional recoverable clicks', async () => {
+    const h = harness(
+      Array.from({ length: 40 }, () => ({
+        kind: 'transient',
+        status: 503,
+        evidence: null
+      }))
+    )
+    await expect(runTargetCartAttempt(h.options)).rejects.toMatchObject({ code: 'retry-limit' })
+    expect(h.options.clickAndObserve).toHaveBeenCalledTimes(31)
+  })
+
+  it('terminates after two product reloads', async () => {
+    const noResponse = { kind: 'no-response', status: null, evidence: null }
+    const h = harness(Array.from({ length: 20 }, () => noResponse))
+    await expect(runTargetCartAttempt(h.options)).rejects.toMatchObject({ code: 'reload-limit' })
+    expect(h.options.restoreProduct).toHaveBeenCalledTimes(2)
+  })
+
+  it('restores a replaced product page before acquiring a button', async () => {
+    const h = harness([
+      {
+        kind: 'success',
+        status: 200,
+        evidence: { source: 'mutation-2xx', mutationStatus: 200 }
+      }
+    ])
+    h.setProductValid(false)
+    const result = await runTargetCartAttempt(h.options)
+    expect(h.options.restoreProduct).toHaveBeenCalledTimes(1)
+    expect(result.reloadCount).toBe(1)
+  })
+
+  it('freezes clicking when evidence appears after transient-modal dismissal', async () => {
+    const h = harness([{ kind: 'transient', status: null, evidence: null }])
+    h.options.getProbableEvidence
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ source: 'visible-added-to-cart', mutationStatus: null })
+    const result = await runTargetCartAttempt(h.options)
+    expect(h.options.clickAndObserve).toHaveBeenCalledTimes(1)
+    expect(h.options.dismissTransient).toHaveBeenCalledTimes(1)
+    expect(result.source).toBe('visible-added-to-cart')
+  })
+
+  it('emits only sanitized state and counter fields', async () => {
+    const h = harness([
+      {
+        kind: 'success',
+        status: 200,
+        evidence: { source: 'mutation-2xx', mutationStatus: 200 }
+      }
+    ])
+    await runTargetCartAttempt(h.options)
+    const allowed = new Set([
+      'state',
+      'clickCount',
+      'retryCount',
+      'noResponseRetries',
+      'reloadCount',
+      'elapsedMs',
+      'kind',
+      'status',
+      'delayMs',
+      'retryAfterHonored',
+      'evidenceSource',
+      'mutationStatus',
+      'reason'
+    ])
+    for (const event of h.events) {
+      expect(Object.keys(event).every((key) => allowed.has(key))).toBe(true)
+    }
+  })
+
+  it.each([
     ['Item is out of stock (Target availability settled)'],
     ['Target security challenge did not clear before fulfillment timeout']
   ])('passes through terminal readiness error: %s', async (message) => {
