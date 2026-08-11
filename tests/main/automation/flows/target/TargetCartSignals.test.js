@@ -137,7 +137,9 @@ describe('TargetCartSignals', () => {
       locator: vi.fn(() => hiddenLocator())
     }
     const button = { click: vi.fn(async () => {}) }
-    await expect(clickAndObserveTargetCart({ page, button, tcin: '123456' })).resolves.toMatchObject({
+    await expect(
+      clickAndObserveTargetCart({ page, button, tcin: '123456' })
+    ).resolves.toMatchObject({
       kind,
       status
     })

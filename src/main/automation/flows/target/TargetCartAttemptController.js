@@ -1,8 +1,4 @@
-import {
-  TARGET_CART_POLICY,
-  TargetCartBudget,
-  TargetCartBudgetError
-} from './TargetCartPolicy.js'
+import { TARGET_CART_POLICY, TargetCartBudget, TargetCartBudgetError } from './TargetCartPolicy.js'
 
 export async function runTargetCartAttempt({
   tcin,
@@ -23,8 +19,7 @@ export async function runTargetCartAttempt({
   const budget = new TargetCartBudget({ startedAt: now(), policy })
   let pendingRetryKind = null
 
-  const emit = (state, fields = {}) =>
-    onEvent({ state, ...budget.snapshot(now()), ...fields })
+  const emit = (state, fields = {}) => onEvent({ state, ...budget.snapshot(now()), ...fields })
 
   const reloadProduct = async (reason) => {
     budget.recordReload(now())

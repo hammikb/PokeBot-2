@@ -50,7 +50,11 @@ export async function getTargetProbableCartEvidence(page, tcin) {
     ? `[role="dialog"]:visible:has(a[href*="${String(tcin)}"]):has-text("cart")`
     : null
   const selector = [exactPromptSelector, PROBABLE_SUCCESS_SELECTOR].filter(Boolean).join(', ')
-  const visible = await page.locator(selector).first().isVisible().catch(() => false)
+  const visible = await page
+    .locator(selector)
+    .first()
+    .isVisible()
+    .catch(() => false)
   return visible ? { source: 'visible-added-to-cart', mutationStatus: null } : null
 }
 

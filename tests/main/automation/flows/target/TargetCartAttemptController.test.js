@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { runTargetCartAttempt } from '../../../../../src/main/automation/flows/target/TargetCartAttemptController.js'
 
-function harness(outcomes, { verification = { present: true, quantity: 1, unitPrice: 19.99 } } = {}) {
+function harness(
+  outcomes,
+  { verification = { present: true, quantity: 1, unitPrice: 19.99 } } = {}
+) {
   let nowMs = 1000
   let productValid = true
   const sleeps = []

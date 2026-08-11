@@ -31,7 +31,9 @@ describe('resolveTargetCartState', () => {
   it('uses the authoritative parser when browser evidence is absent', async () => {
     const expected = { present: true, quantity: 1, unitPrice: 19.99, source: 'item-control' }
     const confirmCart = vi.fn(async () => expected)
-    await expect(resolveTargetCartState({ cartEvidence: null, confirmCart })).resolves.toBe(expected)
+    await expect(resolveTargetCartState({ cartEvidence: null, confirmCart })).resolves.toBe(
+      expected
+    )
     expect(confirmCart).toHaveBeenCalledTimes(1)
   })
 })

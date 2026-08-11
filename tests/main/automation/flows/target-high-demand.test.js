@@ -204,9 +204,9 @@ describe('Target high-demand checkout submission', () => {
       timeout: 30000
     })
     expect(page.waitForTimeout).toHaveBeenCalledWith(1500)
-    expect(
-      page.waitForTimeout.mock.calls.some(([delay]) => delay >= 3000 && delay <= 6000)
-    ).toBe(false)
+    expect(page.waitForTimeout.mock.calls.some(([delay]) => delay >= 3000 && delay <= 6000)).toBe(
+      false
+    )
     expect(result).toMatchObject({
       tcin: '123456',
       quantity: 1,
