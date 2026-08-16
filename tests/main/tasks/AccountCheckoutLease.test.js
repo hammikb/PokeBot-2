@@ -44,6 +44,15 @@ describe('checkout account ownership', () => {
     expect(manager.acquireAccountCheckout('account-1', { ownerId: 'task-2' }).acquired).toBe(true)
   })
 
+  it('does not let an existing owner refresh or replace its lease', () => {
+    const manager = makeManager()
+    manager.acquireAccountCheckout('account-1', { ownerId: 'attempt-1', taskId: 'task-1' })
+
+    expect(
+      manager.acquireAccountCheckout('account-1', { ownerId: 'attempt-1', taskId: 'task-1' })
+    ).toMatchObject({ acquired: false, reason: 'account-busy' })
+  })
+
   it('records a terminal busy attempt when another task owns the account', async () => {
     const existingOwnerId = 'task-1'
     const telemetry = {
@@ -113,19 +122,160 @@ describe('checkout account ownership', () => {
       1,
       'attempt-1',
       'acquired',
-      expect.objectContaining({ ownerId: 'task-1:account-1' })
+      expect.objectContaining({ ownerId: 'attempt-1' })
     )
     expect(telemetry.recordLease).toHaveBeenNthCalledWith(
       2,
       'attempt-1',
       'released',
-      expect.objectContaining({ ownerId: 'task-1:account-1', heldMs: 125 })
+      expect.objectContaining({ ownerId: 'attempt-1', heldMs: 125 })
     )
     expect(telemetry.recordLease.mock.invocationCallOrder[1]).toBeLessThan(
       telemetry.completeAttempt.mock.invocationCallOrder[0]
     )
     expect(manager.acquireAccountCheckout('account-1', { ownerId: 'task-2' }).acquired).toBe(true)
     nowSpy.mockRestore()
+  })
+
+  it('keeps a preserved lease busy for a later checkout from the same task', async () => {
+    const telemetry = {
+      beginAttempt: vi.fn().mockReturnValueOnce('attempt-1').mockReturnValueOnce('attempt-2'),
+      record: vi.fn(),
+      recordLease: vi.fn(),
+      completeAttempt: vi.fn()
+    }
+    const browserPool = {
+      launch: vi.fn(async () => ({ once: vi.fn() })),
+      close: vi.fn(async () => {})
+    }
+    const manager = makeManager({ checkoutTelemetry: telemetry, browserPool })
+    const task = { id: 'task-1', mode: 'test-checkout', retailer: 'target' }
+    const dropEvent = {
+      productUrl: 'https://www.target.com/p/example',
+      productName: 'Product'
+    }
+
+    await manager._runFlowForAccount(
+      async () => ({ success: true, testMode: true }),
+      task,
+      dropEvent,
+      'account-1'
+    )
+    const second = await manager._runFlowForAccount(
+      async () => ({ success: true, testMode: true }),
+      task,
+      dropEvent,
+      'account-1'
+    )
+
+    expect(second).toMatchObject({ success: false, accountBusy: true })
+    expect(browserPool.launch).toHaveBeenCalledTimes(1)
+    expect(telemetry.recordLease).toHaveBeenCalledWith(
+      'attempt-1',
+      'acquired',
+      expect.objectContaining({ ownerId: 'attempt-1' })
+    )
+    expect(JSON.stringify(telemetry.recordLease.mock.calls)).not.toContain('task-1:account-1')
+  })
+
+  it('does not let a stale context close unpin a newer lease', async () => {
+    let closeOldContext
+    const telemetry = {
+      beginAttempt: vi.fn(() => 'attempt-1'),
+      record: vi.fn(),
+      recordLease: vi.fn(),
+      completeAttempt: vi.fn()
+    }
+    const browserPool = {
+      isPinned: vi.fn(() => false),
+      pin: vi.fn(async () => ({})),
+      launch: vi.fn(async () => ({
+        once: vi.fn((_event, callback) => {
+          closeOldContext = callback
+        })
+      })),
+      close: vi.fn(async () => {}),
+      unpin: vi.fn(async () => {})
+    }
+    const manager = makeManager({ checkoutTelemetry: telemetry, browserPool })
+
+    await manager._runFlowForAccount(
+      async () => ({ success: true, testMode: true }),
+      { id: 'task-1', mode: 'test-checkout', retailer: 'target' },
+      { productUrl: 'https://www.target.com/p/example', productName: 'Product' },
+      'account-1'
+    )
+    expect(manager.releaseAccountCheckout('account-1', 'attempt-1')).toBe(true)
+    expect(
+      manager.acquireAccountCheckout('account-1', { ownerId: 'attempt-2', taskId: 'task-1' })
+        .acquired
+    ).toBe(true)
+
+    closeOldContext()
+
+    expect(browserPool.unpin).not.toHaveBeenCalled()
+    expect(
+      manager.acquireAccountCheckout('account-1', { ownerId: 'attempt-3', taskId: 'task-2' })
+        .acquired
+    ).toBe(false)
+  })
+
+  it('releases a preserved lease when its context closed before preservation was known', async () => {
+    let closeContext
+    const telemetry = {
+      beginAttempt: vi.fn(() => 'attempt-1'),
+      record: vi.fn(),
+      recordLease: vi.fn(),
+      completeAttempt: vi.fn()
+    }
+    const browserPool = {
+      isPinned: vi.fn(() => false),
+      pin: vi.fn(async () => ({})),
+      launch: vi.fn(async () => ({
+        once: vi.fn((_event, callback) => {
+          closeContext = callback
+        })
+      })),
+      close: vi.fn(async () => {}),
+      unpin: vi.fn(async () => {})
+    }
+    const manager = makeManager({ checkoutTelemetry: telemetry, browserPool })
+
+    await manager._runFlowForAccount(
+      async () => {
+        closeContext()
+        return { success: true, testMode: true }
+      },
+      { id: 'task-1', mode: 'test-checkout', retailer: 'target' },
+      { productUrl: 'https://www.target.com/p/example', productName: 'Product' },
+      'account-1'
+    )
+
+    expect(browserPool.unpin).toHaveBeenCalledWith('account-1', { close: false })
+    expect(manager.acquireAccountCheckout('account-1', { ownerId: 'attempt-2' }).acquired).toBe(
+      true
+    )
+  })
+
+  it('does not unpin shared warm ownership when a task with a lease stops', async () => {
+    const browserPool = { unpin: vi.fn(async () => {}) }
+    const manager = makeManager({ browserPool })
+    manager._tasks.set('task-1', { id: 'task-1' })
+    manager._warmAccountsByTask.set('task-1', ['account-1'])
+    manager._warmAccountsByTask.set('task-2', ['account-1'])
+    manager._warmAccountRefs.set('account-1', 2)
+    manager.acquireAccountCheckout('account-1', {
+      ownerId: 'attempt-1',
+      taskId: 'task-1'
+    })
+
+    await manager.stopTask('task-1', { unsubscribe: false })
+
+    expect(browserPool.unpin).not.toHaveBeenCalled()
+    expect(manager._warmAccountRefs.get('account-1')).toBe(1)
+    expect(manager.acquireAccountCheckout('account-1', { ownerId: 'attempt-2' }).acquired).toBe(
+      true
+    )
   })
 
   it.each([

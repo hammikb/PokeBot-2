@@ -76,7 +76,7 @@ describe('Target checkout retry classification', () => {
   })
 })
 
-function makeTaskManager(settings = {}, accountOverrides = {}) {
+function makeTaskManager(settings = {}, accountOverrides = {}, managerOverrides = {}) {
   const notify = { fire: vi.fn() }
   const account = {
     id: 'account-1',
@@ -112,7 +112,8 @@ function makeTaskManager(settings = {}, accountOverrides = {}) {
     browserPool,
     getDb: () => db,
     getSettings: () => settings,
-    paymentManager
+    paymentManager,
+    ...managerOverrides
   })
 
   return { manager, notify, accountManager, browserPool, browserContext, paymentManager }
@@ -462,9 +463,67 @@ describe('TaskManager test checkout', () => {
     expect(second).toMatchObject({
       success: false,
       accountBusy: true,
-      error: 'Account already has an active checkout for another product'
+      error: expect.stringContaining('Account is busy')
     })
     expect(runTargetFlow).toHaveBeenCalledTimes(1)
+    finishFirst()
+    await first
+  })
+
+  it('records production-path contention before _runFlowsForTask returns busy', async () => {
+    const telemetry = {
+      beginAttempt: vi.fn().mockReturnValueOnce('attempt-1').mockReturnValueOnce('attempt-2'),
+      record: vi.fn(),
+      recordLease: vi.fn(),
+      completeAttempt: vi.fn()
+    }
+    const { manager } = makeTaskManager({}, {}, { checkoutTelemetry: telemetry })
+    let finishFirst
+    runTargetFlow.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishFirst = () =>
+            resolve({ success: true, testMode: true, requiresManualCheckout: true })
+        })
+    )
+    const task = {
+      id: 'task-a',
+      retailer: 'target',
+      product_name: 'Product A',
+      product_url: 'https://www.target.com/p/example/A-111',
+      account_ids: JSON.stringify(['account-1']),
+      orders_per_drop: 1,
+      mode: 'test-checkout'
+    }
+    const first = manager._runFlowsForTask(task, {
+      retailer: 'target',
+      productName: 'Product A',
+      productUrl: task.product_url,
+      dropType: 'in_stock'
+    })
+    await vi.waitFor(() => expect(runTargetFlow).toHaveBeenCalledTimes(1))
+
+    const second = await manager._runFlowsForTask(
+      { ...task, id: 'task-b' },
+      {
+        retailer: 'target',
+        productName: 'Product B',
+        productUrl: 'https://www.target.com/p/example/A-222',
+        dropType: 'in_stock'
+      }
+    )
+
+    expect(second.results[0]).toMatchObject({ success: false, accountBusy: true })
+    expect(telemetry.beginAttempt).toHaveBeenCalledTimes(2)
+    expect(telemetry.recordLease).toHaveBeenCalledWith(
+      'attempt-2',
+      'busy',
+      expect.objectContaining({ ownerId: 'attempt-1' })
+    )
+    expect(telemetry.completeAttempt).toHaveBeenCalledWith(
+      'attempt-2',
+      expect.objectContaining({ accountBusy: true })
+    )
     finishFirst()
     await first
   })

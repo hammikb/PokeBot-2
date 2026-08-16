@@ -727,7 +727,7 @@ export class TaskManager extends EventEmitter {
   acquireAccountCheckout(accountId, owner = {}) {
     if (!accountId || !owner.ownerId) return { acquired: false, reason: 'invalid-owner' }
     const existing = this._accountCheckoutLeases.get(accountId)
-    if (existing && existing.ownerId !== owner.ownerId) {
+    if (existing) {
       return { acquired: false, reason: 'account-busy', owner: { ...existing } }
     }
     this._accountCheckoutLeases.set(accountId, { ...owner, accountId, acquiredAt: Date.now() })
@@ -747,7 +747,9 @@ export class TaskManager extends EventEmitter {
       if (lease.taskId !== taskId) continue
       if (this.releaseAccountCheckout(accountId, lease.ownerId)) {
         released += 1
-        Promise.resolve(this._pool.unpin?.(accountId, { close: true })).catch(() => {})
+        if ((this._warmAccountRefs.get(accountId) || 0) === 0) {
+          Promise.resolve(this._pool.unpin?.(accountId, { close: true })).catch(() => {})
+        }
       }
     }
     return released
@@ -1249,35 +1251,13 @@ export class TaskManager extends EventEmitter {
         orderResults: []
       }
     }
-    if (this._activeAccountCheckoutRuns.has(accountId)) {
-      log.info('Skipping checkout because the account is already handling another product', {
-        accountId,
-        retailer: task.retailer,
-        productUrl: dropEvent.productUrl
-      })
-      return {
-        accountId,
-        success: false,
-        accountBusy: true,
-        error: 'Account already has an active checkout for another product',
-        ordersRequested: 0,
-        ordersCompleted: 0,
-        orderResults: []
-      }
-    }
-
-    this._activeAccountCheckoutRuns.add(accountId)
-    try {
-      return await this._runOrdersForAccountUnlocked(
-        flow,
-        task,
-        dropEvent,
-        accountId,
-        orderSubmissionGate
-      )
-    } finally {
-      this._activeAccountCheckoutRuns.delete(accountId)
-    }
+    return this._runOrdersForAccountUnlocked(
+      flow,
+      task,
+      dropEvent,
+      accountId,
+      orderSubmissionGate
+    )
   }
 
   async _runOrdersForAccountUnlocked(flow, task, dropEvent, accountId, orderSubmissionGate = null) {
@@ -1336,8 +1316,8 @@ export class TaskManager extends EventEmitter {
         error: 'Account is paused until the previous uncertain order is reviewed'
       }
     }
-    const ownerId = `${task.id || dropEvent.productUrl}:${accountId}`
     const attemptId = this._checkoutTelemetry?.beginAttempt({ task, dropEvent, accountId })
+    const ownerId = attemptId || randomUUID()
     const lease = this.acquireAccountCheckout(accountId, {
       ownerId,
       taskId: task.id || null,
@@ -1373,6 +1353,16 @@ export class TaskManager extends EventEmitter {
     this._checkoutTelemetry?.recordLease(attemptId, 'acquired', { ownerId })
     let preserveLease = false
     let ownsPin = false
+    let checkoutContext = null
+    let checkoutContextClosed = false
+    const releasePreservedLease = () => {
+      if (leaseReleased || !this.releaseAccountCheckout(accountId, ownerId)) return false
+      leaseReleased = true
+      if (ownsPin) {
+        Promise.resolve(this._pool.unpin?.(accountId, { close: false })).catch(() => {})
+      }
+      return true
+    }
     if (!this._pool.isPinned?.(accountId) && this._pool.pin) {
       try {
         await this._pool.pin(accountId, {
@@ -1424,13 +1414,12 @@ export class TaskManager extends EventEmitter {
             retailer: task.retailer,
             priority: 100
           })
+          checkoutContext = context
+          checkoutContextClosed = false
           context.once?.('close', () => {
-            if (preserveLease) {
-              this.releaseAccountCheckout(accountId, ownerId)
-              if (ownsPin) {
-                Promise.resolve(this._pool.unpin?.(accountId, { close: false })).catch(() => {})
-              }
-            }
+            if (checkoutContext !== context) return
+            checkoutContextClosed = true
+            if (preserveLease) releasePreservedLease()
           })
           this._checkoutTelemetry?.record(
             attemptId,
@@ -1564,7 +1553,9 @@ export class TaskManager extends EventEmitter {
       })
       this._logHistory(dropEvent, result, accountId)
       preserveLease = Boolean(result.testMode || result.requiresManualCheckout)
-      if (!preserveLease) {
+      if (preserveLease && checkoutContextClosed) {
+        releasePreservedLease()
+      } else if (!preserveLease) {
         await this._closeAccountContext(accountId)
         releaseLease()
       }
