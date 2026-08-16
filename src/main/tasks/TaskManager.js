@@ -69,6 +69,7 @@ export class TaskManager extends EventEmitter {
     this._warmAccountRefs = new Map()
     this._activeCheckoutRuns = new Set()
     this._activeAccountCheckoutRuns = new Set()
+    this._accountCheckoutLeases = new Map()
     this._manualReviewAccounts = new Set()
     this._productOperations = new Map()
     this._taskStartPromises = new Map()
@@ -279,7 +280,11 @@ export class TaskManager extends EventEmitter {
 
   stopTask(id, { unsubscribe = true } = {}) {
     const entry = this._tasks.get(id)
-    if (!entry) return Promise.resolve(false)
+    if (!entry) {
+      this.releaseAccountCheckoutsForTask(id)
+      return Promise.resolve(false)
+    }
+    this.releaseAccountCheckoutsForTask(id)
     this._releaseTaskAccounts(id)
     this._tasks.delete(id)
     this._emitStatus(id, 'idle')
@@ -717,6 +722,35 @@ export class TaskManager extends EventEmitter {
 
   clearAccountManualReview(accountId) {
     this._manualReviewAccounts.delete(accountId)
+  }
+
+  acquireAccountCheckout(accountId, owner = {}) {
+    if (!accountId || !owner.ownerId) return { acquired: false, reason: 'invalid-owner' }
+    const existing = this._accountCheckoutLeases.get(accountId)
+    if (existing && existing.ownerId !== owner.ownerId) {
+      return { acquired: false, reason: 'account-busy', owner: { ...existing } }
+    }
+    this._accountCheckoutLeases.set(accountId, { ...owner, accountId, acquiredAt: Date.now() })
+    return { acquired: true }
+  }
+
+  releaseAccountCheckout(accountId, ownerId) {
+    const existing = this._accountCheckoutLeases.get(accountId)
+    if (!existing || existing.ownerId !== ownerId) return false
+    this._accountCheckoutLeases.delete(accountId)
+    return true
+  }
+
+  releaseAccountCheckoutsForTask(taskId) {
+    let released = 0
+    for (const [accountId, lease] of this._accountCheckoutLeases) {
+      if (lease.taskId !== taskId) continue
+      if (this.releaseAccountCheckout(accountId, lease.ownerId)) {
+        released += 1
+        Promise.resolve(this._pool.unpin?.(accountId, { close: true })).catch(() => {})
+      }
+    }
+    return released
   }
 
   _getPokemonCenterAccount() {
@@ -1302,7 +1336,63 @@ export class TaskManager extends EventEmitter {
         error: 'Account is paused until the previous uncertain order is reviewed'
       }
     }
+    const ownerId = `${task.id || dropEvent.productUrl}:${accountId}`
     const attemptId = this._checkoutTelemetry?.beginAttempt({ task, dropEvent, accountId })
+    const lease = this.acquireAccountCheckout(accountId, {
+      ownerId,
+      taskId: task.id || null,
+      productName: dropEvent.productName,
+      mode: task.mode
+    })
+    if (!lease.acquired) {
+      const result = {
+        accountId,
+        success: false,
+        accountBusy: true,
+        error: `Account is busy with ${lease.owner?.productName || 'another checkout'}`
+      }
+      this._checkoutTelemetry?.recordLease(attemptId, 'busy', {
+        ownerId: lease.owner?.ownerId
+      })
+      this._checkoutTelemetry?.completeAttempt(attemptId, result)
+      return result
+    }
+    const leaseAcquiredAt = this._accountCheckoutLeases.get(accountId)?.acquiredAt ?? Date.now()
+    let leaseReleased = false
+    const releaseLease = () => {
+      if (leaseReleased) return false
+      const currentLease = this._accountCheckoutLeases.get(accountId)
+      if (!currentLease || currentLease.ownerId !== ownerId) return false
+      this._checkoutTelemetry?.recordLease(attemptId, 'released', {
+        ownerId,
+        heldMs: Math.max(0, Date.now() - leaseAcquiredAt)
+      })
+      leaseReleased = this.releaseAccountCheckout(accountId, ownerId)
+      return leaseReleased
+    }
+    this._checkoutTelemetry?.recordLease(attemptId, 'acquired', { ownerId })
+    let preserveLease = false
+    let ownsPin = false
+    if (!this._pool.isPinned?.(accountId) && this._pool.pin) {
+      try {
+        await this._pool.pin(accountId, {
+          profilePath: account.profile_path,
+          proxy: account.proxy,
+          retailer: task.retailer,
+          priority: 100
+        })
+        ownsPin = true
+      } catch (error) {
+        const result = {
+          accountId,
+          success: false,
+          error: `Could not reserve checkout browser: ${error.message}`
+        }
+        releaseLease()
+        this._checkoutTelemetry?.completeAttempt(attemptId, result)
+        return result
+      }
+    }
     let submissionStarted = false
 
     const retryManager = new RetryManager({
@@ -1333,6 +1423,14 @@ export class TaskManager extends EventEmitter {
             proxy: account.proxy,
             retailer: task.retailer,
             priority: 100
+          })
+          context.once?.('close', () => {
+            if (preserveLease) {
+              this.releaseAccountCheckout(accountId, ownerId)
+              if (ownsPin) {
+                Promise.resolve(this._pool.unpin?.(accountId, { close: false })).catch(() => {})
+              }
+            }
           })
           this._checkoutTelemetry?.record(
             attemptId,
@@ -1465,13 +1563,16 @@ export class TaskManager extends EventEmitter {
         dropType: result.success ? 'in_stock' : 'price_drop'
       })
       this._logHistory(dropEvent, result, accountId)
-      this._checkoutTelemetry?.completeAttempt(attemptId, result)
-      if (!result.requiresManualCheckout) {
+      preserveLease = Boolean(result.testMode || result.requiresManualCheckout)
+      if (!preserveLease) {
         await this._closeAccountContext(accountId)
+        releaseLease()
       }
+      this._checkoutTelemetry?.completeAttempt(attemptId, result)
       return { accountId, ...result }
     } catch (err) {
       await this._closeAccountContext(accountId)
+      releaseLease()
       await this._notify.fire({
         ...dropEvent,
         productName: `ERROR [${account.name}]: ${err.message}`,
@@ -1483,6 +1584,11 @@ export class TaskManager extends EventEmitter {
         error: err.message
       })
       return { accountId, success: false, error: err.message }
+    } finally {
+      if (!preserveLease) releaseLease()
+      if (ownsPin && !preserveLease) {
+        await Promise.resolve(this._pool.unpin?.(accountId, { close: false })).catch(() => {})
+      }
     }
   }
 

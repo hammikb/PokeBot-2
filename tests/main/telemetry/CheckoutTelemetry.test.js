@@ -156,6 +156,15 @@ describe('CheckoutTelemetry', () => {
     })
   })
 
+  it('classifies immediate account contention separately from generic busy failures', () => {
+    expect(classifyCheckoutFailure('Account is busy with another checkout', 'drop_detected')).toEqual(
+      {
+        code: 'account_busy',
+        stage: 'drop_detected'
+      }
+    )
+  })
+
   it('recovers terminal attempts left incomplete by older JSON database builds', () => {
     const dbPath = join(tmpdir(), `pokebot-telemetry-${Date.now()}-${Math.random()}.json`)
     tempPaths.push(dbPath)
@@ -345,6 +354,8 @@ describe('CheckoutTelemetry', () => {
     const leaseMetadata = JSON.parse(leaseEvent.metadata_json)
     expect(leaseMetadata.ownerRef).toMatch(/^[a-f0-9]{20}$/)
     expect(leaseMetadata.ownerRef).not.toBe('account-owner-1')
+    expect(JSON.stringify(leaseMetadata)).not.toContain('account-1')
+    expect(JSON.stringify(leaseMetadata)).not.toContain('Target Account')
 
     const now = Date.now()
     const report = buildCheckoutAnalyticsReport(

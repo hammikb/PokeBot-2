@@ -597,7 +597,8 @@ export function classifyCheckoutStage(message = '') {
 export function classifyCheckoutFailure(message = '', lastStage = 'failed') {
   const value = String(message || '').toLowerCase()
   let code = 'unknown'
-  if (/target cart session rejected with http (?:401|403)\b/.test(value))
+  if (/account is busy/.test(value)) code = 'account_busy'
+  else if (/target cart session rejected with http (?:401|403)\b/.test(value))
     code = 'cart_session_rejected'
   else if (/target rate limited add to cart/.test(value)) code = 'cart_rate_limited'
   else if (
