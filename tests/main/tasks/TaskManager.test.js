@@ -282,6 +282,7 @@ describe('TaskManager test checkout', () => {
     const telemetry = {
       beginAttempt: vi.fn(() => 'attempt-1'),
       record: vi.fn(),
+      recordLease: vi.fn(),
       completeAttempt: vi.fn()
     }
     const dropEventLedger = {
@@ -526,6 +527,145 @@ describe('TaskManager test checkout', () => {
     )
     finishFirst()
     await first
+  })
+
+  it('rejects a standard Walmart checkout while a queue checkout owns the account', async () => {
+    const telemetry = {
+      beginAttempt: vi
+        .fn()
+        .mockReturnValueOnce('queue-attempt')
+        .mockReturnValueOnce('standard-attempt'),
+      record: vi.fn(),
+      recordLease: vi.fn(),
+      completeAttempt: vi.fn()
+    }
+    const queueJoiner = { on: vi.fn(), stop: vi.fn(async () => {}) }
+    const dropEventLedger = {
+      claim: vi.fn(() => ({ claimed: true, receiptId: 'queue-receipt' })),
+      markSubmissionStarted: vi.fn(),
+      complete: vi.fn()
+    }
+    const { manager } = makeTaskManager(
+      {},
+      { name: 'Walmart Account' },
+      { checkoutTelemetry: telemetry, queueJoiner, dropEventLedger }
+    )
+    const queueTask = {
+      id: 'queue-task',
+      retailer: 'walmart',
+      product_name: 'Queue Product',
+      product_url: 'https://www.walmart.com/ip/queue-product/111',
+      account_ids: JSON.stringify(['account-1']),
+      buy_limit: 1,
+      mode: 'monitor-and-buy'
+    }
+    manager._tasks.set(queueTask.id, queueTask)
+    let finishQueue
+    runWalmartFlow.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishQueue = () => resolve({ success: true })
+        })
+    )
+
+    const queueCheckout = manager._onQueueTurn({
+      id: queueTask.id,
+      status: { itemName: 'Queue Product', queueCycleId: 'walmart-queue:queue-111' },
+      context: {}
+    })
+    await vi.waitFor(() => expect(runWalmartFlow).toHaveBeenCalledTimes(1))
+
+    const standard = await manager._runFlowsForTask(
+      {
+        ...queueTask,
+        id: 'standard-task',
+        product_name: 'Standard Product',
+        product_url: 'https://www.walmart.com/ip/standard-product/222'
+      },
+      {
+        retailer: 'walmart',
+        productName: 'Standard Product',
+        productUrl: 'https://www.walmart.com/ip/standard-product/222',
+        dropType: 'in_stock'
+      }
+    )
+
+    expect(standard.results[0]).toMatchObject({ success: false, accountBusy: true })
+    expect(runWalmartFlow).toHaveBeenCalledTimes(1)
+    expect(telemetry.recordLease).toHaveBeenCalledWith(
+      'standard-attempt',
+      'busy',
+      expect.objectContaining({ ownerId: 'queue-attempt' })
+    )
+    finishQueue()
+    await queueCheckout
+  })
+
+  it('does not start a Walmart queue checkout while a standard checkout owns the account', async () => {
+    const telemetry = {
+      beginAttempt: vi.fn(() => 'standard-attempt'),
+      record: vi.fn(),
+      recordLease: vi.fn(),
+      completeAttempt: vi.fn()
+    }
+    const queueJoiner = { on: vi.fn(), stop: vi.fn(async () => {}) }
+    const dropEventLedger = {
+      claim: vi.fn(() => ({ claimed: true, receiptId: 'queue-receipt' })),
+      markSubmissionStarted: vi.fn(),
+      complete: vi.fn()
+    }
+    const { manager, notify } = makeTaskManager(
+      {},
+      { name: 'Walmart Account' },
+      { checkoutTelemetry: telemetry, queueJoiner, dropEventLedger }
+    )
+    let finishStandard
+    runWalmartFlow.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishStandard = () =>
+            resolve({ success: true, testMode: true, requiresManualCheckout: true })
+        })
+    )
+    const standardTask = {
+      id: 'standard-task',
+      retailer: 'walmart',
+      product_name: 'Standard Product',
+      product_url: 'https://www.walmart.com/ip/standard-product/222',
+      account_ids: JSON.stringify(['account-1']),
+      buy_limit: 1,
+      mode: 'test-checkout'
+    }
+    const standardCheckout = manager._runFlowsForTask(standardTask, {
+      retailer: 'walmart',
+      productName: 'Standard Product',
+      productUrl: standardTask.product_url,
+      dropType: 'in_stock'
+    })
+    await vi.waitFor(() => expect(runWalmartFlow).toHaveBeenCalledTimes(1))
+    manager._tasks.set('queue-task', {
+      ...standardTask,
+      id: 'queue-task',
+      product_name: 'Queue Product',
+      product_url: 'https://www.walmart.com/ip/queue-product/111',
+      mode: 'monitor-and-buy'
+    })
+
+    await manager._onQueueTurn({
+      id: 'queue-task',
+      status: { itemName: 'Queue Product', queueCycleId: 'walmart-queue:queue-111' },
+      context: {}
+    })
+
+    expect(runWalmartFlow).toHaveBeenCalledTimes(1)
+    expect(dropEventLedger.claim).not.toHaveBeenCalled()
+    expect(notify.fire).toHaveBeenCalledWith(
+      expect.objectContaining({
+        productName: expect.stringContaining('account is already checking out another item')
+      })
+    )
+    finishStandard()
+    await standardCheckout
   })
 
   it('runs two separate confirmed Target orders when the task requests two', async () => {

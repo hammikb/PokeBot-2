@@ -974,7 +974,10 @@ export class TaskManager extends EventEmitter {
       return
     }
 
-    if (this._activeAccountCheckoutRuns.has(account.id)) {
+    if (
+      this._activeAccountCheckoutRuns.has(account.id) ||
+      this._accountCheckoutLeases.has(account.id)
+    ) {
       this._emitStatus(id, 'manual_required')
       await this._notify.fire({
         retailer: 'walmart',
@@ -998,6 +1001,21 @@ export class TaskManager extends EventEmitter {
     }
 
     this._activeAccountCheckoutRuns.add(account.id)
+    let attemptId = null
+    let leaseOwnerId = null
+    let leaseAcquiredAt = null
+    const releaseQueueLease = () => {
+      if (!leaseOwnerId) return false
+      const currentLease = this._accountCheckoutLeases.get(account.id)
+      if (!currentLease || currentLease.ownerId !== leaseOwnerId) return false
+      this._checkoutTelemetry?.recordLease(attemptId, 'released', {
+        ownerId: leaseOwnerId,
+        heldMs: Math.max(0, Date.now() - leaseAcquiredAt)
+      })
+      const released = this.releaseAccountCheckout(account.id, leaseOwnerId)
+      if (released) leaseOwnerId = null
+      return released
+    }
     try {
       const queueCycleId = String(stableQueueCycle).startsWith('walmart-queue:')
         ? String(stableQueueCycle)
@@ -1033,15 +1051,45 @@ export class TaskManager extends EventEmitter {
         receiptId: receipt.receiptId,
         dropCycleId: queueCycleId
       }
-      this._emitStatus(id, 'checkout')
-      this.emit('drop', dropEvent)
-      await this._notify.fire(dropEvent)
-
-      const attemptId = this._checkoutTelemetry?.beginAttempt({
+      attemptId = this._checkoutTelemetry?.beginAttempt({
         task,
         dropEvent,
         accountId: account.id
       })
+      const ownerId = attemptId || randomUUID()
+      const lease = this.acquireAccountCheckout(account.id, {
+        ownerId,
+        taskId: task.id || null,
+        productName: dropEvent.productName,
+        mode: task.mode
+      })
+      if (!lease.acquired) {
+        const result = {
+          accountId: account.id,
+          success: false,
+          accountBusy: true,
+          error: `Account is busy with ${lease.owner?.productName || 'another checkout'}`
+        }
+        this._checkoutTelemetry?.recordLease(attemptId, 'busy', {
+          ownerId: lease.owner?.ownerId
+        })
+        this._checkoutTelemetry?.completeAttempt(attemptId, result)
+        this._emitStatus(id, 'manual_required')
+        await this._notify.fire({
+          retailer: 'walmart',
+          productName: `QUEUE READY - MANUAL CHECKOUT NEEDED [${account.name}]: account is already checking out another item`,
+          productUrl: task.product_url,
+          dropType: DROP_TYPES.PRICE_DROP
+        })
+        return
+      }
+      leaseOwnerId = ownerId
+      leaseAcquiredAt = this._accountCheckoutLeases.get(account.id)?.acquiredAt ?? Date.now()
+      this._checkoutTelemetry?.recordLease(attemptId, 'acquired', { ownerId })
+      this._emitStatus(id, 'checkout')
+      this.emit('drop', dropEvent)
+      await this._notify.fire(dropEvent)
+
       this._checkoutTelemetry?.record(attemptId, 'queue_waiting', 'Walmart queue admitted')
       let timeout
       let deadlineExpired = false
@@ -1133,6 +1181,7 @@ export class TaskManager extends EventEmitter {
         await this._queueJoiner?.stop(id)
         await Promise.resolve(this._pool.close(account.id)).catch(() => {})
       }
+      releaseQueueLease()
       this._checkoutTelemetry?.completeAttempt(attemptId, result)
       this._logHistory(dropEvent, result, account.id)
       this._dropEventLedger.complete(receipt.receiptId, {
@@ -1158,6 +1207,7 @@ export class TaskManager extends EventEmitter {
       })
       await this._queueJoiner?.stop(id)
     } finally {
+      releaseQueueLease()
       this._activeAccountCheckoutRuns.delete(account.id)
     }
   }
