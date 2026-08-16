@@ -99,10 +99,13 @@ describe('CheckoutEventMetadata', () => {
     })
   })
 
-  it('retains zero retry number', () => {
+  it('enforces non-negative retry numbers', () => {
     expect(sanitizeCheckoutEventMetadata({ eventType: 'cart_retry', retryNumber: 0 })).toEqual({
       eventType: 'cart_retry',
       retryNumber: 0
+    })
+    expect(sanitizeCheckoutEventMetadata({ eventType: 'cart_retry', retryNumber: -1 })).toEqual({
+      eventType: 'cart_retry'
     })
   })
 })
