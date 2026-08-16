@@ -236,7 +236,7 @@ git commit -m "feat: project structured checkout analytics"
 - Modify: `src/main/tasks/TaskManager.js`
 - Modify: `src/main/telemetry/CheckoutTelemetry.js`
 - Modify: `tests/main/automation/flows/target/TargetCartAttemptController.test.js`
-- Modify: `tests/main/automation/target-high-demand.test.js`
+- Modify: `tests/main/automation/flows/target-high-demand.test.js`
 - Modify: `tests/main/telemetry/CheckoutTelemetry.test.js`
 
 **Interfaces:**
@@ -276,7 +276,7 @@ expect(onMilestone).toHaveBeenCalledWith(
 
 - [ ] **Step 2: Run Target tests and verify RED**
 
-Run: `npx vitest run tests/main/automation/flows/target/TargetCartAttemptController.test.js tests/main/automation/target-high-demand.test.js`
+Run: `npx vitest run tests/main/automation/flows/target/TargetCartAttemptController.test.js tests/main/automation/flows/target-high-demand.test.js`
 
 Expected: FAIL because Target milestones do not include structured metadata.
 
@@ -330,14 +330,14 @@ Place exact Target cart checks before generic challenge/session/inventory/high-d
 
 - [ ] **Step 8: Run Task 3 tests and verify GREEN**
 
-Run: `npx vitest run tests/main/automation/flows/target/TargetCartAttemptController.test.js tests/main/automation/target-high-demand.test.js tests/main/telemetry/CheckoutTelemetry.test.js`
+Run: `npx vitest run tests/main/automation/flows/target/TargetCartAttemptController.test.js tests/main/automation/flows/target-high-demand.test.js tests/main/telemetry/CheckoutTelemetry.test.js`
 
 Expected: PASS.
 
 - [ ] **Step 9: Commit Task 3 only**
 
 ```powershell
-git add -- src/main/automation/flows/target.js src/main/tasks/TaskManager.js src/main/telemetry/CheckoutTelemetry.js tests/main/automation/flows/target/TargetCartAttemptController.test.js tests/main/automation/target-high-demand.test.js tests/main/telemetry/CheckoutTelemetry.test.js
+git add -- src/main/automation/flows/target.js src/main/tasks/TaskManager.js src/main/telemetry/CheckoutTelemetry.js tests/main/automation/flows/target/TargetCartAttemptController.test.js tests/main/automation/flows/target-high-demand.test.js tests/main/telemetry/CheckoutTelemetry.test.js
 git commit -m "feat: classify Target cart retries and failures"
 ```
 
@@ -522,7 +522,7 @@ git commit -m "feat: show checkout attempt diagnostics"
 Run:
 
 ```powershell
-npx vitest run tests/main/telemetry/CheckoutEventMetadata.test.js tests/main/telemetry/CheckoutTelemetry.test.js tests/main/automation/flows/target/TargetCartAttemptController.test.js tests/main/automation/target-high-demand.test.js tests/main/tasks/AccountCheckoutLease.test.js tests/renderer/CheckoutAttemptObservability.test.js
+npx vitest run tests/main/telemetry/CheckoutEventMetadata.test.js tests/main/telemetry/CheckoutTelemetry.test.js tests/main/automation/flows/target/TargetCartAttemptController.test.js tests/main/automation/flows/target-high-demand.test.js tests/main/tasks/AccountCheckoutLease.test.js tests/renderer/CheckoutAttemptObservability.test.js
 ```
 
 Expected: PASS with no warnings caused by the new work.
