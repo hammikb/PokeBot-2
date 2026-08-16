@@ -233,6 +233,184 @@ describe('CheckoutTelemetry', () => {
     await expect(telemetry.uploadAttempt('attempt-1')).resolves.toBe(false)
   })
 
+  it('keeps sanitized event metadata locally and omits it from remote event rows', async () => {
+    const dbPath = join(tmpdir(), `pokebot-telemetry-metadata-${Date.now()}.json`)
+    tempPaths.push(dbPath)
+    const db = new JsonDb(dbPath)
+    const remoteRows = []
+    const telemetry = new CheckoutTelemetry({
+      getDb: () => db,
+      authSessionManager: {
+        getStatus: () => ({ authenticated: true, user: { id: 'user-1' } }),
+        getClient: () => ({
+          from: (table) => ({
+            upsert: async (rows) => {
+              remoteRows.push({ table, rows })
+              return { error: null }
+            }
+          })
+        })
+      }
+    })
+    const attemptId = telemetry.beginAttempt({
+      task: { id: 'task-1', retailer: 'target' },
+      dropEvent: { retailer: 'target', productName: 'Pokemon item' },
+      accountId: 'account-1'
+    })
+
+    telemetry.record(attemptId, 'cart_attempted', 'Target response', {
+      eventType: 'cart_response',
+      requestType: 'cart_mutation',
+      responseKind: 'rate_limit',
+      httpStatus: 429,
+      productUrl: 'https://www.target.com/private'
+    })
+    telemetry.completeAttempt(attemptId, { success: true })
+    await telemetry.uploadAttempt(attemptId)
+
+    const event = db
+      .prepare(
+        "SELECT * FROM checkout_attempt_events WHERE attempt_id = ? AND stage = 'cart_attempted'"
+      )
+      .get(attemptId)
+    expect(JSON.parse(event.metadata_json)).toEqual({
+      eventType: 'cart_response',
+      requestType: 'cart_mutation',
+      responseKind: 'rate_limit',
+      httpStatus: 429
+    })
+    const eventPayloads = remoteRows.filter((entry) => entry.table === 'checkout_attempt_events')
+    expect(eventPayloads.at(-1).rows.every((row) => !Object.hasOwn(row, 'metadata_json'))).toBe(
+      true
+    )
+  })
+
+  it('anonymizes account leases and projects structured checkout diagnostics', () => {
+    const dbPath = join(tmpdir(), `pokebot-telemetry-lease-${Date.now()}.json`)
+    tempPaths.push(dbPath)
+    const db = new JsonDb(dbPath)
+    const telemetry = new CheckoutTelemetry({ getDb: () => db })
+    const attemptId = telemetry.beginAttempt({
+      task: { id: 'task-1', retailer: 'target' },
+      dropEvent: { retailer: 'target', productName: 'Pokemon item' },
+      accountId: 'account-1'
+    })
+
+    telemetry.recordLease(attemptId, 'busy', { ownerId: 'account-owner-1', heldMs: 1200 })
+    telemetry.flushLocal()
+
+    const leaseEvent = db
+      .prepare("SELECT * FROM checkout_attempt_events WHERE detail = 'Account lease busy'")
+      .get()
+    const leaseMetadata = JSON.parse(leaseEvent.metadata_json)
+    expect(leaseMetadata.ownerRef).toMatch(/^[a-f0-9]{20}$/)
+    expect(leaseMetadata.ownerRef).not.toBe('account-owner-1')
+
+    const now = Date.now()
+    const report = buildCheckoutAnalyticsReport(
+      [
+        {
+          id: 'structured-attempt',
+          retailer: 'target',
+          product_name: 'Pokemon item',
+          mode: 'auto-checkout',
+          started_at: now - 2_000,
+          outcome: 'failed',
+          final_stage: 'failed'
+        },
+        {
+          id: 'legacy-attempt',
+          retailer: 'target',
+          product_name: 'Legacy item',
+          mode: 'auto-checkout',
+          started_at: now - 4_000,
+          outcome: 'failed',
+          final_stage: 'failed'
+        }
+      ],
+      [
+        {
+          attempt_id: 'structured-attempt',
+          sequence: 1,
+          stage: 'drop_detected',
+          detail: 'Stock detected',
+          elapsed_ms: 0,
+          created_at: now - 2_000
+        },
+        {
+          attempt_id: 'structured-attempt',
+          sequence: 2,
+          stage: 'cart_attempted',
+          detail: 'Target response',
+          elapsed_ms: 1_200,
+          created_at: now - 800,
+          metadata_json:
+            '{"eventType":"cart_response","requestType":"cart_mutation","responseKind":"rate_limit","httpStatus":429,"retryNumber":1}'
+        },
+        {
+          attempt_id: 'structured-attempt',
+          sequence: 3,
+          stage: 'drop_detected',
+          detail: 'Account lease busy',
+          elapsed_ms: 1_300,
+          created_at: now - 700,
+          metadata_json:
+            '{"eventType":"account_lease","leaseState":"busy","ownerRef":"a94a8fe5ccb19ba61c4c","heldMs":1200}'
+        },
+        {
+          attempt_id: 'legacy-attempt',
+          sequence: 1,
+          stage: 'drop_detected',
+          detail: 'Stock detected',
+          elapsed_ms: 0,
+          created_at: now - 4_000
+        }
+      ],
+      { days: 7 }
+    )
+
+    expect(report.attempts[0].cartAttempts).toEqual([
+      expect.objectContaining({ responseKind: 'rate_limit', httpStatus: 429, retryNumber: 1 })
+    ])
+    expect(report.attempts[0].leaseSummary).toMatchObject({ contended: true, state: 'busy' })
+    expect(
+      report.attempts[0].milestones.find((item) => item.stage === 'cart_attempted')
+    ).toMatchObject({ reached: true, reachedMs: 1200 })
+    expect(report.attempts[1]).toMatchObject({ cartAttempts: [], leaseSummary: null })
+  })
+
+  it('preserves a text event when malformed metadata cannot be sanitized', () => {
+    const dbPath = join(tmpdir(), `pokebot-telemetry-malformed-metadata-${Date.now()}.json`)
+    tempPaths.push(dbPath)
+    const db = new JsonDb(dbPath)
+    const telemetry = new CheckoutTelemetry({ getDb: () => db })
+    const attemptId = telemetry.beginAttempt({
+      task: { id: 'task-1', retailer: 'target' },
+      dropEvent: { retailer: 'target', productName: 'Pokemon item' },
+      accountId: 'account-1'
+    })
+    const malformedMetadata = new Proxy(
+      {},
+      {
+        getOwnPropertyDescriptor: () => {
+          throw new Error('bad metadata')
+        }
+      }
+    )
+
+    expect(
+      telemetry.record(attemptId, 'cart_attempted', 'Target response', malformedMetadata)
+    ).toBe(true)
+    telemetry.flushLocal()
+
+    const event = db
+      .prepare(
+        "SELECT * FROM checkout_attempt_events WHERE attempt_id = ? AND stage = 'cart_attempted'"
+      )
+      .get(attemptId)
+    expect(event).toMatchObject({ detail: 'Target response', metadata_json: '{}' })
+  })
+
   it('builds a safe local analytics report with breakdowns and stage timings', () => {
     const now = Date.now()
     const attempts = [

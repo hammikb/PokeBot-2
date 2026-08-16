@@ -2,6 +2,10 @@ import { createHash, randomUUID } from 'crypto'
 import { basename } from 'path'
 import { extractProductKey } from '../products/productKey.js'
 import { createModuleLogger } from '../utils/logger.js'
+import {
+  parseCheckoutEventMetadata,
+  sanitizeCheckoutEventMetadata
+} from './CheckoutEventMetadata.js'
 
 const log = createModuleLogger('CheckoutTelemetry')
 const DEVICE_SETTING = 'checkoutTelemetryDeviceId'
@@ -122,16 +126,16 @@ export class CheckoutTelemetry {
     return id
   }
 
-  record(attemptId, stageOrMessage, detail = null) {
+  record(attemptId, stageOrMessage, detail = null, metadata = {}) {
     try {
-      return this._record(attemptId, stageOrMessage, detail)
+      return this._record(attemptId, stageOrMessage, detail, metadata)
     } catch (error) {
       log.warn('Could not record checkout telemetry', { error: error.message })
       return false
     }
   }
 
-  _record(attemptId, stageOrMessage, detail = null) {
+  _record(attemptId, stageOrMessage, detail = null, metadata = {}) {
     const active = this._active.get(attemptId)
     if (!active) return false
     const stage = CHECKOUT_STAGES.includes(stageOrMessage)
@@ -159,10 +163,20 @@ export class CheckoutTelemetry {
       sequence,
       stage,
       detail: sanitizeDetail(message),
+      metadataJson: serializeCheckoutEventMetadata(metadata),
       elapsedMs: Math.max(0, now - active.startedAt),
       createdAt: now
     })
     return true
+  }
+
+  recordLease(attemptId, leaseState, { ownerId, heldMs = null } = {}) {
+    return this.record(attemptId, 'drop_detected', `Account lease ${leaseState}`, {
+      eventType: 'account_lease',
+      leaseState,
+      ...(ownerId == null || ownerId === '' ? {} : { ownerRef: hashRef(ownerId) }),
+      heldMs
+    })
   }
 
   completeAttempt(attemptId, result = {}) {
@@ -436,8 +450,8 @@ export class CheckoutTelemetry {
       const db = this._getDb()
       const insert = db.prepare(
         `INSERT INTO checkout_attempt_events
-          (id, attempt_id, sequence, stage, detail, elapsed_ms, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+          (id, attempt_id, sequence, stage, detail, elapsed_ms, created_at, metadata_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
       const writeRows = () => {
         for (const event of selected) {
@@ -448,7 +462,8 @@ export class CheckoutTelemetry {
             event.stage,
             event.detail,
             event.elapsedMs,
-            event.createdAt
+            event.createdAt,
+            event.metadataJson
           )
         }
       }
@@ -632,6 +647,14 @@ function hashRef(value) {
   return createHash('sha256').update(String(value)).digest('hex').slice(0, 20)
 }
 
+function serializeCheckoutEventMetadata(value) {
+  try {
+    return JSON.stringify(sanitizeCheckoutEventMetadata(value))
+  } catch {
+    return '{}'
+  }
+}
+
 function parseJson(value) {
   try {
     return JSON.parse(value || '{}')
@@ -679,6 +702,7 @@ function buildAnalyticsAttempt(row, rawEvents) {
         sequence: Number(event.sequence) || index + 1,
         stage: CHECKOUT_STAGES.includes(event.stage) ? event.stage : 'failed',
         detail: sanitizeDetail(event.detail),
+        metadata: parseCheckoutEventMetadata(event.metadata_json),
         elapsedMs,
         deltaMs: Math.max(0, elapsedMs - previousElapsed),
         createdAt: Number(event.created_at) || null
@@ -703,12 +727,49 @@ function buildAnalyticsAttempt(row, rawEvents) {
     monitorLatencyMs: nullableNumber(experimentJson.monitor_latency_ms),
     experiment: sanitizeAnalyticsExperiment(experimentJson),
     artifacts: sanitizeArtifacts(experimentJson[LOCAL_ARTIFACT_KEY]),
+    milestones: buildMilestones(firstStageEvents),
+    cartAttempts: buildCartAttempts(events),
+    leaseSummary: buildLeaseSummary(events),
     stageTimings: [...firstStageEvents.entries()].map(([stage, event]) => ({
       stage,
       reachedMs: event.elapsedMs,
       durationMs: nextStageDuration(stage, event.elapsedMs, firstStageEvents)
     })),
     events
+  }
+}
+
+function buildMilestones(firstStageEvents) {
+  return CHECKOUT_STAGES.map((stage) => {
+    const event = firstStageEvents.get(stage)
+    return {
+      stage,
+      reached: Boolean(event),
+      reachedMs: event?.elapsedMs ?? null,
+      durationMs: event ? nextStageDuration(stage, event.elapsedMs, firstStageEvents) : null
+    }
+  })
+}
+
+function buildCartAttempts(events) {
+  return events
+    .filter((event) =>
+      ['cart_click', 'cart_response', 'cart_retry', 'cart_reload'].includes(
+        event.metadata.eventType
+      )
+    )
+    .map((event) => ({ elapsedMs: event.elapsedMs, ...event.metadata }))
+}
+
+function buildLeaseSummary(events) {
+  const leaseEvents = events.filter((event) => event.metadata.eventType === 'account_lease')
+  const latest = leaseEvents.at(-1)
+  if (!latest) return null
+  return {
+    state: latest.metadata.leaseState || null,
+    contended: leaseEvents.some((event) => event.metadata.leaseState === 'busy'),
+    ownerRef: latest.metadata.ownerRef || null,
+    heldMs: nullableNumber(latest.metadata.heldMs)
   }
 }
 
