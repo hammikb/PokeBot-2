@@ -182,7 +182,8 @@ const TABLE_COLUMNS = {
     'stage',
     'detail',
     'elapsed_ms',
-    'created_at'
+    'created_at',
+    'metadata_json'
   ],
   drop_event_receipts: [
     'id',

@@ -437,6 +437,13 @@ const migrations = [
           ON monitor_unsubscribe_outbox(user_id, created_at);
       `)
     }
+  },
+  {
+    version: 18,
+    name: 'add_checkout_event_metadata',
+    up: (db) => {
+      db.exec('ALTER TABLE checkout_attempt_events ADD COLUMN metadata_json TEXT;')
+    }
   }
 ]
 

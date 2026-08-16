@@ -43,6 +43,14 @@ describe('initDb', () => {
     expect(columns).toContain('buy_limit')
     expect(columns).toContain('orders_per_drop')
   })
+  it('creates checkout event metadata column', () => {
+    const columns = getDb()
+      .prepare('PRAGMA table_info(checkout_attempt_events)')
+      .all()
+      .map((column) => column.name)
+
+    expect(columns).toContain('metadata_json')
+  })
   it('creates settings table', () => {
     const row = getDb()
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='settings'")

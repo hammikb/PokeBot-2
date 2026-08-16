@@ -168,6 +168,46 @@ describe('JsonDb aggregate queries', () => {
   })
 })
 
+describe('JsonDb checkout event metadata compatibility', () => {
+  it('preserves metadata rows while legacy rows remain readable after reopening', () => {
+    db.prepare(
+      `INSERT INTO checkout_attempt_events
+       (id, attempt_id, sequence, stage, detail, elapsed_ms, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run('legacy-event', 'attempt-1', 1, 'cart_attempted', 'Legacy event', 10, 100)
+    db.prepare(
+      `INSERT INTO checkout_attempt_events
+       (id, attempt_id, sequence, stage, detail, elapsed_ms, created_at, metadata_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      'new-event',
+      'attempt-1',
+      2,
+      'cart_attempted',
+      'Structured event',
+      20,
+      200,
+      '{"eventType":"cart_response"}'
+    )
+
+    db.close()
+    db = new JsonDb(dbPath)
+
+    expect(
+      db.prepare('SELECT * FROM checkout_attempt_events WHERE id = ?').get('new-event')
+    ).toMatchObject({ id: 'new-event', metadata_json: '{"eventType":"cart_response"}' })
+    expect(
+      db.prepare('SELECT * FROM checkout_attempt_events WHERE id = ?').get('legacy-event')
+    ).not.toHaveProperty('metadata_json')
+    expect(
+      db
+        .prepare('PRAGMA table_info(checkout_attempt_events)')
+        .all()
+        .map((column) => column.name)
+    ).toContain('metadata_json')
+  })
+})
+
 describe('JsonDb load-time repair', () => {
   it('dedupes rows sharing a primary key, keeping the most recent', () => {
     // Flush a real (empty) db file first so the fixture has the full table
