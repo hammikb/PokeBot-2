@@ -116,6 +116,34 @@ describe('CheckoutTelemetry', () => {
     )
   })
 
+  it('classifies precise Target cart failures before generic checkout failures', () => {
+    expect(
+      classifyCheckoutFailure('Target cart session rejected with HTTP 401', 'cart_attempted')
+    ).toEqual({ code: 'cart_session_rejected', stage: 'cart_attempted' })
+    expect(
+      classifyCheckoutFailure('Target cart session rejected with HTTP 403', 'cart_attempted')
+    ).toEqual({ code: 'cart_session_rejected', stage: 'cart_attempted' })
+    expect(
+      classifyCheckoutFailure('Target rate limited Add to cart; HTTP 429', 'cart_attempted')
+    ).toEqual({ code: 'cart_rate_limited', stage: 'cart_attempted' })
+    expect(
+      classifyCheckoutFailure(
+        'Target cart acquisition exhausted no-response-limit',
+        'cart_attempted'
+      )
+    ).toEqual({ code: 'cart_no_response', stage: 'cart_attempted' })
+    expect(classifyCheckoutFailure('Requested item is out of stock', 'availability_ready')).toEqual(
+      { code: 'inventory', stage: 'availability_ready' }
+    )
+    expect(classifyCheckoutFailure('Target captcha challenge detected', 'session_checked')).toEqual(
+      { code: 'challenge', stage: 'session_checked' }
+    )
+    expect(classifyCheckoutFailure('Browser context closed', 'checkout_opened')).toEqual({
+      code: 'browser_closed',
+      stage: 'checkout_opened'
+    })
+  })
+
   it('recovers terminal attempts left incomplete by older JSON database builds', () => {
     const dbPath = join(tmpdir(), `pokebot-telemetry-${Date.now()}-${Math.random()}.json`)
     tempPaths.push(dbPath)

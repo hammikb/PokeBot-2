@@ -1035,8 +1035,8 @@ export class TaskManager extends EventEmitter {
           this._emitCheckoutStep(dropEvent, account, message)
           this._checkoutTelemetry?.record(attemptId, message)
         },
-        onMilestone: (stage, detail) => {
-          this._checkoutTelemetry?.record(attemptId, stage, `milestone:${detail}`)
+        onMilestone: (stage, detail, metadata = {}) => {
+          this._checkoutTelemetry?.record(attemptId, stage, `milestone:${detail}`, metadata)
         }
       })
       const deadline = new Promise((resolve) => {
@@ -1380,8 +1380,8 @@ export class TaskManager extends EventEmitter {
                 this._emitCheckoutStep(dropEvent, account, message)
                 this._checkoutTelemetry?.record(attemptId, message)
               },
-              onMilestone: (stage, detail) => {
-                this._checkoutTelemetry?.record(attemptId, stage, `milestone:${detail}`)
+              onMilestone: (stage, detail, metadata = {}) => {
+                this._checkoutTelemetry?.record(attemptId, stage, `milestone:${detail}`, metadata)
               },
               browserPool: this._pool,
               accountId: accountId

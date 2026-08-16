@@ -1419,13 +1419,47 @@ export async function browserAddToCart(
             ? 'Adding to cart (browser method)'
             : `Retrying Target Add to cart on the warm product page (attempt ${event.clickCount})`
         )
-        onMilestone('cart_attempted', `Target browser cart requested quantity ${buyLimit}`)
+        onMilestone('cart_attempted', `Target browser cart requested quantity ${buyLimit}`, {
+          eventType: 'cart_click',
+          requestType: 'cart_mutation',
+          attemptNumber: event.clickCount,
+          retryNumber: event.retryCount
+        })
+      } else if (event.state === 'outcome_classified') {
+        onMilestone('cart_attempted', `Target browser cart response: ${event.kind}`, {
+          eventType: 'cart_response',
+          requestType: 'cart_mutation',
+          responseKind: event.kind.replaceAll('-', '_'),
+          ...(Number.isInteger(event.status) ? { httpStatus: event.status } : {}),
+          attemptNumber: event.clickCount,
+          retryNumber: event.retryCount
+        })
       } else if (event.state === 'rate_limited') {
         onStep(`Target rate limited Add to cart; retrying in ${(event.delayMs / 1000).toFixed(1)}s`)
+        onMilestone('cart_attempted', 'Target browser cart rate-limit retry scheduled', {
+          eventType: 'cart_retry',
+          retryKind: 'rate_limit',
+          retryNumber: event.retryCount + 1,
+          delayMs: event.delayMs,
+          retryAfterHonored: event.retryAfterHonored
+        })
       } else if (event.state === 'transient_recovery') {
         onStep('Target cart notice cleared; retrying in 0.4s')
+        onMilestone('cart_attempted', 'Target browser cart transient retry scheduled', {
+          eventType: 'cart_retry',
+          retryKind: 'transient',
+          retryNumber: event.retryCount + 1,
+          delayMs: event.delayMs,
+          retryAfterHonored: event.retryAfterHonored
+        })
       } else if (event.state === 'reloading_product') {
         onStep(`Reloading the Target product page (${event.reason})`)
+        onMilestone('cart_attempted', 'Target browser cart product reload scheduled', {
+          eventType: 'cart_reload',
+          retryKind: 'reload',
+          retryNumber: event.retryCount,
+          ...(event.clickCount > 0 ? { attemptNumber: event.clickCount } : {})
+        })
       }
     }
   })

@@ -139,7 +139,7 @@ describe('Target high-demand checkout submission', () => {
         status: () => status,
         url: () => 'https://carts.target.com/web_checkouts/v1/cart_items',
         request: () => ({ method: () => 'POST' }),
-        headers: () => ({})
+        headers: () => (status === 429 ? { 'retry-after': '2' } : {})
       })
     })
     const addButton = locator({
@@ -181,6 +181,7 @@ describe('Target high-demand checkout submission', () => {
       })
     }
     const onStep = vi.fn()
+    const onMilestone = vi.fn()
 
     const result = await browserAddToCart(
       page,
@@ -190,7 +191,7 @@ describe('Target high-demand checkout submission', () => {
       null,
       {},
       null,
-      vi.fn()
+      onMilestone
     )
 
     expect(click).toHaveBeenCalledTimes(2)
@@ -203,7 +204,7 @@ describe('Target high-demand checkout submission', () => {
       waitUntil: 'domcontentloaded',
       timeout: 30000
     })
-    expect(page.waitForTimeout).toHaveBeenCalledWith(1500)
+    expect(page.waitForTimeout).toHaveBeenCalledWith(2000)
     expect(page.waitForTimeout.mock.calls.some(([delay]) => delay >= 3000 && delay <= 6000)).toBe(
       false
     )
@@ -215,6 +216,28 @@ describe('Target high-demand checkout submission', () => {
       retryCount: 1,
       reloadCount: 0
     })
+    expect(onMilestone).toHaveBeenCalledWith(
+      'cart_attempted',
+      expect.any(String),
+      expect.objectContaining({
+        eventType: 'cart_response',
+        requestType: 'cart_mutation',
+        responseKind: 'rate_limit',
+        httpStatus: 429,
+        attemptNumber: 1
+      })
+    )
+    expect(onMilestone).toHaveBeenCalledWith(
+      'cart_attempted',
+      expect.any(String),
+      expect.objectContaining({
+        eventType: 'cart_retry',
+        retryKind: 'rate_limit',
+        retryNumber: 1,
+        delayMs: 2000,
+        retryAfterHonored: true
+      })
+    )
   })
 
   it('reselects the requested quantity after a no-response product reload', async () => {

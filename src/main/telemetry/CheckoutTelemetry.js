@@ -597,7 +597,12 @@ export function classifyCheckoutStage(message = '') {
 export function classifyCheckoutFailure(message = '', lastStage = 'failed') {
   const value = String(message || '').toLowerCase()
   let code = 'unknown'
-  if (/captcha|challenge/.test(value)) code = 'challenge'
+  if (/target cart session rejected with http (?:401|403)\b/.test(value))
+    code = 'cart_session_rejected'
+  else if (/target rate limited add to cart.*\b429\b/.test(value)) code = 'cart_rate_limited'
+  else if (/target cart acquisition exhausted no-response-limit/.test(value))
+    code = 'cart_no_response'
+  else if (/captcha|challenge/.test(value)) code = 'challenge'
   else if (/not signed|logged out|login|sign-in/.test(value)) code = 'session'
   else if (/out of stock|unavailable|sold out|empty cart/.test(value)) code = 'inventory'
   else if (/fulfillment|availability did not settle|still loading/.test(value))

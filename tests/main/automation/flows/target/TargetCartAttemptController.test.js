@@ -108,6 +108,24 @@ describe('runTargetCartAttempt', () => {
     ])
     await runTargetCartAttempt(h.options)
     expect(h.sleeps).toEqual([2000])
+    expect(h.events).toContainEqual(
+      expect.objectContaining({
+        state: 'outcome_classified',
+        kind: 'rate-limit',
+        status: 429,
+        clickCount: 1,
+        retryCount: 0
+      })
+    )
+    expect(h.events).toContainEqual(
+      expect.objectContaining({
+        state: 'rate_limited',
+        delayMs: 2000,
+        retryAfterHonored: true,
+        clickCount: 1,
+        retryCount: 0
+      })
+    )
 
     const tooLong = harness([
       { kind: 'rate-limit', status: 429, retryAfterMs: 120000, evidence: null }
