@@ -1,5 +1,6 @@
 /* eslint-disable react/prop-types */
 import { useEffect, useMemo, useState } from 'react'
+import CheckoutAttemptObservability from '../components/CheckoutAttemptObservability'
 import { useAppStore } from '../store/appStore'
 import { formatAppDateTime } from '../utils/time'
 
@@ -352,10 +353,11 @@ function AttemptList({ attempts, expandedAttempt, onToggle }) {
   )
 }
 
-function AttemptDetails({ attempt }) {
+export function AttemptDetails({ attempt }) {
   const experimentEntries = Object.entries(attempt.experiment || {})
   return (
     <div className="border-t border-gray-800/70 bg-[#0d0d0d] px-4 py-4">
+      <CheckoutAttemptObservability attempt={attempt} />
       <div className="grid gap-5 xl:grid-cols-[240px_1fr]">
         <aside className="space-y-4">
           <div>
