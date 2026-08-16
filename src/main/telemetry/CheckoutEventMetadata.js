@@ -27,7 +27,7 @@ const ENUM_FIELDS = Object.freeze({
 const INTEGER_RANGES = Object.freeze({
   httpStatus: Object.freeze([100, 599]),
   attemptNumber: Object.freeze([1, 10_000]),
-  retryNumber: Object.freeze([1, 10_000]),
+  retryNumber: Object.freeze([0, 10_000]),
   delayMs: Object.freeze([0, 86_400_000]),
   heldMs: Object.freeze([0, 86_400_000])
 })
