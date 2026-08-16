@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { runTargetCartAttempt } from '../../../../../src/main/automation/flows/target/TargetCartAttemptController.js'
+import { TARGET_CART_POLICY } from '../../../../../src/main/automation/flows/target/TargetCartPolicy.js'
+import { classifyCheckoutFailure } from '../../../../../src/main/telemetry/CheckoutTelemetry.js'
 
 function harness(
   outcomes,
@@ -130,7 +132,77 @@ describe('runTargetCartAttempt', () => {
     const tooLong = harness([
       { kind: 'rate-limit', status: 429, retryAfterMs: 120000, evidence: null }
     ])
-    await expect(runTargetCartAttempt(tooLong.options)).rejects.toMatchObject({ code: 'deadline' })
+    let deadlineError
+    await runTargetCartAttempt(tooLong.options).catch((error) => {
+      deadlineError = error
+    })
+    expect(deadlineError).toMatchObject({ code: 'deadline' })
+    expect(classifyCheckoutFailure(deadlineError.message, 'cart_attempted')).toEqual({
+      code: 'cart_rate_limited',
+      stage: 'cart_attempted'
+    })
+    expect(tooLong.options.clickAndObserve).toHaveBeenCalledTimes(1)
+    expect(tooLong.sleeps).toEqual([])
+    expect(tooLong.options.restoreProduct).not.toHaveBeenCalled()
+  })
+
+  it('classifies the real repeated-rate-limit terminal error without changing retry behavior', async () => {
+    const h = harness(
+      Array.from({ length: 3 }, () => ({
+        kind: 'rate-limit',
+        status: 429,
+        retryAfterMs: null,
+        evidence: null
+      }))
+    )
+    h.options.policy = {
+      ...TARGET_CART_POLICY,
+      rateLimitDelayMs: 25,
+      maxRecoverableRetries: 1
+    }
+
+    let terminalError
+    await runTargetCartAttempt(h.options).catch((error) => {
+      terminalError = error
+    })
+
+    expect(terminalError).toMatchObject({ code: 'retry-limit' })
+    expect(classifyCheckoutFailure(terminalError.message, 'cart_attempted')).toEqual({
+      code: 'cart_rate_limited',
+      stage: 'cart_attempted'
+    })
+    expect(h.options.clickAndObserve).toHaveBeenCalledTimes(2)
+    expect(h.sleeps).toEqual([25, 25])
+    expect(h.options.restoreProduct).not.toHaveBeenCalled()
+  })
+
+  it('classifies the real no-response reload terminal error without changing reload behavior', async () => {
+    const h = harness(
+      Array.from({ length: 5 }, () => ({
+        kind: 'no-response',
+        status: null,
+        evidence: null
+      }))
+    )
+    h.options.policy = {
+      ...TARGET_CART_POLICY,
+      maxNoResponseRetriesPerDocument: 1,
+      maxReloads: 1
+    }
+
+    let terminalError
+    await runTargetCartAttempt(h.options).catch((error) => {
+      terminalError = error
+    })
+
+    expect(terminalError).toMatchObject({ code: 'reload-limit' })
+    expect(classifyCheckoutFailure(terminalError.message, 'cart_attempted')).toEqual({
+      code: 'cart_no_response',
+      stage: 'cart_attempted'
+    })
+    expect(h.options.clickAndObserve).toHaveBeenCalledTimes(4)
+    expect(h.options.restoreProduct).toHaveBeenCalledTimes(1)
+    expect(h.sleeps).toEqual([])
   })
 
   it('checks probable evidence before acquiring another button', async () => {

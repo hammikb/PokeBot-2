@@ -128,7 +128,19 @@ describe('CheckoutTelemetry', () => {
     ).toEqual({ code: 'cart_rate_limited', stage: 'cart_attempted' })
     expect(
       classifyCheckoutFailure(
+        'Target rate limited Add to cart; Target cart acquisition exhausted retry-limit',
+        'cart_attempted'
+      )
+    ).toEqual({ code: 'cart_rate_limited', stage: 'cart_attempted' })
+    expect(
+      classifyCheckoutFailure(
         'Target cart acquisition exhausted no-response-limit',
+        'cart_attempted'
+      )
+    ).toEqual({ code: 'cart_no_response', stage: 'cart_attempted' })
+    expect(
+      classifyCheckoutFailure(
+        'Target cart no response; Target cart acquisition exhausted reload-limit',
         'cart_attempted'
       )
     ).toEqual({ code: 'cart_no_response', stage: 'cart_attempted' })

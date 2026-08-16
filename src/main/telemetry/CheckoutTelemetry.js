@@ -599,8 +599,10 @@ export function classifyCheckoutFailure(message = '', lastStage = 'failed') {
   let code = 'unknown'
   if (/target cart session rejected with http (?:401|403)\b/.test(value))
     code = 'cart_session_rejected'
-  else if (/target rate limited add to cart.*\b429\b/.test(value)) code = 'cart_rate_limited'
-  else if (/target cart acquisition exhausted no-response-limit/.test(value))
+  else if (/target rate limited add to cart/.test(value)) code = 'cart_rate_limited'
+  else if (
+    /target cart no response|target cart acquisition exhausted no-response-limit/.test(value)
+  )
     code = 'cart_no_response'
   else if (/captcha|challenge/.test(value)) code = 'challenge'
   else if (/not signed|logged out|login|sign-in/.test(value)) code = 'session'

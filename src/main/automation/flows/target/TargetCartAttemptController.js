@@ -1,5 +1,20 @@
 import { TARGET_CART_POLICY, TargetCartBudget, TargetCartBudgetError } from './TargetCartPolicy.js'
 
+function withTargetCartFailureContext(operation, failureKind) {
+  try {
+    return operation()
+  } catch (error) {
+    if (error instanceof TargetCartBudgetError) {
+      if (failureKind === 'rate-limit') {
+        error.message = `Target rate limited Add to cart; ${error.message}`
+      } else if (failureKind === 'no-response') {
+        error.message = `Target cart no response; ${error.message}`
+      }
+    }
+    throw error
+  }
+}
+
 export async function runTargetCartAttempt({
   tcin,
   requestedQuantity,
@@ -22,7 +37,10 @@ export async function runTargetCartAttempt({
   const emit = (state, fields = {}) => onEvent({ state, ...budget.snapshot(now()), ...fields })
 
   const reloadProduct = async (reason) => {
-    budget.recordReload(now())
+    withTargetCartFailureContext(
+      () => budget.recordReload(now()),
+      reason === 'no-response-limit' ? 'no-response' : pendingRetryKind
+    )
     emit('reloading_product', { reason })
     await restoreProduct(productUrl)
     pendingRetryKind = 'reload'
@@ -55,7 +73,7 @@ export async function runTargetCartAttempt({
   }
 
   while (true) {
-    budget.assertTimeRemaining(now())
+    withTargetCartFailureContext(() => budget.assertTimeRemaining(now()), pendingRetryKind)
 
     if (!(await isProductPageValid())) {
       await reloadProduct('product-page-replaced')
@@ -84,7 +102,10 @@ export async function runTargetCartAttempt({
       continue
     }
 
-    budget.authorizeClick(pendingRetryKind, now())
+    withTargetCartFailureContext(
+      () => budget.authorizeClick(pendingRetryKind, now()),
+      pendingRetryKind
+    )
     pendingRetryKind = null
     emit('cart_response_wait')
     const outcome = await clickAndObserve(button, { outcomeMs: policy.outcomeMs })
@@ -111,7 +132,10 @@ export async function runTargetCartAttempt({
         outcome.kind === 'rate-limit'
           ? (outcome.retryAfterMs ?? policy.rateLimitDelayMs)
           : policy.transientDelayMs
-      budget.assertDelayFits(delayMs, now())
+      withTargetCartFailureContext(
+        () => budget.assertDelayFits(delayMs, now()),
+        outcome.kind
+      )
       emit(outcome.kind === 'rate-limit' ? 'rate_limited' : 'transient_recovery', {
         delayMs,
         retryAfterHonored: outcome.kind === 'rate-limit' && outcome.retryAfterMs !== null
