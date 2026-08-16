@@ -102,10 +102,14 @@ export async function runTargetCartAttempt({
       continue
     }
 
+    const authorizedRetryKind = pendingRetryKind
     withTargetCartFailureContext(
       () => budget.authorizeClick(pendingRetryKind, now()),
       pendingRetryKind
     )
+    if (authorizedRetryKind === 'no-response') {
+      emit('no_response_retry')
+    }
     pendingRetryKind = null
     emit('cart_response_wait')
     const outcome = await clickAndObserve(button, { outcomeMs: policy.outcomeMs })

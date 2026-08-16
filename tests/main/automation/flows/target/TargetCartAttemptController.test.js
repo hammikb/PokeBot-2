@@ -84,6 +84,38 @@ describe('runTargetCartAttempt', () => {
     expect(result).toMatchObject({ clickCount: 6, retryCount: 5, reloadCount: 1 })
   })
 
+  it('emits each scheduled no-response retry with the counter before the next click', async () => {
+    const h = harness([
+      { kind: 'no-response', status: null, evidence: null },
+      {
+        kind: 'success',
+        status: 200,
+        evidence: { source: 'mutation-2xx', mutationStatus: 200 }
+      }
+    ])
+
+    await runTargetCartAttempt(h.options)
+
+    const scheduledRetries = h.events.filter((event) => event.state === 'no_response_retry')
+    expect(scheduledRetries).toEqual([
+      expect.objectContaining({ clickCount: 2, retryCount: 1, noResponseRetries: 1 })
+    ])
+    expect(scheduledRetries[0]).not.toHaveProperty('delayMs')
+  })
+
+  it('does not emit a no-response retry when the global retry budget rejects it', async () => {
+    const h = harness([{ kind: 'no-response', status: null, evidence: null }])
+    h.options.policy = {
+      ...TARGET_CART_POLICY,
+      maxRecoverableRetries: 0
+    }
+
+    await expect(runTargetCartAttempt(h.options)).rejects.toMatchObject({ code: 'retry-limit' })
+
+    expect(h.events.filter((event) => event.state === 'no_response_retry')).toEqual([])
+    expect(h.options.clickAndObserve).toHaveBeenCalledTimes(1)
+  })
+
   it('waits 400 ms for a transient modal and 1500 ms for 429 without Retry-After', async () => {
     const h = harness([
       { kind: 'transient', status: null, evidence: null },

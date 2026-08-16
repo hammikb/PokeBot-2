@@ -154,6 +154,10 @@ describe('CheckoutTelemetry', () => {
       code: 'browser_closed',
       stage: 'checkout_opened'
     })
+    expect(classifyCheckoutFailure('Target cart returned HTTP 418', 'cart_attempted')).toEqual({
+      code: 'unknown',
+      stage: 'cart_attempted'
+    })
   })
 
   it('classifies immediate account contention separately from generic busy failures', () => {
@@ -396,11 +400,21 @@ describe('CheckoutTelemetry', () => {
           elapsed_ms: 1_200,
           created_at: now - 800,
           metadata_json:
-            '{"eventType":"cart_response","requestType":"cart_mutation","responseKind":"rate_limit","httpStatus":429,"retryNumber":1}'
+            '{"eventType":"cart_response","requestType":"cart_mutation","responseKind":"rate_limit","httpStatus":429,"attemptNumber":1}'
         },
         {
           attempt_id: 'structured-attempt',
           sequence: 3,
+          stage: 'cart_attempted',
+          detail: 'Target no-response retry scheduled',
+          elapsed_ms: 1_250,
+          created_at: now - 750,
+          metadata_json:
+            '{"eventType":"cart_retry","retryKind":"no_response","attemptNumber":2,"retryNumber":1}'
+        },
+        {
+          attempt_id: 'structured-attempt',
+          sequence: 4,
           stage: 'drop_detected',
           detail: 'Account lease busy',
           elapsed_ms: 1_300,
@@ -421,8 +435,15 @@ describe('CheckoutTelemetry', () => {
     )
 
     expect(report.attempts[0].cartAttempts).toEqual([
-      expect.objectContaining({ responseKind: 'rate_limit', httpStatus: 429, retryNumber: 1 })
+      expect.objectContaining({ responseKind: 'rate_limit', httpStatus: 429, attemptNumber: 1 }),
+      expect.objectContaining({
+        eventType: 'cart_retry',
+        retryKind: 'no_response',
+        attemptNumber: 2,
+        retryNumber: 1
+      })
     ])
+    expect(report.attempts[0].cartAttempts[1]).not.toHaveProperty('delayMs')
     expect(report.attempts[0].leaseSummary).toMatchObject({ contended: true, state: 'busy' })
     expect(
       report.attempts[0].milestones.find((item) => item.stage === 'cart_attempted')

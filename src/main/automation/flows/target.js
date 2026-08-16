@@ -1452,6 +1452,13 @@ export async function browserAddToCart(
           delayMs: event.delayMs,
           retryAfterHonored: event.retryAfterHonored
         })
+      } else if (event.state === 'no_response_retry') {
+        onMilestone('cart_attempted', 'Target browser cart no-response retry scheduled', {
+          eventType: 'cart_retry',
+          retryKind: 'no_response',
+          attemptNumber: event.clickCount,
+          retryNumber: event.retryCount
+        })
       } else if (event.state === 'reloading_product') {
         onStep(`Reloading the Target product page (${event.reason})`)
         onMilestone('cart_attempted', 'Target browser cart product reload scheduled', {

@@ -4,14 +4,20 @@ import {
   clickAndObserveTargetCart,
   dismissVisibleTargetCartTransient,
   getTargetProbableCartEvidence,
-  getVisibleTargetAddToCartButton
+  getVisibleTargetAddToCartButton,
+  isTargetCartMutationResponse
 } from '../../../../../src/main/automation/flows/target/TargetCartSignals.js'
 
-function response(status, retryAfter = null) {
+function response(
+  status,
+  retryAfter = null,
+  url = 'https://carts.target.com/web_checkouts/v1/cart_items',
+  method = 'POST'
+) {
   return {
     status: () => status,
-    url: () => 'https://carts.target.com/web_checkouts/v1/cart_items',
-    request: () => ({ method: () => 'POST' }),
+    url: () => url,
+    request: () => ({ method: () => method }),
     headers: () => (retryAfter === null ? {} : { 'retry-after': retryAfter })
   }
 }
@@ -21,6 +27,30 @@ function hiddenLocator() {
 }
 
 describe('TargetCartSignals', () => {
+  it('matches only the exact HTTPS Target cart mutation boundary while allowing a query', () => {
+    expect(
+      isTargetCartMutationResponse(
+        response(
+          200,
+          null,
+          'https://carts.target.com/web_checkouts/v1/cart_items?channel=web'
+        )
+      )
+    ).toBe(true)
+
+    const wrongBoundaries = [
+      ['protocol', 'http://carts.target.com/web_checkouts/v1/cart_items', 'POST'],
+      ['host', 'https://carts.target.com.evil.example/web_checkouts/v1/cart_items', 'POST'],
+      ['path prefix', 'https://carts.target.com/api/web_checkouts/v1/cart_items', 'POST'],
+      ['path suffix', 'https://carts.target.com/web_checkouts/v1/cart_items/extra', 'POST'],
+      ['method', 'https://carts.target.com/web_checkouts/v1/cart_items', 'GET']
+    ]
+
+    for (const [, url, method] of wrongBoundaries) {
+      expect(isTargetCartMutationResponse(response(200, null, url, method))).toBe(false)
+    }
+  })
+
   it('includes exact-TCIN and visible fulfillment selectors', () => {
     const result = { first: vi.fn(() => ({ id: 'button' })) }
     const page = { locator: vi.fn(() => result) }
@@ -130,6 +160,7 @@ describe('TargetCartSignals', () => {
     [401, 'session-error'],
     [403, 'session-error'],
     [409, 'success'],
+    [418, 'transient'],
     [503, 'transient']
   ])('classifies HTTP %i as %s', async (status, kind) => {
     const page = {

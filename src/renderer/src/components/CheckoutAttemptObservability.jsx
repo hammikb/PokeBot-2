@@ -121,6 +121,9 @@ function stageIndex(stage) {
 }
 
 function formatAttemptNumber(attempt) {
+  if (attempt.attemptNumber != null && attempt.retryNumber != null) {
+    return `Attempt ${attempt.attemptNumber} / Retry ${attempt.retryNumber}`
+  }
   if (attempt.attemptNumber != null) return `Attempt ${attempt.attemptNumber}`
   if (attempt.retryNumber != null) return `Retry ${attempt.retryNumber}`
   return '—'

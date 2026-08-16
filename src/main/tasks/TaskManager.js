@@ -281,10 +281,8 @@ export class TaskManager extends EventEmitter {
   stopTask(id, { unsubscribe = true } = {}) {
     const entry = this._tasks.get(id)
     if (!entry) {
-      this.releaseAccountCheckoutsForTask(id)
       return Promise.resolve(false)
     }
-    this.releaseAccountCheckoutsForTask(id)
     this._releaseTaskAccounts(id)
     this._tasks.delete(id)
     this._emitStatus(id, 'idle')
@@ -739,20 +737,6 @@ export class TaskManager extends EventEmitter {
     if (!existing || existing.ownerId !== ownerId) return false
     this._accountCheckoutLeases.delete(accountId)
     return true
-  }
-
-  releaseAccountCheckoutsForTask(taskId) {
-    let released = 0
-    for (const [accountId, lease] of this._accountCheckoutLeases) {
-      if (lease.taskId !== taskId) continue
-      if (this.releaseAccountCheckout(accountId, lease.ownerId)) {
-        released += 1
-        if ((this._warmAccountRefs.get(accountId) || 0) === 0) {
-          Promise.resolve(this._pool.unpin?.(accountId, { close: true })).catch(() => {})
-        }
-      }
-    }
-    return released
   }
 
   _getPokemonCenterAccount() {
@@ -1318,29 +1302,41 @@ export class TaskManager extends EventEmitter {
         ? 2
         : 1
     const orderResults = []
+    const batchLease = ordersRequested > 1 ? {} : null
 
-    for (let orderNumber = 1; orderNumber <= ordersRequested; orderNumber += 1) {
-      if (orderNumber > 1) {
-        const account = this._accountManager.getDecrypted(accountId)
-        if (account) {
-          this._emitCheckoutStep(
-            dropEvent,
-            account,
-            `Order 1 confirmed - starting separate order ${orderNumber} of ${ordersRequested}`
-          )
+    try {
+      for (let orderNumber = 1; orderNumber <= ordersRequested; orderNumber += 1) {
+        if (orderNumber > 1) {
+          const account = this._accountManager.getDecrypted(accountId)
+          if (account) {
+            this._emitCheckoutStep(
+              dropEvent,
+              account,
+              `Order 1 confirmed - starting separate order ${orderNumber} of ${ordersRequested}`
+            )
+          }
+          await new Promise((resolve) => setTimeout(resolve, 750))
         }
-        await new Promise((resolve) => setTimeout(resolve, 750))
-      }
 
-      const result = await this._runFlowForAccount(
-        flow,
-        { ...task, order_sequence: orderNumber, orders_per_drop: ordersRequested },
-        dropEvent,
-        accountId,
-        orderSubmissionGate
-      )
-      orderResults.push(result)
-      if (!result.success || result.testMode || result.requiresManualCheckout) break
+        const result = await this._runFlowForAccount(
+          flow,
+          { ...task, order_sequence: orderNumber, orders_per_drop: ordersRequested },
+          dropEvent,
+          accountId,
+          orderSubmissionGate,
+          {
+            leaseScope: batchLease,
+            retainLeaseOnSuccess: orderNumber < ordersRequested
+          }
+        )
+        orderResults.push(result)
+        if (!result.success || result.testMode || result.requiresManualCheckout) break
+      }
+    } finally {
+      if (batchLease?.ownerId && !batchLease.preserved) {
+        this.releaseAccountCheckout(accountId, batchLease.ownerId)
+        batchLease.ownerId = null
+      }
     }
 
     const completed = orderResults.filter((result) => result.success && !result.testMode).length
@@ -1354,7 +1350,14 @@ export class TaskManager extends EventEmitter {
     }
   }
 
-  async _runFlowForAccount(flow, task, dropEvent, accountId, orderSubmissionGate = null) {
+  async _runFlowForAccount(
+    flow,
+    task,
+    dropEvent,
+    accountId,
+    orderSubmissionGate = null,
+    { leaseScope = null, retainLeaseOnSuccess = false } = {}
+  ) {
     const account = this._accountManager.getDecrypted(accountId)
     if (!account) return { accountId, success: false, error: 'Account not found' }
     if (account.status === 'manual_review' || this._manualReviewAccounts.has(accountId)) {
@@ -1367,13 +1370,21 @@ export class TaskManager extends EventEmitter {
       }
     }
     const attemptId = this._checkoutTelemetry?.beginAttempt({ task, dropEvent, accountId })
-    const ownerId = attemptId || randomUUID()
-    const lease = this.acquireAccountCheckout(accountId, {
-      ownerId,
-      taskId: task.id || null,
-      productName: dropEvent.productName,
-      mode: task.mode
-    })
+    const checkoutLease = leaseScope || {}
+    const ownerId = checkoutLease.ownerId || attemptId || randomUUID()
+    const existingLease = checkoutLease.ownerId
+      ? this._accountCheckoutLeases.get(accountId)
+      : null
+    const lease = checkoutLease.ownerId
+      ? existingLease?.ownerId === ownerId
+        ? { acquired: true, reused: true }
+        : { acquired: false, reason: 'account-busy', owner: existingLease }
+      : this.acquireAccountCheckout(accountId, {
+          ownerId,
+          taskId: task.id || null,
+          productName: dropEvent.productName,
+          mode: task.mode
+        })
     if (!lease.acquired) {
       const result = {
         accountId,
@@ -1387,8 +1398,20 @@ export class TaskManager extends EventEmitter {
       this._checkoutTelemetry?.completeAttempt(attemptId, result)
       return result
     }
-    const leaseAcquiredAt = this._accountCheckoutLeases.get(accountId)?.acquiredAt ?? Date.now()
+    if (!checkoutLease.ownerId) {
+      checkoutLease.ownerId = ownerId
+      checkoutLease.acquiredAt =
+        this._accountCheckoutLeases.get(accountId)?.acquiredAt ?? Date.now()
+      checkoutLease.preserved = false
+    }
+    const leaseAcquiredAt = checkoutLease.acquiredAt
     let leaseReleased = false
+    const clearLeaseScope = () => {
+      if (checkoutLease.ownerId !== ownerId) return
+      checkoutLease.ownerId = null
+      checkoutLease.acquiredAt = null
+      checkoutLease.preserved = false
+    }
     const releaseLease = () => {
       if (leaseReleased) return false
       const currentLease = this._accountCheckoutLeases.get(accountId)
@@ -1398,16 +1421,21 @@ export class TaskManager extends EventEmitter {
         heldMs: Math.max(0, Date.now() - leaseAcquiredAt)
       })
       leaseReleased = this.releaseAccountCheckout(accountId, ownerId)
+      if (leaseReleased) clearLeaseScope()
       return leaseReleased
     }
-    this._checkoutTelemetry?.recordLease(attemptId, 'acquired', { ownerId })
+    if (!lease.reused) {
+      this._checkoutTelemetry?.recordLease(attemptId, 'acquired', { ownerId })
+    }
     let preserveLease = false
+    let retainLeaseAfterFlow = false
     let ownsPin = false
     let checkoutContext = null
     let checkoutContextClosed = false
     const releasePreservedLease = () => {
       if (leaseReleased || !this.releaseAccountCheckout(accountId, ownerId)) return false
       leaseReleased = true
+      clearLeaseScope()
       if (ownsPin) {
         Promise.resolve(this._pool.unpin?.(accountId, { close: false })).catch(() => {})
       }
@@ -1558,7 +1586,7 @@ export class TaskManager extends EventEmitter {
                 cause: err.message
               }
             }
-            await this._closeAccountContext(accountId)
+            await this._closeAccountContext(accountId, { allowPinned: ownsPin })
             throw err
           }
         },
@@ -1603,16 +1631,20 @@ export class TaskManager extends EventEmitter {
       })
       this._logHistory(dropEvent, result, accountId)
       preserveLease = Boolean(result.testMode || result.requiresManualCheckout)
+      retainLeaseAfterFlow = Boolean(
+        retainLeaseOnSuccess && result.success && !result.testMode && !result.requiresManualCheckout
+      )
+      checkoutLease.preserved = preserveLease
       if (preserveLease && checkoutContextClosed) {
         releasePreservedLease()
       } else if (!preserveLease) {
-        await this._closeAccountContext(accountId)
-        releaseLease()
+        await this._closeAccountContext(accountId, { allowPinned: ownsPin })
+        if (!retainLeaseAfterFlow) releaseLease()
       }
       this._checkoutTelemetry?.completeAttempt(attemptId, result)
       return { accountId, ...result }
     } catch (err) {
-      await this._closeAccountContext(accountId)
+      await this._closeAccountContext(accountId, { allowPinned: ownsPin })
       releaseLease()
       await this._notify.fire({
         ...dropEvent,
@@ -1626,7 +1658,7 @@ export class TaskManager extends EventEmitter {
       })
       return { accountId, success: false, error: err.message }
     } finally {
-      if (!preserveLease) releaseLease()
+      if (!preserveLease && !retainLeaseAfterFlow) releaseLease()
       if (ownsPin && !preserveLease) {
         await Promise.resolve(this._pool.unpin?.(accountId, { close: false })).catch(() => {})
       }
@@ -1674,9 +1706,9 @@ export class TaskManager extends EventEmitter {
     }
   }
 
-  async _closeAccountContext(accountId) {
+  async _closeAccountContext(accountId, { allowPinned = false } = {}) {
     if (this._queueJoiner?.isUsingAccount(accountId)) return
-    if (this._pool.isPinned?.(accountId)) return
+    if (!allowPinned && this._pool.isPinned?.(accountId)) return
     await this._pool.close(accountId)
   }
 

@@ -75,8 +75,11 @@ export async function dismissVisibleTargetCartTransient(page) {
 
 export function isTargetCartMutationResponse(response) {
   try {
+    const targetUrl = new URL(response.url())
     return (
-      /carts\.target\.com\/web_checkouts\/v1\/cart_items/i.test(response.url()) &&
+      targetUrl.protocol === 'https:' &&
+      targetUrl.host === 'carts.target.com' &&
+      targetUrl.pathname === '/web_checkouts/v1/cart_items' &&
       response.request().method() === 'POST'
     )
   } catch {
@@ -113,6 +116,9 @@ function classifyResponse(response, evidence, nowMs) {
   }
   if (status === 401 || status === 403) {
     return { kind: 'session-error', status, retryAfterMs: null, evidence: null }
+  }
+  if (status >= 400 && status < 500) {
+    return { kind: 'transient', status, retryAfterMs: null, evidence: null }
   }
   if (status >= 500) return { kind: 'transient', status, retryAfterMs: null, evidence: null }
   if (evidence) return { kind: 'success', status, retryAfterMs: null, evidence }

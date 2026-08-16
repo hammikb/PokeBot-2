@@ -245,6 +245,7 @@ describe('Target high-demand checkout submission', () => {
     let currentUrl = 'https://www.target.com/p/test-product/-/A-123456'
     const click = vi.fn(async () => {})
     const selectOption = vi.fn(async () => {})
+    const onMilestone = vi.fn()
     const addButton = locator({ isVisible: () => true, isDisabled: () => false, click })
     const quantity = locator({ count: () => 1, selectOption })
     const page = {
@@ -293,7 +294,7 @@ describe('Target high-demand checkout submission', () => {
       null,
       {},
       null,
-      vi.fn()
+      onMilestone
     )
 
     expect(result).toMatchObject({ quantity: 2, reloadCount: 1 })
@@ -304,6 +305,15 @@ describe('Target high-demand checkout submission', () => {
     expect(selectOption).toHaveBeenCalledTimes(2)
     expect(selectOption).toHaveBeenNthCalledWith(1, { value: '2' })
     expect(selectOption).toHaveBeenNthCalledWith(2, { value: '2' })
+    const noResponseRetries = onMilestone.mock.calls
+      .map(([, , metadata]) => metadata)
+      .filter(
+        (metadata) =>
+          metadata?.eventType === 'cart_retry' && metadata?.retryKind === 'no_response'
+      )
+    expect(noResponseRetries.map((metadata) => metadata.retryNumber)).toEqual([1, 2, 3, 4])
+    expect(noResponseRetries.map((metadata) => metadata.attemptNumber)).toEqual([2, 3, 4, 5])
+    expect(noResponseRetries.every((metadata) => !Object.hasOwn(metadata, 'delayMs'))).toBe(true)
   })
 
   it('holds the current checkout page without reloading when Target shows high demand', async () => {

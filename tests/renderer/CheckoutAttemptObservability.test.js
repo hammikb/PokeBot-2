@@ -67,6 +67,27 @@ describe('CheckoutAttemptObservability', () => {
     expect(html.indexOf('Cart Attempted')).toBeLessThan(html.indexOf('Cart Ready'))
   })
 
+  it('shows the retry number beside the click attempt without inventing a delay', () => {
+    const html = renderToStaticMarkup(
+      createElement(CheckoutAttemptObservability, {
+        attempt: {
+          cartAttempts: [
+            {
+              elapsedMs: 1250,
+              eventType: 'cart_retry',
+              retryKind: 'no_response',
+              attemptNumber: 2,
+              retryNumber: 1
+            }
+          ]
+        }
+      })
+    )
+
+    expect(html).toContain('Attempt 2 / Retry 1')
+    expect(html).not.toContain('0ms')
+  })
+
   it('places diagnostics before the existing timeline without removing artifacts or events', () => {
     const html = renderToStaticMarkup(
       createElement(AttemptDetails, {
