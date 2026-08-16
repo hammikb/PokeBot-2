@@ -62,4 +62,43 @@ describe('CheckoutEventMetadata', () => {
       })
     ).toEqual({})
   })
+
+  it('keeps only normalized, hashed account-lease metadata', () => {
+    expect(
+      sanitizeCheckoutEventMetadata({
+        eventType: 'account_lease',
+        leaseState: 'busy',
+        ownerRef: 'a94a8fe5ccb19ba61c4c',
+        heldMs: 1200,
+        ownerId: 'account-1'
+      })
+    ).toEqual({
+      eventType: 'account_lease',
+      leaseState: 'busy',
+      ownerRef: 'a94a8fe5ccb19ba61c4c',
+      heldMs: 1200
+    })
+  })
+
+  it('rejects non-string owner references even when coerced text resembles a hash', () => {
+    expect(
+      sanitizeCheckoutEventMetadata({
+        eventType: 'account_lease',
+        leaseState: 'busy',
+        ownerRef: { toString: () => 'a94a8fe5ccb19ba61c4c' }
+      })
+    ).toEqual({ eventType: 'account_lease', leaseState: 'busy' })
+  })
+
+  it('rejects zero and negative attempt numbers', () => {
+    expect(sanitizeCheckoutEventMetadata({ eventType: 'cart_response', attemptNumber: 0 })).toEqual({
+      eventType: 'cart_response'
+    })
+    expect(sanitizeCheckoutEventMetadata({ eventType: 'cart_response', attemptNumber: -1 })).toEqual({
+      eventType: 'cart_response'
+    })
+    expect(sanitizeCheckoutEventMetadata({ eventType: 'cart_retry', retryNumber: 0 })).toEqual({
+      eventType: 'cart_retry'
+    })
+  })
 })

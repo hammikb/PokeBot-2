@@ -3,7 +3,7 @@ const EVENT_TYPES = Object.freeze([
   'cart_response',
   'cart_retry',
   'cart_reload',
-  'lease'
+  'account_lease'
 ])
 const REQUEST_TYPES = Object.freeze(['cart_mutation'])
 const RESPONSE_KINDS = Object.freeze([
@@ -26,13 +26,14 @@ const ENUM_FIELDS = Object.freeze({
 
 const INTEGER_RANGES = Object.freeze({
   httpStatus: Object.freeze([100, 599]),
-  attemptNumber: Object.freeze([0, 10_000]),
-  retryNumber: Object.freeze([0, 10_000]),
+  attemptNumber: Object.freeze([1, 10_000]),
+  retryNumber: Object.freeze([1, 10_000]),
   delayMs: Object.freeze([0, 86_400_000]),
   heldMs: Object.freeze([0, 86_400_000])
 })
 
 const BOOLEAN_FIELDS = Object.freeze(['retryAfterHonored'])
+const OWNER_REF_PATTERN = /^[a-f0-9]{20}$/
 
 export function sanitizeCheckoutEventMetadata(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return {}
@@ -54,6 +55,13 @@ export function sanitizeCheckoutEventMetadata(input) {
   }
   for (const field of BOOLEAN_FIELDS) {
     if (Object.hasOwn(input, field) && typeof input[field] === 'boolean') output[field] = input[field]
+  }
+  if (
+    Object.hasOwn(input, 'ownerRef') &&
+    typeof input.ownerRef === 'string' &&
+    OWNER_REF_PATTERN.test(input.ownerRef)
+  ) {
+    output.ownerRef = input.ownerRef
   }
   return output
 }
