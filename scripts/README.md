@@ -15,7 +15,7 @@ following groups.
 
 ## Production Pi monitoring
 
-- `pokemon_center_queue_monitor.py` — Pokemon Center waiting-room detector.
+- `pokemon_center_queue_monitor.py` — persistent, proxy-only Chromium detector for the Pokemon Center waiting room.
 - `target_stock_observer.py` — low-bandwidth Target availability observer.
 - `walmart_restock_scanner.py` — low-bandwidth Walmart restock scanner.
 - `walmart_queue_rank_tracker.mjs` — broad, low-bandwidth Walmart category and queue detector.
@@ -24,6 +24,32 @@ following groups.
 
 These monitors are proxy-sensitive. Review their environment variables and
 fail-closed behavior before installing them on a Pi.
+
+### Pokemon Center detector operations
+
+The Pokemon Center detector keeps one headless Chromium process and one
+proxy-bound browser context alive between checks. It blocks images, media,
+fonts, and stylesheets to reduce bandwidth. A blocked context is replaced only
+after repeated failures, and a quarantined proxy is not retried until its
+cooldown expires. It never falls back to the Pi's home IP.
+
+Its periodic remote health record includes the classified state, last HTTP
+status, last successful check, success percentage, consecutive failures,
+non-secret proxy label, rotations, and browser restarts. Use the existing logs
+page to distinguish a healthy `storefront` state from `blocked` or `error`.
+
+Relevant systemd environment settings are:
+
+- `POKEMON_CENTER_FAILURE_THRESHOLD=2`
+- `POKEMON_CENTER_PROXY_COOLDOWN_SECONDS=900`
+- `POKEMON_CENTER_HEALTH_HEARTBEAT_SECONDS=300`
+- `POKEMON_CENTER_NAVIGATION_TIMEOUT_MS=30000`
+
+Run a one-shot live browser check before deployment with:
+
+```bash
+python scripts/diagnostics/diagnose_pokemon_center_queue.py
+```
 
 ## Organized support folders
 

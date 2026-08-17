@@ -7,7 +7,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pokemon_center_queue_monitor import BrowserQueueProbe
+from pokemon_center_queue_core import Observation
+from pokemon_center_queue_monitor import (
+    BrowserQueueProbe,
+    QueueMonitorController,
+    deliver_queue_open,
+)
 
 
 class FakeLocator:
@@ -197,6 +202,89 @@ async def main():
         raise AssertionError("proxy exhaustion must fail closed")
     assert len(exhausted_browser.contexts) == 1
     assert exhausted_browser.contexts[0].closed is True
+
+    deliveries = []
+    saved_states = []
+
+    async def publish(delivery):
+        deliveries.append(dict(delivery))
+        return True, True
+
+    controller = QueueMonitorController(
+        initial_queue_open=False,
+        close_confirmations=2,
+        publish=publish,
+        save_state=saved_states.append,
+    )
+    await controller.process(Observation("storefront", 200), proxy_label="proxy[01]")
+    await controller.process(Observation("queue", 200), proxy_label="proxy[01]")
+    await controller.process(Observation("queue", 200), proxy_label="proxy[01]")
+    assert deliveries == [{"discord": False, "supabase": False}]
+    assert saved_states == [True]
+
+    await controller.process(Observation("blocked", 403), proxy_label="proxy[02]")
+    await controller.process(Observation("error", None), proxy_label="proxy[02]")
+    assert controller.tracker.queue_open is True
+    assert saved_states == [True]
+    await controller.process(Observation("storefront", 200), proxy_label="proxy[02]")
+    assert controller.tracker.queue_open is True
+    await controller.process(Observation("storefront", 200), proxy_label="proxy[02]")
+    assert controller.tracker.queue_open is False
+    assert saved_states == [True, False]
+
+    retry_deliveries = []
+
+    async def retry_publish(delivery):
+        retry_deliveries.append(dict(delivery))
+        if len(retry_deliveries) == 1:
+            return True, False
+        return True, True
+
+    retry_controller = QueueMonitorController(
+        initial_queue_open=False,
+        close_confirmations=2,
+        publish=retry_publish,
+        save_state=lambda value: None,
+    )
+    await retry_controller.process(Observation("queue", 200), proxy_label="proxy[01]")
+    await retry_controller.process(Observation("queue", 200), proxy_label="proxy[01]")
+    assert retry_deliveries == [
+        {"discord": False, "supabase": False},
+        {"discord": True, "supabase": False},
+    ]
+
+    health = retry_controller.health_snapshot(
+        proxy_label="proxy[01] proxy-one:80",
+        proxy_state="eligible",
+        rotations=1,
+        browser_restarts=2,
+    )
+    assert health["state"] == "queue"
+    assert health["checks_total"] == 2
+    assert health["checks_successful"] == 2
+    assert health["checks_failed"] == 0
+    assert health["success_percent"] == 100.0
+    assert health["proxy"] == "proxy[01] proxy-one:80"
+    assert health["rotations"] == 1
+    assert health["browser_restarts"] == 2
+
+    channel_calls = []
+
+    async def already_sent_discord():
+        channel_calls.append("discord")
+        return True
+
+    async def pending_supabase():
+        channel_calls.append("supabase")
+        return True
+
+    delivered = await deliver_queue_open(
+        {"discord": True, "supabase": False},
+        send_discord=already_sent_discord,
+        send_supabase=pending_supabase,
+    )
+    assert delivered == (True, True)
+    assert channel_calls == ["supabase"]
     print("Pokemon Center persistent browser regression checks passed")
 
 

@@ -11,7 +11,12 @@ from urllib.parse import urlsplit
 import httpx
 from patchright.async_api import async_playwright
 
-from pokemon_center_queue_core import Observation, ProxyHealthPool, classify_observation
+from pokemon_center_queue_core import (
+    Observation,
+    ProxyHealthPool,
+    QueueTransitionTracker,
+    classify_observation,
+)
 
 try:
     from config import DISCORD_WEBHOOK_URL as CONFIG_DISCORD_WEBHOOK_URL
@@ -26,6 +31,18 @@ OPEN_CHECK_SECONDS = max(
 )
 CLOSE_CONFIRMATIONS = max(
     2, int(os.getenv("POKEMON_CENTER_CLOSE_CONFIRMATIONS", "2"))
+)
+FAILURE_THRESHOLD = max(
+    1, int(os.getenv("POKEMON_CENTER_FAILURE_THRESHOLD", "2"))
+)
+PROXY_COOLDOWN_SECONDS = max(
+    60, int(os.getenv("POKEMON_CENTER_PROXY_COOLDOWN_SECONDS", "900"))
+)
+HEALTH_HEARTBEAT_SECONDS = max(
+    60, int(os.getenv("POKEMON_CENTER_HEALTH_HEARTBEAT_SECONDS", "300"))
+)
+NAVIGATION_TIMEOUT_MS = max(
+    5_000, int(os.getenv("POKEMON_CENTER_NAVIGATION_TIMEOUT_MS", "30000"))
 )
 WATCHLIST_URL = os.getenv("POKEALERT_WATCHLIST_URL", "").strip()
 INGEST_URL = os.getenv("POKEALERT_INGEST_URL", "").strip()
@@ -121,6 +138,7 @@ class BrowserQueueProbe:
         proxy_pool=None,
         failure_threshold=2,
         proxy_cooldown_seconds=1800,
+        proxy_start_index=0,
     ):
         self.browser = browser
         self.check_url = check_url
@@ -129,6 +147,7 @@ class BrowserQueueProbe:
             proxies,
             failure_threshold=failure_threshold,
             cooldown_seconds=proxy_cooldown_seconds,
+            start_index=proxy_start_index,
         )
         self.user_agent = (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -206,31 +225,85 @@ class BrowserQueueProbe:
         self.page = None
 
 
-def is_proxy_gateway_error(exc):
-    message = str(exc).lower()
-    return isinstance(exc, httpx.ProxyError) or any(
-        marker in message
-        for marker in (
-            "502 bad gateway",
-            "503 service unavailable",
-            "504 gateway timeout",
-            "http 502",
-            "http 503",
-            "http 504",
-            "proxy error",
+class QueueMonitorController:
+    """Apply observations to durable queue transitions and alert delivery."""
+
+    def __init__(self, initial_queue_open, close_confirmations, publish, save_state):
+        self.tracker = QueueTransitionTracker(initial_queue_open, close_confirmations)
+        self.publish = publish
+        self.save_state = save_state
+        self.delivery = {
+            "discord": bool(initial_queue_open),
+            "supabase": bool(initial_queue_open),
+        }
+        self.checks_total = 0
+        self.checks_successful = 0
+        self.checks_failed = 0
+        self.consecutive_failures = 0
+        self.last_check_at = None
+        self.last_success_at = None
+        self.last_state = "queue" if initial_queue_open else "unknown"
+        self.last_status = None
+        self.last_error = ""
+
+    async def process(self, observation, proxy_label=""):
+        checked_at = now_iso()
+        self.checks_total += 1
+        self.last_check_at = checked_at
+        self.last_state = observation.kind
+        self.last_status = observation.status
+        if observation.kind in ("storefront", "queue"):
+            self.checks_successful += 1
+            self.consecutive_failures = 0
+            self.last_success_at = checked_at
+            self.last_error = ""
+        else:
+            self.checks_failed += 1
+            self.consecutive_failures += 1
+            self.last_error = str(observation.detail or observation.kind)[:160]
+
+        transition = self.tracker.observe(observation)
+        if transition == "opened":
+            self.delivery = {"discord": False, "supabase": False}
+            self.save_state(True)
+        elif transition == "closed":
+            self.delivery = {"discord": False, "supabase": False}
+            self.save_state(False)
+
+        if observation.kind == "queue" and not all(self.delivery.values()):
+            discord_sent, supabase_sent = await self.publish(dict(self.delivery))
+            self.delivery["discord"] = self.delivery["discord"] or bool(discord_sent)
+            self.delivery["supabase"] = self.delivery["supabase"] or bool(supabase_sent)
+        return transition
+
+    def health_snapshot(
+        self,
+        proxy_label,
+        proxy_state,
+        rotations,
+        browser_restarts,
+    ):
+        success_percent = (
+            round(self.checks_successful * 100 / self.checks_total, 1)
+            if self.checks_total
+            else 0.0
         )
-    )
-
-
-def pokemon_center_client(proxy, headers):
-    if not proxy:
-        raise RuntimeError("Refusing direct Pokemon Center connection: proxy is required")
-    return httpx.AsyncClient(
-        timeout=20,
-        follow_redirects=True,
-        headers=headers,
-        proxy=proxy,
-    )
+        return {
+            "state": self.last_state,
+            "last_check_at": self.last_check_at,
+            "last_success_at": self.last_success_at,
+            "last_http_status": self.last_status,
+            "consecutive_failures": self.consecutive_failures,
+            "checks_total": self.checks_total,
+            "checks_successful": self.checks_successful,
+            "checks_failed": self.checks_failed,
+            "success_percent": success_percent,
+            "proxy": proxy_label,
+            "proxy_state": proxy_state,
+            "rotations": rotations,
+            "browser_restarts": browser_restarts,
+            "last_error": self.last_error,
+        }
 
 
 async def ingest(event_type, payload):
@@ -325,12 +398,7 @@ async def send_discord_queue_alert():
     return False
 
 
-async def publish_queue_open():
-    # Discord is attempted first and independently. A watchlist or Supabase
-    # outage must never suppress the time-sensitive queue alert.
-    discord_sent = await send_discord_queue_alert()
-    supabase_sent = False
-    product_count = 0
+async def send_supabase_queue_signal():
     try:
         products = await load_products()
         payload = []
@@ -346,17 +414,36 @@ async def publish_queue_open():
                     "created_at": now_iso(),
                 }
             )
-        product_count = len(payload)
         await ingest("drop", payload)
-        supabase_sent = True
+        return True
     except Exception as exc:
         print(f"[WARNING] Could not publish Supabase queue signal: {exc}", flush=True)
+        return False
+
+
+async def deliver_queue_open(delivery, send_discord, send_supabase):
+    discord_sent = bool(delivery.get("discord"))
+    supabase_sent = bool(delivery.get("supabase"))
+    if not discord_sent:
+        discord_sent = bool(await send_discord())
+    if not supabase_sent:
+        supabase_sent = bool(await send_supabase())
+    return discord_sent, supabase_sent
+
+
+async def publish_queue_open(delivery=None):
+    # Retry only failed destinations so a Supabase outage cannot duplicate a
+    # Discord alert, and vice versa.
+    discord_sent, supabase_sent = await deliver_queue_open(
+        delivery or {"discord": False, "supabase": False},
+        send_discord=send_discord_queue_alert,
+        send_supabase=send_supabase_queue_signal,
+    )
 
     await remote_log(
         "Queue open alert completed "
         f"(discord={'sent' if discord_sent else 'failed'}, "
-        f"supabase={'published' if supabase_sent else 'failed'}, "
-        f"products={product_count})"
+        f"supabase={'published' if supabase_sent else 'failed'})"
     )
     return discord_sent, supabase_sent
 
@@ -384,177 +471,101 @@ async def run():
     # Fail closed. A missing or malformed proxy file must stop the service
     # instead of allowing a Pokemon Center request through the Pi's home IP.
     proxies = load_proxies()
-    proxy_index = int(time.time()) % len(proxies)
-    await remote_log(
-        "Pokemon Center queue detector started "
-        f"(every {CHECK_SECONDS}s normally, every {OPEN_CHECK_SECONDS}s while open, "
-        f"proxy required, {len(proxies)} available)"
+    initial_queue_open = load_queue_open_state()
+    controller = QueueMonitorController(
+        initial_queue_open=initial_queue_open,
+        close_confirmations=CLOSE_CONFIRMATIONS,
+        publish=publish_queue_open,
+        save_state=save_queue_open_state,
     )
 
-    headers = {
-        "user-agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/138.0.0.0 Safari/537.36"
-        ),
-        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "accept-language": "en-US,en;q=0.9",
-    }
-    client = pokemon_center_client(proxies[proxy_index], headers)
-    try:
-        queue_was_open = load_queue_open_state()
-        consecutive_closed = 0
-        consecutive_errors = 0
-        bytes_used = 0
-        last_bandwidth_log = time.monotonic()
-        first_success_logged = False
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch(
+            headless=True,
+            executable_path=BROWSER_EXECUTABLE,
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking"],
+        )
+        probe = BrowserQueueProbe(
+            browser=browser,
+            proxies=proxies,
+            check_url=CHECK_URL,
+            navigation_timeout_ms=NAVIGATION_TIMEOUT_MS,
+            failure_threshold=FAILURE_THRESHOLD,
+            proxy_cooldown_seconds=PROXY_COOLDOWN_SECONDS,
+            proxy_start_index=int(time.time()) % len(proxies),
+        )
+        await remote_log(
+            "Pokemon Center browser detector started "
+            f"(every {CHECK_SECONDS}s normally, every {OPEN_CHECK_SECONDS}s while open, "
+            f"proxy-only, {len(proxies)} available)"
+        )
+        last_health_log = 0.0
+        previous_state = None
+        previous_rotations = 0
 
-        while True:
-            started = time.monotonic()
-            check_succeeded = False
-            try:
-                gateway_failovers = 0
-                while True:
-                    try:
-                        # Read no more than 64 KiB of the decoded response. The active
-                        # Imperva wrapper is about 1 KiB; a normal storefront response is
-                        # closed early instead of downloading megabytes of HTML.
-                        chunks = []
-                        decoded_bytes = 0
-                        async with client.stream("GET", CHECK_URL) as response:
-                            status = response.status_code
-                            async for chunk in response.aiter_bytes():
-                                remaining = 65_536 - decoded_bytes
-                                if remaining <= 0:
-                                    break
-                                chunks.append(chunk[:remaining])
-                                decoded_bytes += min(len(chunk), remaining)
-                                if decoded_bytes >= 65_536:
-                                    break
-                            final_url = str(response.url)
+        try:
+            while True:
+                started = time.monotonic()
+                try:
+                    observation = await probe.check()
+                except Exception as exc:
+                    observation = Observation(
+                        "error",
+                        detail=f"browser recovery {type(exc).__name__}",
+                    )
 
-                        body = b"".join(chunks).decode("utf-8", errors="ignore")
-                        if is_security_interstitial(body):
-                            raise RuntimeError(
-                                "Pokemon Center returned an Imperva security interstitial"
-                            )
-                        queue_open = queue_state_from_text(body, final_url)
-                        if (
-                            status not in (200, 301, 302, 303, 307, 308)
-                            and not queue_open
-                        ):
-                            raise RuntimeError(f"Pokemon Center returned HTTP {status}")
-                        bytes_used += decoded_bytes
-                        break
-                    except Exception as exc:
-                        max_failovers = min(2, len(proxies) - 1)
-                        if (
-                            not is_proxy_gateway_error(exc)
-                            or gateway_failovers >= max_failovers
-                        ):
-                            raise
+                proxy_index, _ = probe.proxy_pool.current()
+                label = probe.proxy_pool.label(proxy_index)
+                transition = await controller.process(observation, proxy_label=label)
+                now = time.monotonic()
+                state_changed = observation.kind != previous_state
+                rotated = probe.rotation_count != previous_rotations
+                threshold_failure = controller.consecutive_failures in (1, 5, 20)
+                heartbeat_due = now - last_health_log >= HEALTH_HEARTBEAT_SECONDS
 
-                        previous_proxy = proxy_label(
-                            proxies[proxy_index], proxy_index
-                        )
-                        await client.aclose()
-                        proxy_index = (proxy_index + 1) % len(proxies)
-                        client = pokemon_center_client(
-                            proxies[proxy_index], headers
-                        )
-                        gateway_failovers += 1
-                        print(
-                            "[WARNING] Pokemon Center proxy gateway failed; "
-                            f"immediate failover {previous_proxy} -> "
-                            f"{proxy_label(proxies[proxy_index], proxy_index)} "
-                            f"(retry {gateway_failovers}/{max_failovers})",
-                            flush=True,
-                        )
-
-                consecutive_errors = 0
-                check_succeeded = True
-                if not first_success_logged:
+                if transition == "opened":
+                    await remote_log("Pokemon Center virtual queue detected")
+                elif transition == "closed":
                     await remote_log(
-                        "Pokemon Center proxied check succeeded "
-                        f"(HTTP {status}, queue_open={str(queue_open).lower()}, "
-                        f"{proxy_label(proxies[proxy_index], proxy_index)})"
-                    )
-                    first_success_logged = True
-                if queue_open:
-                    consecutive_closed = 0
-                    if not queue_was_open:
-                        await remote_log(
-                            "Pokemon Center queue/interstitial detected "
-                            f"(HTTP {status}, {decoded_bytes} bytes)"
-                        )
-                        # One transition produces one Supabase event and one Pi-side
-                        # Discord alert. Electron only handles desktop notifications.
-                        await publish_queue_open()
-                        save_queue_open_state(True)
-                    queue_was_open = True
-                elif queue_was_open:
-                    consecutive_closed += 1
-                    if consecutive_closed >= CLOSE_CONFIRMATIONS:
-                        queue_was_open = False
-                        consecutive_closed = 0
-                        save_queue_open_state(False)
-                        await remote_log(
-                            "Pokemon Center queue is no longer active; normal detection resumed"
-                        )
-                else:
-                    consecutive_closed = 0
-            except Exception as exc:
-                consecutive_errors += 1
-                print(f"[WARNING] Check failed ({consecutive_errors}): {exc}", flush=True)
-                blocked_response = any(
-                    marker in str(exc)
-                    for marker in (
-                        "HTTP 403",
-                        "HTTP 429",
-                        "Imperva security interstitial",
-                    )
-                )
-                gateway_error = is_proxy_gateway_error(exc)
-                if blocked_response or gateway_error or consecutive_errors % 3 == 0:
-                    previous_proxy = proxy_label(proxies[proxy_index], proxy_index)
-                    await client.aclose()
-                    proxy_index = (proxy_index + 1) % len(proxies)
-                    client = pokemon_center_client(proxies[proxy_index], headers)
-                    await remote_log(
-                        "Pokemon Center proxy rotated after repeated errors "
-                        f"({previous_proxy} -> "
-                        f"{proxy_label(proxies[proxy_index], proxy_index)})",
-                        "warning",
-                    )
-                if consecutive_errors in (1, 5, 20):
-                    await remote_log(
-                        f"Pokemon Center check error x{consecutive_errors}: {str(exc)[:300]}",
-                        "warning",
+                        "Pokemon Center queue is no longer active; normal detection resumed"
                     )
 
-            if time.monotonic() - last_bandwidth_log >= 3600:
-                await remote_log(
-                    f"Pokemon Center detector downloaded at most {bytes_used / 1_000_000:.2f} MB of response bodies since startup"
-                )
-                last_bandwidth_log = time.monotonic()
+                if state_changed or rotated or threshold_failure or heartbeat_due or transition:
+                    health = controller.health_snapshot(
+                        proxy_label=label,
+                        proxy_state=probe.proxy_pool.state(proxy_index, now=now),
+                        rotations=probe.rotation_count,
+                        browser_restarts=probe.context_restart_count,
+                    )
+                    await remote_log(
+                        "Pokemon Center detector health "
+                        + json.dumps(health, separators=(",", ":"), sort_keys=True),
+                        "warning" if observation.kind in ("blocked", "error") else "info",
+                    )
+                    last_health_log = now
 
-            interval = OPEN_CHECK_SECONDS if queue_was_open else CHECK_SECONDS
-            if queue_was_open and consecutive_closed:
-                # Once the queue appears closed, confirm promptly rather than
-                # waiting the full queue-open interval between confirmations.
-                interval = CHECK_SECONDS
-            if not check_succeeded:
-                # Avoid repeating the old tight 403 loop. Errors back off from
-                # one minute to at most fifteen minutes; a successful proxied
-                # response resets the counter and normal cadence immediately.
-                interval = max(
-                    interval,
-                    min(900, max(60, CHECK_SECONDS * (2 ** min(consecutive_errors, 5)))),
-                )
-            delay = max(1.0, interval - (time.monotonic() - started))
-            await asyncio.sleep(delay)
-    finally:
-        await client.aclose()
+                previous_state = observation.kind
+                previous_rotations = probe.rotation_count
+                interval = OPEN_CHECK_SECONDS if controller.tracker.queue_open else CHECK_SECONDS
+                if controller.tracker.queue_open and observation.kind == "storefront":
+                    interval = CHECK_SECONDS
+                if observation.kind in ("blocked", "error"):
+                    interval = max(
+                        interval,
+                        min(
+                            PROXY_COOLDOWN_SECONDS,
+                            max(
+                                60,
+                                CHECK_SECONDS
+                                * (2 ** min(controller.consecutive_failures, 5)),
+                            ),
+                        ),
+                    )
+                delay = max(1.0, interval - (time.monotonic() - started))
+                await asyncio.sleep(delay)
+        finally:
+            await probe.close()
+            await browser.close()
 
 
 if __name__ == "__main__":
