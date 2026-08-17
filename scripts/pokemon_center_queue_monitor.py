@@ -11,6 +11,8 @@ from urllib.parse import urlsplit
 import httpx
 from patchright.async_api import async_playwright
 
+from pokemon_center_queue_core import Observation, ProxyHealthPool, classify_observation
+
 try:
     from config import DISCORD_WEBHOOK_URL as CONFIG_DISCORD_WEBHOOK_URL
 except (ImportError, AttributeError):
@@ -103,6 +105,105 @@ def proxy_label(value, index=None):
     parsed = urlsplit(value)
     prefix = f"proxy[{index + 1:02d}] " if index is not None else ""
     return f"{prefix}{parsed.hostname}:{parsed.port}"
+
+
+class BrowserQueueProbe:
+    """One persistent browser with one proxy-bound context and page."""
+
+    blocked_resource_types = {"image", "media", "font", "stylesheet"}
+
+    def __init__(
+        self,
+        browser,
+        proxies,
+        check_url=CHECK_URL,
+        navigation_timeout_ms=30_000,
+        proxy_pool=None,
+        failure_threshold=2,
+        proxy_cooldown_seconds=1800,
+    ):
+        self.browser = browser
+        self.check_url = check_url
+        self.navigation_timeout_ms = int(navigation_timeout_ms)
+        self.proxy_pool = proxy_pool or ProxyHealthPool(
+            proxies,
+            failure_threshold=failure_threshold,
+            cooldown_seconds=proxy_cooldown_seconds,
+        )
+        self.user_agent = (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/138.0.0.0 Safari/537.36"
+        )
+        self.context = None
+        self.page = None
+        self.rotation_count = 0
+        self.context_restart_count = 0
+
+    async def start(self):
+        if self.context is not None:
+            return
+        _, proxy = self.proxy_pool.current()
+        self.context = await self.browser.new_context(
+            proxy=playwright_proxy(proxy),
+            user_agent=self.user_agent,
+        )
+        self.context_restart_count += 1
+        self.page = await self.context.new_page()
+        await self.page.route("**/*", self._route_resource)
+
+    async def _route_resource(self, route):
+        if route.request.resource_type in self.blocked_resource_types:
+            await route.abort()
+        else:
+            await route.continue_()
+
+    async def check(self):
+        await self.start()
+        try:
+            response = await self.page.goto(
+                self.check_url,
+                wait_until="domcontentloaded",
+                timeout=self.navigation_timeout_ms,
+            )
+            texts = []
+            for frame in self.page.frames:
+                try:
+                    text = await frame.locator("body").inner_text(timeout=3_000)
+                except Exception:
+                    text = ""
+                if text:
+                    texts.append(text[:20_000])
+            status = response.status if response else None
+            observation = classify_observation(status, self.page.url, texts)
+        except Exception as exc:
+            observation = Observation(
+                "error",
+                detail=f"browser {type(exc).__name__}",
+            )
+
+        index, _ = self.proxy_pool.current()
+        now = time.monotonic()
+        if observation.kind in ("storefront", "queue"):
+            self.proxy_pool.record_success(index, now=now)
+        elif self.proxy_pool.record_failure(index, now=now):
+            await self.rotate(now=now)
+        return observation
+
+    async def rotate(self, now=None):
+        await self.close()
+        self.proxy_pool.rotate(now=time.monotonic() if now is None else now)
+        self.rotation_count += 1
+        await self.start()
+
+    async def close(self):
+        if self.context is not None:
+            try:
+                await self.context.close()
+            except Exception:
+                pass
+        self.context = None
+        self.page = None
 
 
 def is_proxy_gateway_error(exc):
