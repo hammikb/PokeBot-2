@@ -26,6 +26,7 @@ export async function runTargetCartAttempt({
   getProbableEvidence,
   clickAndObserve,
   verifyCart,
+  recoverAmbiguousCart = async () => null,
   dismissTransient,
   restoreProduct,
   isProductPageValid,
@@ -33,6 +34,7 @@ export async function runTargetCartAttempt({
 }) {
   const budget = new TargetCartBudget({ startedAt: now(), policy })
   let pendingRetryKind = null
+  let shouldRecoverAmbiguousCart = false
 
   const emit = (state, fields = {}) => onEvent({ state, ...budget.snapshot(now()), ...fields })
 
@@ -74,6 +76,33 @@ export async function runTargetCartAttempt({
 
   while (true) {
     withTargetCartFailureContext(() => budget.assertTimeRemaining(now()), pendingRetryKind)
+
+    if (shouldRecoverAmbiguousCart) {
+      shouldRecoverAmbiguousCart = false
+      const recovered = await recoverAmbiguousCart()
+      const recoveryOutcome =
+        recovered?.present && Number.isInteger(recovered.quantity) && recovered.quantity > 0
+          ? 'present'
+          : recovered?.recoveryOutcome === 'timeout'
+            ? 'timeout'
+            : 'absent'
+      emit('ambiguous_cart_recovery', { outcome: recoveryOutcome })
+      if (recoveryOutcome === 'present') {
+        const snapshot = budget.snapshot(now())
+        return {
+          tcin,
+          quantity: recovered.quantity,
+          requestedQuantity,
+          unitPrice: recovered.unitPrice ?? null,
+          source: 'ambiguous-cart-recovery',
+          mutationStatus: null,
+          clickCount: snapshot.clickCount,
+          retryCount: snapshot.retryCount,
+          reloadCount: snapshot.reloadCount,
+          confirmedAt: new Date(now()).toISOString()
+        }
+      }
+    }
 
     if (!(await isProductPageValid())) {
       await reloadProduct('product-page-replaced')
@@ -127,6 +156,7 @@ export async function runTargetCartAttempt({
 
     if (outcome.kind === 'no-response') {
       pendingRetryKind = 'no-response'
+      shouldRecoverAmbiguousCart = true
       continue
     }
 

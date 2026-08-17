@@ -1394,6 +1394,24 @@ export async function browserAddToCart(
   }
   await selectRequestedQuantity()
 
+  const restoreProduct = async () => {
+    await page.goto(productUrl, { waitUntil: navigationWaitUntil, timeout: 30000 })
+    if (navigationWaitUntil === 'commit') {
+      await page.locator('body').waitFor({ state: 'attached', timeout: 5000 })
+    }
+    await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
+    await waitForTargetAddToCartReady(page, {
+      onStep,
+      notificationEngine,
+      dropEvent,
+      coordinator,
+      timeoutMs: 5000,
+      pollMs: 100,
+      tcin
+    })
+    await selectRequestedQuantity()
+  }
+
   return runTargetCartAttempt({
     tcin,
     requestedQuantity: buyLimit,
@@ -1424,24 +1442,21 @@ export async function browserAddToCart(
       }
       return cartState
     },
-    dismissTransient: () => dismissVisibleTargetCartTransient(page),
-    restoreProduct: async () => {
-      await page.goto(productUrl, { waitUntil: navigationWaitUntil, timeout: 30000 })
-      if (navigationWaitUntil === 'commit') {
-        await page.locator('body').waitFor({ state: 'attached', timeout: 5000 })
+    recoverAmbiguousCart: async () => {
+      onStep('Checking the Target cart after an unclear Add to cart response')
+      const recovered = await recoverAmbiguousTargetCart(page, tcin, { coordinator })
+      if (!recovered.present) {
+        onStep(
+          recovered.recoveryOutcome === 'timeout'
+            ? 'Quick cart check timed out - returning to the product'
+            : 'Requested item was not in the cart - returning to the product'
+        )
+        await restoreProduct()
       }
-      await waitForCaptchaIfNeeded(page, notificationEngine, dropEvent)
-      await waitForTargetAddToCartReady(page, {
-        onStep,
-        notificationEngine,
-        dropEvent,
-        coordinator,
-        timeoutMs: 5000,
-        pollMs: 100,
-        tcin
-      })
-      await selectRequestedQuantity()
+      return recovered
     },
+    dismissTransient: () => dismissVisibleTargetCartTransient(page),
+    restoreProduct,
     isProductPageValid: async () => /target\.com\/p\//i.test(page.url?.() || ''),
     onEvent: (event) => {
       log.info('Target cart attempt event', event)
@@ -1491,6 +1506,19 @@ export async function browserAddToCart(
           attemptNumber: event.clickCount,
           retryNumber: event.retryCount
         })
+      } else if (event.state === 'ambiguous_cart_recovery') {
+        onMilestone(
+          'cart_attempted',
+          event.outcome === 'present'
+            ? 'Target ambiguous cart response recovered from cart'
+            : 'Target ambiguous cart response not confirmed',
+          {
+            eventType: 'cart_recovery',
+            responseKind: event.outcome,
+            attemptNumber: event.clickCount,
+            retryNumber: event.retryCount
+          }
+        )
       } else if (event.state === 'reloading_product') {
         onStep(`Reloading the Target product page (${event.reason})`)
         onMilestone('cart_attempted', 'Target browser cart product reload scheduled', {
@@ -1620,9 +1648,53 @@ async function waitForTargetCartState(page, tcin, timeoutMs, coordinator = null)
       return lastState
     }
     const snapshot = await coordinator?.signalState()
-    await waitForTargetSignal(page, coordinator, snapshot, 1000)
+    const remainingMs = Math.max(0, deadline - Date.now())
+    if (remainingMs === 0) break
+    await waitForTargetSignal(page, coordinator, snapshot, Math.min(1000, remainingMs))
   }
   return lastState
+}
+
+export async function recoverAmbiguousTargetCart(
+  page,
+  tcin,
+  {
+    coordinator = null,
+    timeoutMs = 2000,
+    now = () => Date.now(),
+    waitForCartState = waitForTargetCartState
+  } = {}
+) {
+  const startedAt = now()
+  const unresolved = (recoveryOutcome) => ({
+    present: false,
+    quantity: null,
+    unitPrice: null,
+    source: 'ambiguous-cart-recovery',
+    recoveryOutcome
+  })
+
+  try {
+    if (!/target\.com\/(co-cart|cart)/i.test(page.url?.() || '')) {
+      await page.goto('https://www.target.com/co-cart', {
+        waitUntil: 'commit',
+        timeout: Math.max(1, Math.min(1200, timeoutMs))
+      })
+    }
+
+    const remainingMs = Math.max(0, timeoutMs - (now() - startedAt))
+    if (remainingMs === 0) return unresolved('timeout')
+    const cartState = await waitForCartState(page, tcin, remainingMs, coordinator)
+    if (cartState?.present && Number.isInteger(cartState.quantity) && cartState.quantity > 0) {
+      return cartState
+    }
+    return unresolved(now() - startedAt >= timeoutMs ? 'timeout' : 'absent')
+  } catch (error) {
+    log.info('Target ambiguous cart recovery did not settle', {
+      reason: /timeout/i.test(String(error?.message || '')) ? 'timeout' : 'navigation-failed'
+    })
+    return unresolved('timeout')
+  }
 }
 
 async function confirmRequestedTargetCartItem(

@@ -240,7 +240,7 @@ describe('Target high-demand checkout submission', () => {
     )
   })
 
-  it('reselects the requested quantity after a no-response product reload', async () => {
+  it('recovers a cart item after a no-response without another click or product reload', async () => {
     const outcomes = [null, null, null, null, null, 200]
     let currentUrl = 'https://www.target.com/p/test-product/-/A-123456'
     const click = vi.fn(async () => {})
@@ -297,23 +297,34 @@ describe('Target high-demand checkout submission', () => {
       onMilestone
     )
 
-    expect(result).toMatchObject({ quantity: 2, reloadCount: 1 })
+    expect(result).toMatchObject({
+      quantity: 2,
+      source: 'ambiguous-cart-recovery',
+      clickCount: 1,
+      reloadCount: 0
+    })
     expect(page.goto).toHaveBeenCalledWith(
-      'https://www.target.com/p/test-product/-/A-123456',
+      'https://www.target.com/co-cart',
       expect.anything()
     )
-    expect(selectOption).toHaveBeenCalledTimes(2)
+    expect(selectOption).toHaveBeenCalledTimes(1)
     expect(selectOption).toHaveBeenNthCalledWith(1, { value: '2' })
-    expect(selectOption).toHaveBeenNthCalledWith(2, { value: '2' })
     const noResponseRetries = onMilestone.mock.calls
       .map(([, , metadata]) => metadata)
       .filter(
         (metadata) =>
           metadata?.eventType === 'cart_retry' && metadata?.retryKind === 'no_response'
       )
-    expect(noResponseRetries.map((metadata) => metadata.retryNumber)).toEqual([1, 2, 3, 4])
-    expect(noResponseRetries.map((metadata) => metadata.attemptNumber)).toEqual([2, 3, 4, 5])
-    expect(noResponseRetries.every((metadata) => !Object.hasOwn(metadata, 'delayMs'))).toBe(true)
+    expect(noResponseRetries).toEqual([])
+    expect(onMilestone).toHaveBeenCalledWith(
+      'cart_attempted',
+      'Target ambiguous cart response recovered from cart',
+      expect.objectContaining({
+        eventType: 'cart_recovery',
+        responseKind: 'present',
+        attemptNumber: 1
+      })
+    )
   })
 
   it('holds the current checkout page without reloading when Target shows high demand', async () => {

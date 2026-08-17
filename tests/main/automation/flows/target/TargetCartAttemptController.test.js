@@ -32,6 +32,7 @@ function harness(
       getProbableEvidence: vi.fn(async () => null),
       clickAndObserve: vi.fn(async () => outcomes.shift()),
       verifyCart: vi.fn(async () => verification),
+      recoverAmbiguousCart: vi.fn(async () => null),
       dismissTransient: vi.fn(async () => {}),
       restoreProduct: vi.fn(async () => {
         productValid = true
@@ -68,6 +69,61 @@ describe('runTargetCartAttempt', () => {
       reloadCount: 0
     })
     expect(h.sleeps).toEqual([])
+  })
+
+  it('recovers an authoritative cart after no response before issuing a second click', async () => {
+    const h = harness([{ kind: 'no-response', status: null, evidence: null }])
+    h.options.recoverAmbiguousCart.mockResolvedValueOnce({
+      present: true,
+      quantity: 1,
+      unitPrice: 19.99,
+      source: 'target-cart-page'
+    })
+
+    await expect(runTargetCartAttempt(h.options)).resolves.toMatchObject({
+      tcin: '123456',
+      quantity: 1,
+      unitPrice: 19.99,
+      source: 'ambiguous-cart-recovery',
+      clickCount: 1,
+      retryCount: 0
+    })
+    expect(h.options.clickAndObserve).toHaveBeenCalledTimes(1)
+    expect(h.options.recoverAmbiguousCart).toHaveBeenCalledTimes(1)
+    expect(h.events).toContainEqual(
+      expect.objectContaining({
+        state: 'ambiguous_cart_recovery',
+        outcome: 'present',
+        clickCount: 1
+      })
+    )
+  })
+
+  it('continues the normal retry when ambiguous cart recovery finds no item', async () => {
+    const h = harness([
+      { kind: 'no-response', status: null, evidence: null },
+      { kind: 'success', status: 200, evidence: { source: 'mutation-2xx', mutationStatus: 200 } }
+    ])
+
+    await expect(runTargetCartAttempt(h.options)).resolves.toMatchObject({
+      source: 'mutation-2xx',
+      clickCount: 2,
+      retryCount: 1
+    })
+    expect(h.options.recoverAmbiguousCart).toHaveBeenCalledTimes(1)
+    expect(h.events).toContainEqual(
+      expect.objectContaining({ state: 'ambiguous_cart_recovery', outcome: 'absent' })
+    )
+  })
+
+  it('does not probe the cart when the add result is not ambiguous', async () => {
+    const h = harness([
+      { kind: 'success', status: 200, evidence: { source: 'mutation-2xx', mutationStatus: 200 } }
+    ])
+
+    await runTargetCartAttempt(h.options)
+
+    expect(h.options.recoverAmbiguousCart).not.toHaveBeenCalled()
   })
 
   it('uses four additional no-response clicks then reloads the product once', async () => {
@@ -332,7 +388,8 @@ describe('runTargetCartAttempt', () => {
       'retryAfterHonored',
       'evidenceSource',
       'mutationStatus',
-      'reason'
+      'reason',
+      'outcome'
     ])
     for (const event of h.events) {
       expect(Object.keys(event).every((key) => allowed.has(key))).toBe(true)
