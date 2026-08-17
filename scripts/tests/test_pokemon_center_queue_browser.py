@@ -2,7 +2,9 @@
 """Regression checks for the persistent Pokemon Center browser boundary."""
 
 import asyncio
+import json
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -11,6 +13,7 @@ from pokemon_center_queue_core import Observation
 from pokemon_center_queue_monitor import (
     BrowserQueueProbe,
     QueueMonitorController,
+    append_proxy_usage,
     calculate_check_interval,
     deliver_queue_open,
 )
@@ -355,6 +358,24 @@ async def main():
     routing_probe._on_response(type("R", (), {"headers": {"content-length": "4194304"}})())
     assert routing_probe.proxied_bytes == 4194304
     await routing_probe.close()
+
+    # Proxy usage history is persisted without proxy credentials so headless
+    # and Xvfb canaries can be compared after a restart.
+    with tempfile.TemporaryDirectory() as directory:
+        usage_path = Path(directory) / "proxy-usage.jsonl"
+        append_proxy_usage(
+            usage_path,
+            {
+                "headless": False,
+                "proxy": "proxy[01] p.webshare.io:80",
+                "proxied_requests": 3,
+                "proxied_bytes": 4194304,
+            },
+        )
+        row = json.loads(usage_path.read_text(encoding="utf-8").strip())
+        assert row["headless"] is False
+        assert row["proxied_bytes"] == 4194304
+        assert "secret" not in usage_path.read_text(encoding="utf-8")
 
     print("Pokemon Center persistent browser regression checks passed")
 

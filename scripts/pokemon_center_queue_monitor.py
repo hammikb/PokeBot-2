@@ -49,6 +49,9 @@ HEALTH_HEARTBEAT_SECONDS = max(
 NAVIGATION_TIMEOUT_MS = max(
     5_000, int(os.getenv("POKEMON_CENTER_NAVIGATION_TIMEOUT_MS", "30000"))
 )
+POKEMON_CENTER_HEADLESS = os.getenv(
+    "POKEMON_CENTER_HEADLESS", "true"
+).strip().lower() not in {"0", "false", "no", "off"}
 CHALLENGE_BACKOFF_THRESHOLD = max(
     1, int(os.getenv("POKEMON_CENTER_CHALLENGE_BACKOFF_THRESHOLD", "3"))
 )
@@ -74,6 +77,10 @@ BROWSER_EXECUTABLE = os.getenv("MONITOR_BROWSER_EXECUTABLE", "/usr/bin/chromium"
 PROXY_FILE = os.getenv(
     "MONITOR_PROXY_FILE", "/home/hammikb/api-monitor-python/proxies.txt"
 )
+PROXY_USAGE_FILE = os.getenv(
+    "POKEMON_CENTER_PROXY_USAGE_FILE",
+    "/home/hammikb/api-monitor-python/.pokemon-center-proxy-usage.jsonl",
+)
 
 QUEUE_MARKERS = (
     "virtual queue to enter pokémon center",
@@ -86,6 +93,20 @@ QUEUE_MARKERS = (
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
+
+
+def append_proxy_usage(path, snapshot):
+    """Append non-sensitive proxy usage telemetry for canary comparisons."""
+    path = str(path or "").strip()
+    if not path:
+        return
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    record = {"created_at": now_iso(), **dict(snapshot or {})}
+    with open(path, "a", encoding="utf-8") as handle:
+        json.dump(record, handle, separators=(",", ":"), sort_keys=True)
+        handle.write("\n")
 
 
 def load_queue_open_state():
@@ -567,7 +588,7 @@ async def run():
 
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(
-            headless=True,
+            headless=POKEMON_CENTER_HEADLESS,
             executable_path=BROWSER_EXECUTABLE,
             args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking"],
         )
@@ -657,6 +678,24 @@ async def run():
                         "Pokemon Center detector health "
                         + json.dumps(health, separators=(",", ":"), sort_keys=True),
                         "warning" if observation.kind in ("blocked", "error") else "info",
+                    )
+                    append_proxy_usage(
+                        PROXY_USAGE_FILE,
+                        {
+                            "headless": POKEMON_CENTER_HEADLESS,
+                            "state": health["state"],
+                            "proxy": health["proxy"],
+                            "proxy_state": health["proxy_state"],
+                            "checks_total": health["checks_total"],
+                            "checks_successful": health["checks_successful"],
+                            "checks_failed": health["checks_failed"],
+                            "success_percent": health["success_percent"],
+                            "rotations": health["rotations"],
+                            "browser_restarts": health["browser_restarts"],
+                            "proxied_requests": health.get("proxied_requests", 0),
+                            "proxied_bytes": health.get("proxied_bytes", 0),
+                            "aborted_requests": health.get("aborted_requests", 0),
+                        },
                     )
                     last_health_log = now
 

@@ -11,6 +11,8 @@ WorkingDirectory=/home/hammikb/api-monitor-python
 Environment=PYTHONUNBUFFERED=1
 Environment=MONITOR_BROWSER_EXECUTABLE=/usr/bin/chromium
 Environment=MONITOR_PROXY_FILE=/home/hammikb/api-monitor-python/proxies.txt
+Environment=POKEMON_CENTER_HEADLESS=false
+Environment=POKEMON_CENTER_PROXY_USAGE_FILE=/home/hammikb/api-monitor-python/.pokemon-center-proxy-usage.jsonl
 Environment=POKEMON_CENTER_CHECK_SECONDS=30
 Environment=POKEMON_CENTER_OPEN_CHECK_SECONDS=600
 Environment=POKEMON_CENTER_CLOSE_CONFIRMATIONS=2
@@ -18,7 +20,7 @@ Environment=POKEMON_CENTER_FAILURE_THRESHOLD=2
 Environment=POKEMON_CENTER_PROXY_COOLDOWN_SECONDS=900
 Environment=POKEMON_CENTER_HEALTH_HEARTBEAT_SECONDS=300
 Environment=POKEMON_CENTER_NAVIGATION_TIMEOUT_MS=30000
-ExecStart=/home/hammikb/api-monitor-python/.venv/bin/python /home/hammikb/api-monitor-python/pokemon_center_queue_monitor.py
+ExecStart=/usr/bin/xvfb-run -a /home/hammikb/api-monitor-python/.venv/bin/python /home/hammikb/api-monitor-python/pokemon_center_queue_monitor.py
 Restart=always
 RestartSec=5
 
