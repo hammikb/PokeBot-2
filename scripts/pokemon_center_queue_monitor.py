@@ -192,11 +192,6 @@ class BrowserQueueProbe:
             cooldown_seconds=proxy_cooldown_seconds,
             start_index=proxy_start_index,
         )
-        self.user_agent = (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/138.0.0.0 Safari/537.36"
-        )
         self.context = None
         self.page = None
         self.rotation_count = 0
@@ -212,7 +207,6 @@ class BrowserQueueProbe:
         _, proxy = self.proxy_pool.current()
         self.context = await self.browser.new_context(
             proxy=playwright_proxy(proxy),
-            user_agent=self.user_agent,
         )
         self.context_restart_count += 1
         self.page = await self.context.new_page()
@@ -275,7 +269,12 @@ class BrowserQueueProbe:
         now = time.monotonic()
         if observation.kind in ("storefront", "queue"):
             self.proxy_pool.record_success(index, now=now)
-        elif self.proxy_pool.record_failure(index, now=now):
+        # A security challenge is site/session evidence, not proof that this
+        # proxy is broken. ChallengeBackoff in the controller loop handles the
+        # process-wide pause; rotating here would burn through healthy proxies
+        # during a site-wide WAF event. Browser/transport errors remain
+        # proxy-specific and still trigger the configured failure threshold.
+        elif observation.kind == "error" and self.proxy_pool.record_failure(index, now=now):
             await self.rotate(now=now)
         return observation
 

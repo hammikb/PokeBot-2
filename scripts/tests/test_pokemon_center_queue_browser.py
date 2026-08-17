@@ -154,7 +154,6 @@ async def main():
                 "username": "user",
                 "password": "secret",
             },
-            "user_agent": probe.user_agent,
         }
     ]
 
@@ -184,12 +183,26 @@ async def main():
     )
     blocked = await blocked_probe.check()
     assert blocked.kind == "blocked"
-    assert blocked_browser.contexts[0].closed is True
-    assert len(blocked_browser.contexts) == 2
-    assert blocked_probe.rotation_count == 1
+    assert blocked_browser.contexts[0].closed is False
+    assert len(blocked_browser.contexts) == 1
+    assert blocked_probe.rotation_count == 0
     assert blocked_probe.proxy_pool.failure_count() == 0
-    recovered = await blocked_probe.check()
-    assert recovered.kind == "storefront"
+
+    # A browser/transport failure is proxy-specific and should still rotate
+    # immediately when the configured threshold is reached.
+    transport_browser = FakeBrowser(pages=[FakePage(error="navigation timeout"), FakePage()])
+    transport_probe = BrowserQueueProbe(
+        browser=transport_browser,
+        proxies=[
+            "http://user:secret@failed-proxy:80",
+            "http://user:secret@working-proxy:80",
+        ],
+        failure_threshold=1,
+    )
+    transport_error = await transport_probe.check()
+    assert transport_error.kind == "error"
+    assert len(transport_browser.contexts) == 2
+    assert transport_probe.rotation_count == 1
     await blocked_probe.close()
 
     crash_browser = FakeBrowser(
@@ -210,7 +223,7 @@ async def main():
     assert (await crash_probe.check()).kind == "storefront"
     await crash_probe.close()
 
-    exhausted_browser = FakeBrowser(pages=[FakePage(status=403)])
+    exhausted_browser = FakeBrowser(pages=[FakePage(error="proxy connection refused")])
     exhausted_probe = BrowserQueueProbe(
         browser=exhausted_browser,
         proxies=["http://user:secret@only-proxy:80"],
