@@ -55,6 +55,11 @@ class FakePage:
         self.wait_calls = []
         self.route_handler = None
         self.closed = False
+        self.response_handlers = []
+
+    def on(self, event, handler):
+        if event == "response":
+            self.response_handlers.append(handler)
 
     async def route(self, pattern, handler):
         assert pattern == "**/*"
@@ -103,8 +108,10 @@ class FakeBrowser:
 
 
 class FakeRoute:
-    def __init__(self, resource_type):
-        self.request = type("Request", (), {"resource_type": resource_type})()
+    def __init__(self, resource_type, method="GET", url=""):
+        self.request = type(
+            "Request", (), {"resource_type": resource_type, "method": method, "url": url}
+        )()
         self.action = None
 
     async def abort(self):
@@ -302,6 +309,53 @@ async def main():
     assert calculate_check_interval("storefront", True, 0, False, 30, 600, 900) == 30
     assert calculate_check_interval("blocked", False, 1, False, 30, 600, 900) == 60
     assert calculate_check_interval("blocked", False, 0, True, 30, 600, 900) == 5
+
+    # --- Proxy-bandwidth routing: abort third-party and non-GET requests, and
+    # account for what was proxied vs aborted.
+    class ProbeRequest:
+        def __init__(self, method, resource_type, url):
+            self.method = method
+            self.resource_type = resource_type
+            self.url = url
+
+    class ProbeRoute:
+        def __init__(self, request):
+            self.request = request
+            self.action = None
+
+        async def abort(self):
+            self.action = "abort"
+
+        async def continue_(self):
+            self.action = "continue"
+
+    routing_browser = FakeBrowser()
+    routing_probe = BrowserQueueProbe(
+        browser=routing_browser,
+        proxies=["http://user:secret@proxy-one:80"],
+        check_url="https://www.pokemoncenter.com/",
+    )
+    await routing_probe.start()
+    cases = [
+        ("GET", "document", "https://www.pokemoncenter.com/", "continue"),
+        ("GET", "xhr", "https://api.pokemoncenter.com/products/etb", "continue"),
+        ("GET", "script", "https://www.google-analytics.com/ga.js", "abort"),
+        ("GET", "script", "https://www.pokemoncenter.com/app.js", "continue"),
+        ("GET", "image", "https://assets.pokemoncenter.com/x.png", "abort"),
+        ("POST", "xhr", "https://www.pokemoncenter.com/notify", "abort"),
+        ("GET", "fetch", "https://cdn.thirdparty.com/beacon", "abort"),
+    ]
+    for method, rtype, url, expected in cases:
+        route = ProbeRoute(ProbeRequest(method, rtype, url))
+        await routing_probe._route_resource(route)
+        assert route.action == expected, f"{method} {rtype} {url} -> {route.action}"
+    assert routing_probe.proxied_requests == 3
+    assert routing_probe.aborted_requests == 4
+    # A 4MB proxied response is included in best-effort data accounting.
+    routing_probe._on_response(type("R", (), {"headers": {"content-length": "4194304"}})())
+    assert routing_probe.proxied_bytes == 4194304
+    await routing_probe.close()
+
     print("Pokemon Center persistent browser regression checks passed")
 
 

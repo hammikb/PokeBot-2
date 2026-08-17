@@ -9,14 +9,19 @@ from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
 import httpx
-from patchright.async_api import async_playwright
 
 from pokemon_center_queue_core import (
+    ChallengeBackoff,
     Observation,
     ProxyHealthPool,
     QueueTransitionTracker,
     classify_observation,
+    route_request_decision,
 )
+
+# `patchright` (the patched Playwright build) is only needed to launch the live
+# browser; import it lazily inside `run()` so the pure classifier/route tests and
+# tooling that never launch a browser do not require it to be installed.
 
 try:
     from config import DISCORD_WEBHOOK_URL as CONFIG_DISCORD_WEBHOOK_URL
@@ -43,6 +48,16 @@ HEALTH_HEARTBEAT_SECONDS = max(
 )
 NAVIGATION_TIMEOUT_MS = max(
     5_000, int(os.getenv("POKEMON_CENTER_NAVIGATION_TIMEOUT_MS", "30000"))
+)
+CHALLENGE_BACKOFF_THRESHOLD = max(
+    1, int(os.getenv("POKEMON_CENTER_CHALLENGE_BACKOFF_THRESHOLD", "3"))
+)
+CHALLENGE_BACKOFF_BASE_SECONDS = max(
+    10, int(os.getenv("POKEMON_CENTER_CHALLENGE_BACKOFF_BASE_SECONDS", "60"))
+)
+CHALLENGE_BACKOFF_MAX_SECONDS = max(
+    CHALLENGE_BACKOFF_BASE_SECONDS,
+    int(os.getenv("POKEMON_CENTER_CHALLENGE_BACKOFF_MAX_SECONDS", "900")),
 )
 WATCHLIST_URL = os.getenv("POKEALERT_WATCHLIST_URL", "").strip()
 INGEST_URL = os.getenv("POKEALERT_INGEST_URL", "").strip()
@@ -125,9 +140,14 @@ def proxy_label(value, index=None):
 
 
 class BrowserQueueProbe:
-    """One persistent browser with one proxy-bound context and page."""
+    """One persistent browser with one proxy-bound context and page.
 
-    blocked_resource_types = {"image", "media", "font", "stylesheet"}
+    The detector only needs the page text to classify storefront vs queue, so
+    every cross-origin request (analytics, tag managers, ads, telemetry) and
+    unnecessary static same-origin requests are aborted before they are proxied.
+    Each aborted byte is bandwidth the proxy never bills; this is the monitor's
+    primary lever for proxy-data usage.
+    """
 
     def __init__(
         self,
@@ -160,6 +180,10 @@ class BrowserQueueProbe:
         self.page = None
         self.rotation_count = 0
         self.context_restart_count = 0
+        # Accounting for how much actually flowed through the proxy.
+        self.proxied_requests = 0
+        self.proxied_bytes = 0
+        self.aborted_requests = 0
 
     async def start(self):
         if self.context is not None:
@@ -171,13 +195,28 @@ class BrowserQueueProbe:
         )
         self.context_restart_count += 1
         self.page = await self.context.new_page()
+        self.page.on("response", self._on_response)
         await self.page.route("**/*", self._route_resource)
 
     async def _route_resource(self, route):
-        if route.request.resource_type in self.blocked_resource_types:
+        # Only GET navigation/document and same-origin XHR/fetch may use the
+        # proxy. POST/PUT/beacons and any third-party host are aborted so they
+        # neither spend data nor leak signal to trackers.
+        request = route.request
+        method = (getattr(request, "method", None) or "GET").upper()
+        decision = route_request_decision(request.resource_type, request.url)
+        if method != "GET" or decision == "abort":
+            self.aborted_requests += 1
             await route.abort()
-        else:
-            await route.continue_()
+            return
+        self.proxied_requests += 1
+        await route.continue_()
+
+    def _on_response(self, response):
+        # Best-effort byte accounting; headers may be missing on aborted flows.
+        length = response.headers.get("content-length")
+        if length and length.isdigit():
+            self.proxied_bytes += int(length)
 
     async def check(self):
         await self.start()
@@ -292,13 +331,14 @@ class QueueMonitorController:
         proxy_state,
         rotations,
         browser_restarts,
+        proxy_bandwidth=None,
     ):
         success_percent = (
             round(self.checks_successful * 100 / self.checks_total, 1)
             if self.checks_total
             else 0.0
         )
-        return {
+        snapshot = {
             "state": self.last_state,
             "last_check_at": self.last_check_at,
             "last_success_at": self.last_success_at,
@@ -314,6 +354,15 @@ class QueueMonitorController:
             "browser_restarts": browser_restarts,
             "last_error": self.last_error,
         }
+        if proxy_bandwidth:
+            snapshot.update(
+                {
+                    "proxied_requests": proxy_bandwidth.get("proxied_requests", 0),
+                    "proxied_bytes": proxy_bandwidth.get("proxied_bytes", 0),
+                    "aborted_requests": proxy_bandwidth.get("aborted_requests", 0),
+                }
+            )
+        return snapshot
 
 
 def calculate_check_interval(
@@ -505,6 +554,8 @@ async def run():
         raise RuntimeError("Missing PokeAlert ingest configuration")
     # Fail closed. A missing or malformed proxy file must stop the service
     # instead of allowing a Pokemon Center request through the Pi's home IP.
+    from patchright.async_api import async_playwright
+
     proxies = load_proxies()
     initial_queue_open = load_queue_open_state()
     controller = QueueMonitorController(
@@ -537,9 +588,27 @@ async def run():
         last_health_log = 0.0
         previous_state = None
         previous_rotations = 0
+        challenge_backoff = ChallengeBackoff(
+            threshold=CHALLENGE_BACKOFF_THRESHOLD,
+            base_seconds=CHALLENGE_BACKOFF_BASE_SECONDS,
+            max_seconds=CHALLENGE_BACKOFF_MAX_SECONDS,
+        )
+        backoff_logged = False
 
         try:
             while True:
+                remaining_backoff = challenge_backoff.remaining(time.monotonic())
+                if remaining_backoff:
+                    if not backoff_logged:
+                        await remote_log(
+                            "Pokemon Center security challenge backoff active "
+                            f"for {remaining_backoff}s",
+                            "warning",
+                        )
+                        backoff_logged = True
+                    await asyncio.sleep(remaining_backoff)
+                    continue
+                backoff_logged = False
                 started = time.monotonic()
                 try:
                     observation = await probe.check()
@@ -553,6 +622,13 @@ async def run():
                 label = probe.proxy_pool.label(proxy_index)
                 transition = await controller.process(observation, proxy_label=label)
                 now = time.monotonic()
+                new_backoff = challenge_backoff.record(observation.kind, now=now)
+                if new_backoff:
+                    await remote_log(
+                        "Pokemon Center security challenge threshold reached; "
+                        f"pausing checks for {new_backoff}s",
+                        "warning",
+                    )
                 state_changed = observation.kind != previous_state
                 rotated = probe.rotation_count != previous_rotations
                 threshold_failure = controller.consecutive_failures in (1, 5, 20)
@@ -571,6 +647,11 @@ async def run():
                         proxy_state=probe.proxy_pool.state(proxy_index, now=now),
                         rotations=probe.rotation_count,
                         browser_restarts=probe.context_restart_count,
+                        proxy_bandwidth={
+                            "proxied_requests": probe.proxied_requests,
+                            "proxied_bytes": probe.proxied_bytes,
+                            "aborted_requests": probe.aborted_requests,
+                        },
                     )
                     await remote_log(
                         "Pokemon Center detector health "

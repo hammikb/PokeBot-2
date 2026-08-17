@@ -1,7 +1,7 @@
 """Pure state logic for the Pokemon Center queue detector."""
 
 from dataclasses import dataclass
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlparse
 
 
 QUEUE_MARKERS = (
@@ -62,6 +62,35 @@ class QueueTransitionTracker:
         self.queue_open = False
         self._storefront_reads = 0
         return "closed"
+
+
+class ChallengeBackoff:
+    """Bounded process-wide pause for repeated site security challenges."""
+
+    def __init__(self, threshold=3, base_seconds=60, max_seconds=900):
+        self.threshold = max(1, int(threshold))
+        self.base_seconds = max(1, int(base_seconds))
+        self.max_seconds = max(self.base_seconds, int(max_seconds))
+        self.consecutive_challenges = 0
+        self.pause_until = 0.0
+
+    def record(self, observation_kind, now=0):
+        now = float(now)
+        if observation_kind == "blocked":
+            self.consecutive_challenges += 1
+            if self.consecutive_challenges < self.threshold:
+                return 0
+            exponent = self.consecutive_challenges - self.threshold
+            pause = min(self.max_seconds, self.base_seconds * (2**exponent))
+            self.pause_until = max(self.pause_until, now + pause)
+            return int(round(self.pause_until - now))
+        if observation_kind in ("storefront", "queue"):
+            self.consecutive_challenges = 0
+            self.pause_until = 0.0
+        return 0
+
+    def remaining(self, now=0):
+        return max(0, int(round(self.pause_until - float(now))))
 
 
 class ProxyHealthPool:
@@ -132,10 +161,14 @@ def classify_observation(status, url, frame_texts):
     normalized_url = str(url or "").lower()
     text = "\n".join(str(item or "") for item in (frame_texts or ())).lower()
 
-    if status in (403, 429) or any(
+    challenge_detected = status in (403, 429) or any(
         marker in normalized_url or marker in text for marker in BLOCKED_MARKERS
-    ):
-        return Observation("blocked", status, str(url or ""), "site security challenge")
+    )
+    if challenge_detected:
+        detail = "site security challenge"
+        if status not in (403, 429) and status is not None:
+            detail += f" (HTTP {status})"
+        return Observation("blocked", status, str(url or ""), detail)
 
     queue_markers = sum(marker in text for marker in QUEUE_MARKERS)
     queue_url = any(marker in normalized_url for marker in QUEUE_URL_MARKERS)
@@ -151,3 +184,47 @@ def classify_observation(status, url, frame_texts):
     if not text.strip():
         return Observation("error", status, str(url or ""), "empty browser document")
     return Observation("error", status, str(url or ""), "unrecognized browser document")
+
+
+# Request route boundaries. The detector needs first-party scripts to render
+# the storefront/queue text, but does not need static media or third-party
+# telemetry. Blocking those requests reduces proxy usage without returning a
+# half-hydrated application shell.
+# Some drivers report an empty resource type for third-party beacons; the URL
+# allow-list below is the second layer of defense. Root domains are matched by
+# safe subdomain suffix, so queue/CDN subdomains continue to work.
+ALLOWED_REQUEST_HOSTS = frozenset(
+    {
+        "pokemoncenter.com",
+        "queue-it.net",
+        "queue-it.com",
+    }
+)
+ALLOWED_RESOURCE_TYPES = frozenset({"document", "script", "xhr", "fetch"})
+
+
+def _host_of(url):
+    try:
+        return (urlparse(str(url or "")).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def _allowed_host(host):
+    return any(host == root or host.endswith(f".{root}") for root in ALLOWED_REQUEST_HOSTS)
+
+
+def route_request_decision(resource_type, url):
+    """Return ``"abort"`` or ``"continue"`` for a pending request.
+
+    Pure decision logic so it can be unit-tested without a browser. The policy:
+    abort static/unsupported resource types and any cross-origin (third-party)
+    request. First-party scripts remain available for client-side rendering.
+    """
+    resource_type = (resource_type or "").lower()
+    if resource_type and resource_type not in ALLOWED_RESOURCE_TYPES:
+        return "abort"
+    host = _host_of(url)
+    if host and not _allowed_host(host):
+        return "abort"
+    return "continue"
