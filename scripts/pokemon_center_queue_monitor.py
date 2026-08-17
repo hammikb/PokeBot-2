@@ -316,6 +316,31 @@ class QueueMonitorController:
         }
 
 
+def calculate_check_interval(
+    observation_kind,
+    queue_open,
+    proxy_failures,
+    rotated,
+    check_seconds,
+    open_seconds,
+    proxy_cooldown_seconds,
+):
+    if observation_kind in ("blocked", "error") and rotated:
+        return 5
+    interval = open_seconds if queue_open else check_seconds
+    if queue_open and observation_kind == "storefront":
+        interval = check_seconds
+    if observation_kind in ("blocked", "error"):
+        interval = max(
+            interval,
+            min(
+                proxy_cooldown_seconds,
+                max(60, check_seconds * (2 ** min(proxy_failures, 5))),
+            ),
+        )
+    return interval
+
+
 async def ingest(event_type, payload):
     if not INGEST_URL or not INGEST_TOKEN:
         raise RuntimeError("POKEALERT_INGEST_URL/POKEALERT_INGEST_TOKEN are not configured")
@@ -556,22 +581,15 @@ async def run():
 
                 previous_state = observation.kind
                 previous_rotations = probe.rotation_count
-                interval = OPEN_CHECK_SECONDS if controller.tracker.queue_open else CHECK_SECONDS
-                if controller.tracker.queue_open and observation.kind == "storefront":
-                    interval = CHECK_SECONDS
-                if observation.kind in ("blocked", "error"):
-                    proxy_failures = probe.proxy_pool.failure_count(proxy_index)
-                    interval = max(
-                        interval,
-                        min(
-                            PROXY_COOLDOWN_SECONDS,
-                            max(
-                                60,
-                                CHECK_SECONDS
-                                * (2 ** min(proxy_failures, 5)),
-                            ),
-                        ),
-                    )
+                interval = calculate_check_interval(
+                    observation.kind,
+                    controller.tracker.queue_open,
+                    probe.proxy_pool.failure_count(proxy_index),
+                    rotated,
+                    CHECK_SECONDS,
+                    OPEN_CHECK_SECONDS,
+                    PROXY_COOLDOWN_SECONDS,
+                )
                 delay = max(1.0, interval - (time.monotonic() - started))
                 await asyncio.sleep(delay)
         finally:

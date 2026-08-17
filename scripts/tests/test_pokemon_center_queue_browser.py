@@ -11,6 +11,7 @@ from pokemon_center_queue_core import Observation
 from pokemon_center_queue_monitor import (
     BrowserQueueProbe,
     QueueMonitorController,
+    calculate_check_interval,
     deliver_queue_open,
 )
 
@@ -296,6 +297,11 @@ async def main():
     )
     assert delivered == (True, True)
     assert channel_calls == ["supabase"]
+    assert calculate_check_interval("storefront", False, 0, False, 30, 600, 900) == 30
+    assert calculate_check_interval("queue", True, 0, False, 30, 600, 900) == 600
+    assert calculate_check_interval("storefront", True, 0, False, 30, 600, 900) == 30
+    assert calculate_check_interval("blocked", False, 1, False, 30, 600, 900) == 60
+    assert calculate_check_interval("blocked", False, 0, True, 30, 600, 900) == 5
     print("Pokemon Center persistent browser regression checks passed")
 
 
