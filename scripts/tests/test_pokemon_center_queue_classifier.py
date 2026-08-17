@@ -78,7 +78,9 @@ def main():
     assert pool.current() == (0, "http://user:secret@proxy-one:80")
     pool.record_success(1, now=90)
     pool.record_failure(0, now=99)
+    assert pool.failure_count(0) == 1
     assert pool.record_failure(0, now=100) is True
+    assert pool.failure_count(0) == 0
     assert pool.rotate(now=100) == (1, "http://user:secret@proxy-two:80")
     assert pool.label(0) == "proxy[01] proxy-one:80"
     assert "secret" not in pool.label(0)

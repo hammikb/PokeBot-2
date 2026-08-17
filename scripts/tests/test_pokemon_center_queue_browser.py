@@ -176,6 +176,7 @@ async def main():
     assert blocked_browser.contexts[0].closed is True
     assert len(blocked_browser.contexts) == 2
     assert blocked_probe.rotation_count == 1
+    assert blocked_probe.proxy_pool.failure_count() == 0
     recovered = await blocked_probe.check()
     assert recovered.kind == "storefront"
     await blocked_probe.close()

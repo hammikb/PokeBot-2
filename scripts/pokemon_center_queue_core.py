@@ -92,6 +92,10 @@ class ProxyHealthPool:
         health = self._health[selected]
         return "quarantined" if health["quarantined_until"] > now else "eligible"
 
+    def failure_count(self, index=None):
+        selected = self.index if index is None else index
+        return self._health[selected]["failures"]
+
     def record_success(self, index=None, now=0):
         selected = self.index if index is None else index
         health = self._health[selected]

@@ -560,6 +560,7 @@ async def run():
                 if controller.tracker.queue_open and observation.kind == "storefront":
                     interval = CHECK_SECONDS
                 if observation.kind in ("blocked", "error"):
+                    proxy_failures = probe.proxy_pool.failure_count(proxy_index)
                     interval = max(
                         interval,
                         min(
@@ -567,7 +568,7 @@ async def run():
                             max(
                                 60,
                                 CHECK_SECONDS
-                                * (2 ** min(controller.consecutive_failures, 5)),
+                                * (2 ** min(proxy_failures, 5)),
                             ),
                         ),
                     )
