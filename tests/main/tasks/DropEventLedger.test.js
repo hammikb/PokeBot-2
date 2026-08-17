@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { initDb, JsonDb } from '../../../src/main/db.js'
+import { getDb, initDb, JsonDb } from '../../../src/main/db.js'
 import { createReceiptId, DropEventLedger } from '../../../src/main/tasks/DropEventLedger.js'
 
 describe('DropEventLedger', () => {
@@ -12,10 +12,17 @@ describe('DropEventLedger', () => {
   beforeEach(() => {
     directory = mkdtempSync(join(tmpdir(), 'pokebot-drop-ledger-'))
     initDb(join(directory, 'pokebot.db'))
+    const db = getDb()
+    const insertTask = db.prepare(
+      'INSERT INTO tasks (id, retailer, product_url, mode, account_ids) VALUES (?, ?, ?, ?, ?)'
+    )
+    insertTask.run('task-1', 'target', 'https://www.target.com/p/-/A-1', 'auto-checkout', '[]')
+    insertTask.run('task-2', 'target', 'https://www.target.com/p/-/A-2', 'auto-checkout', '[]')
     ledger = new DropEventLedger({ now: () => 1_700_000_000_000 })
   })
 
   afterEach(() => {
+    getDb().close()
     rmSync(directory, { recursive: true, force: true })
   })
 
