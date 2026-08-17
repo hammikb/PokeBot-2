@@ -139,10 +139,12 @@ class BrowserQueueProbe:
         failure_threshold=2,
         proxy_cooldown_seconds=1800,
         proxy_start_index=0,
+        settle_time_ms=3_000,
     ):
         self.browser = browser
         self.check_url = check_url
         self.navigation_timeout_ms = int(navigation_timeout_ms)
+        self.settle_time_ms = max(0, int(settle_time_ms))
         self.proxy_pool = proxy_pool or ProxyHealthPool(
             proxies,
             failure_threshold=failure_threshold,
@@ -185,6 +187,8 @@ class BrowserQueueProbe:
                 wait_until="domcontentloaded",
                 timeout=self.navigation_timeout_ms,
             )
+            if self.settle_time_ms:
+                await self.page.wait_for_timeout(self.settle_time_ms)
             texts = []
             for frame in self.page.frames:
                 try:
@@ -200,6 +204,12 @@ class BrowserQueueProbe:
                 "error",
                 detail=f"browser {type(exc).__name__}",
             )
+        finally:
+            if self.page is not None:
+                try:
+                    await self.page.goto("about:blank", wait_until="commit", timeout=5_000)
+                except Exception:
+                    pass
 
         index, _ = self.proxy_pool.current()
         now = time.monotonic()

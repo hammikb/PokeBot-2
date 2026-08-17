@@ -51,6 +51,7 @@ class FakePage:
             )
         ]
         self.goto_calls = []
+        self.wait_calls = []
         self.route_handler = None
         self.closed = False
 
@@ -64,6 +65,9 @@ class FakePage:
             raise RuntimeError(self.error)
         self.url = url
         return FakeResponse(self.status)
+
+    async def wait_for_timeout(self, milliseconds):
+        self.wait_calls.append(milliseconds)
 
     async def close(self):
         self.closed = True
@@ -125,7 +129,13 @@ async def main():
     assert second.kind == "storefront"
     assert len(browser.contexts) == 1
     assert browser.contexts[0].new_page_calls == 1
-    assert len(browser.contexts[0].page.goto_calls) == 2
+    assert browser.contexts[0].page.goto_calls == [
+        ("https://www.pokemoncenter.com/", "domcontentloaded", 12_000),
+        ("about:blank", "commit", 5_000),
+        ("https://www.pokemoncenter.com/", "domcontentloaded", 12_000),
+        ("about:blank", "commit", 5_000),
+    ]
+    assert browser.contexts[0].page.wait_calls == [3_000, 3_000]
     assert browser.context_options == [
         {
             "proxy": {
