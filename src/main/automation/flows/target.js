@@ -98,7 +98,7 @@ export async function runTargetFlow(
   let cartFallbackReason = null
   let cartQuantityActual = null
   let cartEvidence = null
-  let reuseDecision = { preserve: false, reason: 'terminal-or-success' }
+  let flowError = null
   const navigationWaitUntil = targetCommitNavigationEnabled ? 'commit' : 'domcontentloaded'
   const withCartExecution = (result) => ({
     ...result,
@@ -549,11 +549,7 @@ export async function runTargetFlow(
     }
   } catch (err) {
     const submissionUncertain = orderSubmissionAttempted && !isTestMode
-    reuseDecision = classifyTargetPageReuse({
-      error: err,
-      page,
-      orderSubmissionAttempted
-    })
+    flowError = err
     if (submissionUncertain) requiresManual = true
     onStep(`Error: ${err.message}`)
     log.error('Target checkout flow failed', {
@@ -587,7 +583,8 @@ export async function runTargetFlow(
       page,
       pooled: usesPooledCheckoutPage,
       requiresManual,
-      reuseDecision
+      error: flowError,
+      orderSubmissionAttempted
     })
   }
 }
@@ -596,13 +593,20 @@ export async function cleanupTargetCheckoutPage({
   page,
   pooled,
   requiresManual,
-  reuseDecision = { preserve: false, reason: 'default-close' },
+  error = null,
+  orderSubmissionAttempted = false,
+  reuseDecision = null,
   log: cleanupLog = log
 }) {
-  const preserve = Boolean(requiresManual || (pooled && reuseDecision.preserve))
+  const decision =
+    reuseDecision ||
+    (error
+      ? classifyTargetPageReuse({ error, page, orderSubmissionAttempted })
+      : { preserve: false, reason: 'terminal-or-success' })
+  const preserve = Boolean(requiresManual || (pooled && decision.preserve))
   cleanupLog.info('Target checkout page cleanup decision', {
     action: preserve ? 'preserve' : 'discard',
-    reason: requiresManual ? 'manual-review' : reuseDecision.reason
+    reason: requiresManual ? 'manual-review' : decision.reason
   })
   if (!preserve) await page.close().catch(() => {})
 }
