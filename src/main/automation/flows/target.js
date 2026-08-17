@@ -10,6 +10,7 @@ import { validateTargetCartForCheckout } from './target/TargetCheckoutSafety.js'
 import { runTargetCartAttempt } from './target/TargetCartAttemptController.js'
 import { resolveTargetCartState } from './target/TargetCartEvidence.js'
 import { TARGET_CART_STRATEGY } from './target/TargetCartPolicy.js'
+import { classifyTargetPageReuse } from './target/TargetPageReusePolicy.js'
 import {
   TRANSIENT_CART_DIALOG_SELECTOR,
   clickAndObserveTargetCart,
@@ -63,8 +64,11 @@ export async function runTargetFlow(
     accountId = null // [TARGET] Pass the account ID for Shape tracking
   }
 ) {
-  const page =
+  const usesPooledCheckoutPage = Boolean(
     browserPool && accountId && typeof browserPool.getCheckoutPage === 'function'
+  )
+  const page =
+    usesPooledCheckoutPage
       ? await browserPool.getCheckoutPage(accountId, context)
       : await context.newPage()
   const coordinator = await TargetPageCoordinator.attach(page)
@@ -94,6 +98,7 @@ export async function runTargetFlow(
   let cartFallbackReason = null
   let cartQuantityActual = null
   let cartEvidence = null
+  let reuseDecision = { preserve: false, reason: 'terminal-or-success' }
   const navigationWaitUntil = targetCommitNavigationEnabled ? 'commit' : 'domcontentloaded'
   const withCartExecution = (result) => ({
     ...result,
@@ -544,6 +549,11 @@ export async function runTargetFlow(
     }
   } catch (err) {
     const submissionUncertain = orderSubmissionAttempted && !isTestMode
+    reuseDecision = classifyTargetPageReuse({
+      error: err,
+      page,
+      orderSubmissionAttempted
+    })
     if (submissionUncertain) requiresManual = true
     onStep(`Error: ${err.message}`)
     log.error('Target checkout flow failed', {
@@ -573,10 +583,28 @@ export async function runTargetFlow(
     })
   } finally {
     diagnostics.dispose()
-    if (!requiresManual) {
-      await page.close().catch(() => {})
-    }
+    await cleanupTargetCheckoutPage({
+      page,
+      pooled: usesPooledCheckoutPage,
+      requiresManual,
+      reuseDecision
+    })
   }
+}
+
+export async function cleanupTargetCheckoutPage({
+  page,
+  pooled,
+  requiresManual,
+  reuseDecision = { preserve: false, reason: 'default-close' },
+  log: cleanupLog = log
+}) {
+  const preserve = Boolean(requiresManual || (pooled && reuseDecision.preserve))
+  cleanupLog.info('Target checkout page cleanup decision', {
+    action: preserve ? 'preserve' : 'discard',
+    reason: requiresManual ? 'manual-review' : reuseDecision.reason
+  })
+  if (!preserve) await page.close().catch(() => {})
 }
 
 // Observe Target's session after the requested page has loaded. Never navigate
