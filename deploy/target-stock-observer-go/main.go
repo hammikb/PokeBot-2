@@ -34,6 +34,8 @@ type config struct {
 	checkSeconds, slowCheckSeconds                          int
 	fastStart, fastEnd                                      int
 	requestSpacing, productRefresh, errorBackoff            time.Duration
+	blockedBackoff                                          time.Duration
+	maxFailovers                                            int
 	proxyIndex                                              int
 	proxyCooldown                                           time.Duration
 	timeZone                                                *time.Location
@@ -201,6 +203,25 @@ func (p *proxyPool) chooseNext(now time.Time, current int) int {
 	return best
 }
 
+func (p *proxyPool) chooseReady(now time.Time, current int) int {
+	if len(p.proxies) == 0 {
+		return -1
+	}
+	best := -1
+	for index, health := range p.health {
+		if index == current && len(p.proxies) > 1 {
+			continue
+		}
+		if health.cooldownUntil.After(now) {
+			continue
+		}
+		if best == -1 || health.lastUsedAt.Before(p.health[best].lastUsedAt) {
+			best = index
+		}
+	}
+	return best
+}
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	cfg, err := loadConfig()
@@ -305,7 +326,7 @@ func main() {
 		}
 		interval := scheduled
 		if cycleBlocked {
-			interval = 15 * time.Minute
+			interval = cfg.blockedBackoff
 		}
 		if consecutiveErrors > 0 && !cycleBlocked {
 			backoff := scheduled * time.Duration(1<<min(consecutiveErrors, 5))
@@ -359,7 +380,7 @@ func loadConfig() (config, error) {
 		apiKey:       apiKey, userAgent: env("TARGET_STOCK_USER_AGENT", defaultUserAgent), storeID: env("TARGET_STOCK_STORE_ID", "1296"), zipCode: env("TARGET_STOCK_ZIP", "90001"), stateCode: env("TARGET_STOCK_STATE", "CA"),
 		proxyFile: env("TARGET_STOCK_PROXY_FILE", "/home/hammikb/api-monitor-python/proxies.txt"), stateFile: env("TARGET_STOCK_STATE_FILE", "/home/hammikb/api-monitor-python/.target-stock-observer-go-state.json"),
 		checkSeconds: check, slowCheckSeconds: slow, fastStart: start, fastEnd: end,
-		requestSpacing: time.Duration(envFloat("TARGET_STOCK_REQUEST_SPACING_SECONDS", 2) * float64(time.Second)), productRefresh: time.Duration(envInt("TARGET_STOCK_PRODUCT_REFRESH_SECONDS", 300)) * time.Second, errorBackoff: time.Duration(max(envInt("TARGET_STOCK_ERROR_BACKOFF_MAX_SECONDS", 900), 60)) * time.Second, proxyCooldown: time.Duration(max(envInt("TARGET_STOCK_PROXY_COOLDOWN_SECONDS", 300), 60)) * time.Second,
+		requestSpacing: time.Duration(envFloat("TARGET_STOCK_REQUEST_SPACING_SECONDS", 2) * float64(time.Second)), productRefresh: time.Duration(envInt("TARGET_STOCK_PRODUCT_REFRESH_SECONDS", 300)) * time.Second, errorBackoff: time.Duration(max(envInt("TARGET_STOCK_ERROR_BACKOFF_MAX_SECONDS", 900), 60)) * time.Second, blockedBackoff: time.Duration(max(envInt("TARGET_STOCK_BLOCKED_BACKOFF_SECONDS", 900), 5)) * time.Second, maxFailovers: min(max(envInt("TARGET_STOCK_MAX_FAILOVERS", 2), 0), 8), proxyCooldown: time.Duration(max(envInt("TARGET_STOCK_PROXY_COOLDOWN_SECONDS", 300), 60)) * time.Second,
 		proxyIndex: max(envInt("TARGET_STOCK_PROXY_INDEX", 0), 0), timeZone: zone, shadow: envBool("TARGET_STOCK_SHADOW", false),
 	}, nil
 }
@@ -453,7 +474,7 @@ func newClient(proxy string) *http.Client {
 }
 
 func fetchWithFailover(client **http.Client, proxies []string, proxyIndex *int, pool *proxyPool, cfg config, productURL string) (observation, error) {
-	maxFailovers := min(2, len(proxies)-1)
+	maxFailovers := min(cfg.maxFailovers, len(proxies)-1)
 	for attempt := 0; ; attempt++ {
 		current, err := fetchObservation(*client, cfg, productURL)
 		if err == nil {
@@ -467,7 +488,21 @@ func fetchWithFailover(client **http.Client, proxies []string, proxyIndex *int, 
 			if pool != nil {
 				pool.recordFailure(*proxyIndex, "blocked", time.Now())
 			}
-			return observation{}, err
+			if attempt >= maxFailovers {
+				return observation{}, err
+			}
+			next := (*proxyIndex + 1) % len(proxies)
+			if pool != nil {
+				next = pool.chooseReady(time.Now(), *proxyIndex)
+			}
+			if next < 0 || next == *proxyIndex {
+				return observation{}, err
+			}
+			(*client).CloseIdleConnections()
+			*proxyIndex = next
+			*client = newClient(proxies[*proxyIndex])
+			log.Printf("proxy blocked; cooldown and failover to proxy[%d]: %v", *proxyIndex+1, err)
+			continue
 		}
 		if pool != nil {
 			pool.recordFailure(*proxyIndex, "transport", time.Now())
@@ -477,9 +512,9 @@ func fetchWithFailover(client **http.Client, proxies []string, proxyIndex *int, 
 		}
 		next := (*proxyIndex + 1) % len(proxies)
 		if pool != nil {
-			next = pool.chooseNext(time.Now(), *proxyIndex)
+			next = pool.chooseReady(time.Now(), *proxyIndex)
 		}
-		if next == *proxyIndex {
+		if next < 0 || next == *proxyIndex {
 			return observation{}, err
 		}
 		(*client).CloseIdleConnections()

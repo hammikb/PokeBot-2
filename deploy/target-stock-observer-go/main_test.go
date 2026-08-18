@@ -61,6 +61,38 @@ func TestProxyPoolCooldownAndSelection(t *testing.T) {
 	}
 }
 
+func TestProxyPoolReadySelectionSkipsCoolingProxies(t *testing.T) {
+	pool := newProxyPool([]string{"http://one:80", "http://two:80", "http://three:80"}, 0, 60*time.Second)
+	now := time.Unix(100, 0)
+	pool.recordFailure(0, "blocked", now)
+	pool.recordFailure(1, "blocked", now)
+	if got := pool.chooseReady(now, 0); got != 2 {
+		t.Fatalf("ready selection = %d, want 2", got)
+	}
+	pool.recordFailure(2, "blocked", now)
+	if got := pool.chooseReady(now, 0); got != -1 {
+		t.Fatalf("all-cooling selection = %d, want -1", got)
+	}
+}
+
+func TestLoadConfigBlockedFailoverSettings(t *testing.T) {
+	t.Setenv("POKEALERT_INGEST_URL", "https://example.test/api/ingest")
+	t.Setenv("POKEALERT_INGEST_TOKEN", "token")
+	t.Setenv("TARGET_REDSKY_API_KEY", "key")
+	t.Setenv("TARGET_STOCK_MAX_FAILOVERS", "4")
+	t.Setenv("TARGET_STOCK_BLOCKED_BACKOFF_SECONDS", "20")
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.maxFailovers != 4 {
+		t.Fatalf("max failovers = %d, want 4", cfg.maxFailovers)
+	}
+	if cfg.blockedBackoff != 20*time.Second {
+		t.Fatalf("blocked backoff = %s, want 20s", cfg.blockedBackoff)
+	}
+}
+
 func TestNewClientUsesAutomaticCompressionAndTimeout(t *testing.T) {
 	client := newClient("http://proxy.example:8080")
 	defer client.CloseIdleConnections()
