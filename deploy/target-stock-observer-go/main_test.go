@@ -75,6 +75,27 @@ func TestProxyPoolReadySelectionSkipsCoolingProxies(t *testing.T) {
 	}
 }
 
+func TestProxyHealthRowsAreSafeAndComparable(t *testing.T) {
+	pool := newProxyPool([]string{"http://user:secret@example.test:8080"}, 0, 60*time.Second)
+	now := time.Unix(100, 0)
+	pool.recordSuccess(0, now)
+	pool.recordFailure(0, "blocked_403", now.Add(time.Second))
+	rows := pool.healthRows(now.Add(2 * time.Second))
+	if len(rows) != 1 {
+		t.Fatalf("health rows = %d, want 1", len(rows))
+	}
+	row := rows[0]
+	if row.Proxy == "http://user:secret@example.test:8080" || len(row.Proxy) != len("proxy-000000000000") {
+		t.Fatalf("proxy was not safely anonymized: %q", row.Proxy)
+	}
+	if row.Successes != 1 || row.Blocked403 != 1 || row.Blocked429 != 0 || row.FetchFailures != 0 {
+		t.Fatalf("unexpected health counters: %+v", row)
+	}
+	if row.LastFailureAt == nil || row.CooldownUntil == nil {
+		t.Fatalf("failure/cooldown timestamps missing: %+v", row)
+	}
+}
+
 func TestLoadConfigBlockedFailoverSettings(t *testing.T) {
 	t.Setenv("POKEALERT_INGEST_URL", "https://example.test/api/ingest")
 	t.Setenv("POKEALERT_INGEST_TOKEN", "token")

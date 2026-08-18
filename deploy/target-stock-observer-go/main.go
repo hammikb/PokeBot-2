@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,8 +39,9 @@ type config struct {
 	maxFailovers                                            int
 	proxyIndex                                              int
 	proxyCooldown                                           time.Duration
+	proxyHealthInterval                                     time.Duration
 	timeZone                                                *time.Location
-	shadow                                                  bool
+	shadow, proxyHealthPublish                              bool
 }
 
 type observation struct {
@@ -125,11 +127,25 @@ func readBoundedBody(reader io.Reader, limit int) ([]byte, bool, error) {
 
 type proxyHealth struct {
 	successes           int
+	blocked403          int
+	blocked429          int
 	blocked             int
 	transportFailures   int
 	consecutiveFailures int
 	cooldownUntil       time.Time
+	lastFailureAt       time.Time
 	lastUsedAt          time.Time
+}
+
+type proxyHealthRow struct {
+	Proxy              string  `json:"proxy"`
+	Successes          int     `json:"successes"`
+	Blocked403         int     `json:"blocked_403"`
+	Blocked429         int     `json:"blocked_429"`
+	NavigationFailures int     `json:"navigation_failures"`
+	FetchFailures      int     `json:"fetch_failures"`
+	LastFailureAt      *string `json:"last_failure_at"`
+	CooldownUntil      *string `json:"cooldown_until"`
 }
 
 type proxyPool struct {
@@ -163,8 +179,13 @@ func (p *proxyPool) recordFailure(index int, kind string, now time.Time) {
 	}
 	health := &p.health[index]
 	health.consecutiveFailures++
+	health.lastFailureAt = now
 	health.lastUsedAt = now
-	if kind == "blocked" {
+	if kind == "blocked_429" {
+		health.blocked429++
+		health.blocked++
+	} else if kind == "blocked" || kind == "blocked_403" {
+		health.blocked403++
 		health.blocked++
 	} else {
 		health.transportFailures++
@@ -174,6 +195,35 @@ func (p *proxyPool) recordFailure(index int, kind string, now time.Time) {
 		multiplier = 4
 	}
 	health.cooldownUntil = now.Add(p.cooldown * time.Duration(multiplier))
+}
+
+func (p *proxyPool) healthRows(now time.Time) []proxyHealthRow {
+	rows := make([]proxyHealthRow, 0, len(p.health))
+	for index, health := range p.health {
+		row := proxyHealthRow{
+			Proxy:              publicProxyID(p.proxies[index]),
+			Successes:          health.successes,
+			Blocked403:         health.blocked403,
+			Blocked429:         health.blocked429,
+			NavigationFailures: 0,
+			FetchFailures:      health.transportFailures,
+		}
+		if !health.lastFailureAt.IsZero() {
+			value := health.lastFailureAt.UTC().Format(time.RFC3339Nano)
+			row.LastFailureAt = &value
+		}
+		if health.cooldownUntil.After(now) {
+			value := health.cooldownUntil.UTC().Format(time.RFC3339Nano)
+			row.CooldownUntil = &value
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func publicProxyID(proxy string) string {
+	digest := sha256.Sum256([]byte(proxy))
+	return "proxy-" + fmt.Sprintf("%x", digest[:6])
 }
 
 func (p *proxyPool) chooseNext(now time.Time, current int) int {
@@ -247,7 +297,7 @@ func main() {
 	defer client.CloseIdleConnections()
 	consecutiveErrors := 0
 	var downloadedBytes int64
-	var lastRefresh, lastBandwidth time.Time
+	var lastRefresh, lastBandwidth, lastProxyHealth time.Time
 	lastMode := ""
 	log.Printf("Target Go observer started (products=%d, fast=%ds, slow=%ds, proxy_required=true, shadow=%t)", len(urls), cfg.checkSeconds, cfg.slowCheckSeconds, cfg.shadow)
 
@@ -320,6 +370,14 @@ func main() {
 			}
 			log.Printf("switching proxy after failures: proxy[%d]", proxyIndex+1)
 		}
+		if cfg.proxyHealthPublish && (lastProxyHealth.IsZero() || time.Since(lastProxyHealth) >= cfg.proxyHealthInterval) {
+			if err := postIngest(cfg, "proxy_health", proxyPool.healthRows(time.Now())); err != nil {
+				log.Printf("proxy health publish failed: %v", err)
+			} else {
+				log.Printf("proxy health published (%d proxies)", len(proxyPool.health))
+			}
+			lastProxyHealth = time.Now()
+		}
 		if time.Since(lastBandwidth) >= time.Hour {
 			log.Printf("Target response bodies downloaded since startup: %.3f MB", float64(downloadedBytes)/1_000_000)
 			lastBandwidth = time.Now()
@@ -380,8 +438,8 @@ func loadConfig() (config, error) {
 		apiKey:       apiKey, userAgent: env("TARGET_STOCK_USER_AGENT", defaultUserAgent), storeID: env("TARGET_STOCK_STORE_ID", "1296"), zipCode: env("TARGET_STOCK_ZIP", "90001"), stateCode: env("TARGET_STOCK_STATE", "CA"),
 		proxyFile: env("TARGET_STOCK_PROXY_FILE", "/home/hammikb/api-monitor-python/proxies.txt"), stateFile: env("TARGET_STOCK_STATE_FILE", "/home/hammikb/api-monitor-python/.target-stock-observer-go-state.json"),
 		checkSeconds: check, slowCheckSeconds: slow, fastStart: start, fastEnd: end,
-		requestSpacing: time.Duration(envFloat("TARGET_STOCK_REQUEST_SPACING_SECONDS", 2) * float64(time.Second)), productRefresh: time.Duration(envInt("TARGET_STOCK_PRODUCT_REFRESH_SECONDS", 300)) * time.Second, errorBackoff: time.Duration(max(envInt("TARGET_STOCK_ERROR_BACKOFF_MAX_SECONDS", 900), 60)) * time.Second, blockedBackoff: time.Duration(max(envInt("TARGET_STOCK_BLOCKED_BACKOFF_SECONDS", 900), 5)) * time.Second, maxFailovers: min(max(envInt("TARGET_STOCK_MAX_FAILOVERS", 2), 0), 8), proxyCooldown: time.Duration(max(envInt("TARGET_STOCK_PROXY_COOLDOWN_SECONDS", 300), 60)) * time.Second,
-		proxyIndex: max(envInt("TARGET_STOCK_PROXY_INDEX", 0), 0), timeZone: zone, shadow: envBool("TARGET_STOCK_SHADOW", false),
+		requestSpacing: time.Duration(envFloat("TARGET_STOCK_REQUEST_SPACING_SECONDS", 2) * float64(time.Second)), productRefresh: time.Duration(envInt("TARGET_STOCK_PRODUCT_REFRESH_SECONDS", 300)) * time.Second, errorBackoff: time.Duration(max(envInt("TARGET_STOCK_ERROR_BACKOFF_MAX_SECONDS", 900), 60)) * time.Second, blockedBackoff: time.Duration(max(envInt("TARGET_STOCK_BLOCKED_BACKOFF_SECONDS", 900), 5)) * time.Second, maxFailovers: min(max(envInt("TARGET_STOCK_MAX_FAILOVERS", 2), 0), 8), proxyCooldown: time.Duration(max(envInt("TARGET_STOCK_PROXY_COOLDOWN_SECONDS", 300), 60)) * time.Second, proxyHealthInterval: time.Duration(max(envInt("TARGET_STOCK_PROXY_HEALTH_INTERVAL_SECONDS", 60), 10)) * time.Second,
+		proxyIndex: max(envInt("TARGET_STOCK_PROXY_INDEX", 0), 0), timeZone: zone, shadow: envBool("TARGET_STOCK_SHADOW", false), proxyHealthPublish: envBool("TARGET_STOCK_PROXY_HEALTH_PUBLISH", false),
 	}, nil
 }
 
@@ -486,7 +544,11 @@ func fetchWithFailover(client **http.Client, proxies []string, proxyIndex *int, 
 		var blocked *targetBlockedError
 		if errors.As(err, &blocked) {
 			if pool != nil {
-				pool.recordFailure(*proxyIndex, "blocked", time.Now())
+				kind := "blocked_403"
+				if blocked.status == http.StatusTooManyRequests {
+					kind = "blocked_429"
+				}
+				pool.recordFailure(*proxyIndex, kind, time.Now())
 			}
 			if attempt >= maxFailovers {
 				return observation{}, err

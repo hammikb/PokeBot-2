@@ -23,6 +23,8 @@ Environment=TARGET_STOCK_PRODUCT_REFRESH_SECONDS=300
 Environment=TARGET_STOCK_PROXY_COOLDOWN_SECONDS=300
 Environment=TARGET_STOCK_BLOCKED_BACKOFF_SECONDS=900
 Environment=TARGET_STOCK_MAX_FAILOVERS=2
+Environment=TARGET_STOCK_PROXY_HEALTH_PUBLISH=true
+Environment=TARGET_STOCK_PROXY_HEALTH_INTERVAL_SECONDS=60
 ExecStart=/home/hammikb/target-stock-observer-go/target-stock-observer
 Restart=on-failure
 RestartSec=15
