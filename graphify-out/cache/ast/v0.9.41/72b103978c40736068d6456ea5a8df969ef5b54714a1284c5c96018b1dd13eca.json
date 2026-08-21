@@ -1,0 +1,1 @@
+{"nodes": [{"id": "pkg_pokealert_target_stock_observer", "label": "pokealert/target-stock-observer", "file_type": "code", "type": "package", "ecosystem": "go", "source_file": "deploy/target-stock-observer-go/go.mod", "source_location": "L1"}], "edges": []}

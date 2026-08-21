@@ -72,6 +72,7 @@ function locator({
   count = () => 0,
   fill = () => {},
   selectOption = () => {},
+  evaluate = () => '',
   child
 } = {}) {
   return {
@@ -102,6 +103,12 @@ function locator({
     },
     async selectOption(value) {
       return selectOption(value)
+    },
+    async evaluate(fn) {
+      return evaluate(fn)
+    },
+    async textContent() {
+      return String(evaluate())
     }
   }
 }
@@ -243,11 +250,22 @@ describe('Target high-demand checkout submission', () => {
   it('recovers a cart item after a no-response without another click or product reload', async () => {
     const outcomes = [null, null, null, null, null, 200]
     let currentUrl = 'https://www.target.com/p/test-product/-/A-123456'
-    const click = vi.fn(async () => {})
-    const selectOption = vi.fn(async () => {})
+    let headerCartQuantity = 0
+    let quantityValue = '1'
+    const click = vi.fn(async () => {
+      // The POST is never observed (no-response), but the header badge still moves.
+      headerCartQuantity += Number(quantityValue)
+    })
     const onMilestone = vi.fn()
     const addButton = locator({ isVisible: () => true, isDisabled: () => false, click })
-    const quantity = locator({ count: () => 1, selectOption })
+    const selectOption = vi.fn(async ({ value }) => {
+      quantityValue = value
+    })
+    const quantity = locator({
+      count: () => 1,
+      selectOption,
+      evaluate: () => quantityValue
+    })
     const page = {
       frames: () => [],
       url: () => currentUrl,
@@ -276,7 +294,10 @@ describe('Target high-demand checkout submission', () => {
         cookies: vi.fn(async () => [{ name: 'accessToken', value: 'x'.repeat(32) }])
       })),
       locator: vi.fn((selector) => {
-        if (selector === 'select[data-test="@web/QuantitySelector"]') return quantity
+        if (selector.includes('@web/CartLinkQuantity')) {
+          return locator({ count: () => 1, evaluate: () => String(headerCartQuantity) })
+        }
+        if (selector.includes('@web/QuantitySelector')) return quantity
         if (selector.includes('Add to cart')) return addButton
         if (selector.includes('fulfillment')) return locator({ isVisible: () => false })
         if (selector.includes('Out of stock') || selector.includes('text=/')) {
@@ -303,17 +324,13 @@ describe('Target high-demand checkout submission', () => {
       clickCount: 1,
       reloadCount: 0
     })
-    expect(page.goto).toHaveBeenCalledWith(
-      'https://www.target.com/co-cart',
-      expect.anything()
-    )
+    expect(page.goto).not.toHaveBeenCalledWith('https://www.target.com/co-cart', expect.anything())
     expect(selectOption).toHaveBeenCalledTimes(1)
     expect(selectOption).toHaveBeenNthCalledWith(1, { value: '2' })
     const noResponseRetries = onMilestone.mock.calls
       .map(([, , metadata]) => metadata)
       .filter(
-        (metadata) =>
-          metadata?.eventType === 'cart_retry' && metadata?.retryKind === 'no_response'
+        (metadata) => metadata?.eventType === 'cart_retry' && metadata?.retryKind === 'no_response'
       )
     expect(noResponseRetries).toEqual([])
     expect(onMilestone).toHaveBeenCalledWith(
@@ -601,6 +618,80 @@ describe('Target high-demand checkout submission', () => {
 
     expect(result).toBe('quota-reached')
     expect(page.state.submitClicks).toBe(0)
+  })
+
+  it('re-asserts quantity before every retry click, not just the first', async () => {
+    // Target resets the picker to 1 after a refused add. The retry loop reuses the same
+    // warm page, so without a re-assert attempt 1 asks for 2 and every retry asks for 1.
+    const outcomes = [429, 429, 200]
+    let currentUrl = 'https://www.target.com/p/test-product/-/A-123456'
+    let quantityValue = '1'
+    let headerCartQuantity = 0
+    const click = vi.fn(async () => {
+      // Target drops the picker back to 1 whenever the add is refused.
+      if (outcomes.length > 1) quantityValue = '1'
+      else headerCartQuantity += Number(quantityValue)
+    })
+    const selectOption = vi.fn(async ({ value }) => {
+      quantityValue = value
+    })
+    const quantity = locator({ count: () => 1, selectOption, evaluate: () => quantityValue })
+    const addButton = locator({ isVisible: () => true, isDisabled: () => false, click })
+    const page = {
+      frames: () => [],
+      url: () => currentUrl,
+      goto: vi.fn(async (url) => {
+        currentUrl = url
+      }),
+      waitForTimeout: vi.fn(async () => {}),
+      waitForResponse: vi.fn(async () => {
+        const status = outcomes.length > 1 ? outcomes.shift() : outcomes[0]
+        return {
+          status: () => status,
+          url: () => 'https://carts.target.com/web_checkouts/v1/cart_items',
+          request: () => ({ method: () => 'POST' }),
+          headers: () => ({})
+        }
+      }),
+      evaluate: vi.fn(async () => ({
+        present: true,
+        quantity: 2,
+        unitPrice: 19.99,
+        source: 'item-control'
+      })),
+      content: vi.fn(async () => ''),
+      context: vi.fn(() => ({
+        cookies: vi.fn(async () => [{ name: 'accessToken', value: 'x'.repeat(32) }])
+      })),
+      locator: vi.fn((selector) => {
+        if (selector.includes('@web/CartLinkQuantity')) {
+          return locator({ count: () => 1, evaluate: () => String(headerCartQuantity) })
+        }
+        if (selector.includes('@web/QuantitySelector')) return quantity
+        if (selector.includes('Add to cart')) return addButton
+        if (selector.includes('fulfillment')) return locator({ isVisible: () => false })
+        if (selector.includes('Out of stock') || selector.includes('text=/')) {
+          return locator({ isVisible: () => false })
+        }
+        return locator()
+      })
+    }
+
+    await browserAddToCart(
+      page,
+      'https://www.target.com/p/test-product/-/A-123456',
+      2,
+      vi.fn(),
+      null,
+      {},
+      null,
+      vi.fn()
+    )
+
+    // Set once up front, then re-set after each refusal reset it.
+    expect(selectOption.mock.calls.length).toBeGreaterThan(1)
+    expect(selectOption).toHaveBeenLastCalledWith({ value: '2' })
+    expect(quantityValue).toBe('2')
   })
 })
 

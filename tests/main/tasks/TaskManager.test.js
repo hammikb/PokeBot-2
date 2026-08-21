@@ -40,11 +40,18 @@ describe('Target checkout retry classification', () => {
   it('retries temporary Target states but not settled inventory failures', () => {
     expect(isRetryableCheckoutError('Target fulfillment is still loading')).toBe(true)
     expect(isRetryableCheckoutError('Target availability did not settle')).toBe(true)
+    expect(isRetryableCheckoutError('Target did not confirm the requested item in the cart')).toBe(
+      true
+    )
+    expect(isRetryableCheckoutError('Target high-demand add-to-cart retry window expired')).toBe(
+      true
+    )
     expect(isRetryableCheckoutError('Item is out of stock (Target availability settled)')).toBe(
       false
     )
     expect(isRetryableCheckoutError('Target security challenge did not clear')).toBe(false)
     expect(isRetryableCheckoutError('HTTP 403')).toBe(false)
+    expect(isRetryableCheckoutError('Target cart acquisition exhausted out-of-stock', 'out-of-stock')).toBe(false)
   })
 
   it("retries temporary Sam's Club traffic and checkout failures", () => {
@@ -736,10 +743,44 @@ describe('TaskManager test checkout', () => {
         productUrl: 'https://www.target.com/p/example/A-123',
         mode: 'test-checkout',
         useTargetCartApi: false,
-        targetCheckoutLiteMode: false
+        targetCheckoutLiteMode: false,
+        getInventoryGate: expect.any(Function)
       })
     )
     expect(browserPool.close).not.toHaveBeenCalled()
+  })
+
+  it('passes the triggering drop timestamp into the Target inventory gate', async () => {
+    const { manager } = makeTaskManager()
+    const getInventoryGate = vi.fn(() => ({ mode: 'extend' }))
+    manager._supabaseSource = { getInventoryGate }
+    const dropEvent = {
+      retailer: 'target',
+      productName: 'Pokemon ETB',
+      productUrl: 'https://www.target.com/p/example/A-123',
+      dropType: 'in_stock',
+      observedAt: '2026-08-11T08:36:11.000Z'
+    }
+
+    await manager._runFlowForAccount(
+      runTargetFlow,
+      {
+        id: 'task-1',
+        retailer: 'target',
+        product_url: dropEvent.productUrl,
+        buy_limit: 1,
+        mode: 'monitor-and-buy'
+      },
+      dropEvent,
+      'account-1'
+    )
+
+    const options = runTargetFlow.mock.calls.at(-1)[1]
+    expect(options.getInventoryGate()).toEqual({ mode: 'extend' })
+    expect(getInventoryGate).toHaveBeenCalledWith(
+      dropEvent.productUrl,
+      '2026-08-11T08:36:11.000Z'
+    )
   })
 
   it('passes the experimental Target cart API setting into checkout', async () => {

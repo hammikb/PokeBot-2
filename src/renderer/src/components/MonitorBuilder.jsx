@@ -231,7 +231,7 @@ export default function MonitorBuilder({
           <img
             src={product.productImageUrl}
             alt=""
-            className="w-24 h-24 object-contain bg-white rounded-xl"
+            className="w-32 h-32 object-contain bg-white rounded-xl"
           />
         )}
         <div className="min-w-0 flex-1">
@@ -313,66 +313,73 @@ function RetailerSource({ retailer, source, accounts, update, toggleAccount }) {
         >
           {source.verificationStatus.replace('-', ' ')}
         </span>
+        <span className="text-[10px] uppercase rounded-full px-2 py-1 bg-white/5 text-gray-500">
+          {source.enabled ? 'Enabled' : 'Disabled'}
+        </span>
       </div>
-      <input
-        value={source.productUrl}
-        onChange={(event) =>
-          update({ productUrl: event.target.value, verificationStatus: 'custom-url' })
-        }
-        placeholder={`${retailer} product URL`}
-        className="w-full bg-[#0b0c0e] border border-white/10 rounded-lg px-3 py-2 text-gray-200"
-      />
-      <div className={`grid gap-3 ${retailer === 'target' ? 'grid-cols-4' : 'grid-cols-3'}`}>
-        <MoneyField
-          label="Retailer MSRP"
-          value={source.msrp}
-          onChange={(msrp) => update({ msrp })}
-        />
-        <MoneyField
-          label="Price limit (required)"
-          value={source.priceCeiling}
-          onChange={(priceCeiling) => update({ priceCeiling })}
-        />
-        <label className="text-gray-500 text-xs">
-          Buy up to
+      {source.enabled ? (
+        <>
           <input
-            type="number"
-            min="1"
-            max={max}
-            value={source.buyLimit}
-            onChange={(event) => update({ buyLimit: Number(event.target.value) })}
-            className="mt-1 w-full bg-[#0b0c0e] border border-white/10 rounded-lg px-3 py-2 text-gray-200"
+            value={source.productUrl}
+            onChange={(event) =>
+              update({ productUrl: event.target.value, verificationStatus: 'custom-url' })
+            }
+            placeholder={`${retailer} product URL`}
+            className="w-full bg-[#0b0c0e] border border-white/10 rounded-lg px-3 py-2 text-gray-200"
           />
-        </label>
-        {retailer === 'target' && (
-          <label className="text-gray-500 text-xs">
-            Separate orders
-            <select
-              value={source.ordersPerDrop || 1}
-              onChange={(event) => update({ ordersPerDrop: Number(event.target.value) })}
-              className="mt-1 w-full bg-[#0b0c0e] border border-white/10 rounded-lg px-3 py-2 text-gray-200"
-            >
-              <option value="1">1 order</option>
-              <option value="2">2 orders</option>
-            </select>
-          </label>
-        )}
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {accounts.map((account) => (
-          <button
-            type="button"
-            key={account.id}
-            onClick={() => toggleAccount(account.id)}
-            className={`rounded-full border px-3 py-1 text-xs ${source.accountIds.includes(account.id) ? 'border-red-500 text-white bg-red-500/10' : 'border-white/10 text-gray-500'}`}
-          >
-            {account.name}
-          </button>
-        ))}
-        {accounts.length === 0 && (
-          <span className="text-gray-600 text-xs">No {retailer} accounts configured.</span>
-        )}
-      </div>
+          <div className={`grid gap-3 ${retailer === 'target' ? 'grid-cols-4' : 'grid-cols-3'}`}>
+            <MoneyField
+              label="Retailer MSRP"
+              value={source.msrp}
+              onChange={(msrp) => update({ msrp })}
+            />
+            <MoneyField
+              label="Price limit (required)"
+              value={source.priceCeiling}
+              onChange={(priceCeiling) => update({ priceCeiling })}
+            />
+            <label className="text-gray-500 text-xs">
+              Buy up to
+              <input
+                type="number"
+                min="1"
+                max={max}
+                value={source.buyLimit}
+                onChange={(event) => update({ buyLimit: Number(event.target.value) })}
+                className="mt-1 w-full bg-[#0b0c0e] border border-white/10 rounded-lg px-3 py-2 text-gray-200"
+              />
+            </label>
+            {retailer === 'target' && (
+              <label className="text-gray-500 text-xs">
+                Separate orders
+                <select
+                  value={source.ordersPerDrop || 1}
+                  onChange={(event) => update({ ordersPerDrop: Number(event.target.value) })}
+                  className="mt-1 w-full bg-[#0b0c0e] border border-white/10 rounded-lg px-3 py-2 text-gray-200"
+                >
+                  <option value="1">1 order</option>
+                  <option value="2">2 orders</option>
+                </select>
+              </label>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {accounts.map((account) => (
+              <button
+                type="button"
+                key={account.id}
+                onClick={() => toggleAccount(account.id)}
+                className={`rounded-full border px-3 py-1 text-xs ${source.accountIds.includes(account.id) ? 'border-red-500 text-white bg-red-500/10' : 'border-white/10 text-gray-500'}`}
+              >
+                {account.name}
+              </button>
+            ))}
+            {accounts.length === 0 && (
+              <span className="text-gray-600 text-xs">No {retailer} accounts configured.</span>
+            )}
+          </div>
+        </>
+      ) : null}
     </div>
   )
 }

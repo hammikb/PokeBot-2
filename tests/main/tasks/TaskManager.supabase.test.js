@@ -24,6 +24,7 @@ function makeFakeSource() {
   source.unsubscribeWalmartQueueFeed = vi.fn(async () => {})
   source.unsubscribe = vi.fn(async () => {})
   source.releaseChannel = vi.fn(async () => {})
+  source.recoverInterruptedChannels = vi.fn(async () => ({ recovered: 0 }))
   source.stop = vi.fn(async () => {})
   return source
 }
@@ -79,7 +80,7 @@ function makeManager() {
 }
 
 describe('TaskManager central monitoring', () => {
-  it('joins every Walmart queue feed item with the first active Walmart account', async () => {
+  it('joins every Walmart queue feed item with the first active Walmart account (browser transport)', async () => {
     const source = makeFakeSource()
     const queueJoiner = Object.assign(new EventEmitter(), {
       start: vi.fn(),
@@ -99,9 +100,15 @@ describe('TaskManager central monitoring', () => {
     const manager = new TaskManager({
       accountManager,
       notificationEngine: { fire: vi.fn() },
-      browserPool: { pin: vi.fn(async () => ({})), unpin: vi.fn(async () => {}), isPinned: vi.fn(() => false) },
+      browserPool: {
+        pin: vi.fn(async () => ({})),
+        unpin: vi.fn(async () => {}),
+        isPinned: vi.fn(() => false)
+      },
       getDb: () => makeStubDb(),
-      getSettings: () => ({}),
+      // Walmart queues are held over HTTP by WalmartQueueHost by default; the
+      // browser joiner is now opt-in via this setting.
+      getSettings: () => ({ walmartQueueTransport: 'browser' }),
       createSupabaseSource: async () => source,
       queueJoiner
     })
@@ -139,7 +146,7 @@ describe('TaskManager central monitoring', () => {
     expect(manager._pool.unpin).toHaveBeenCalledWith('walmart-account-1', { close: true })
   })
 
-  it('does not join a global Walmart queue without a configured Walmart account', async () => {
+  it('does not join a global Walmart queue without a configured Walmart account (browser transport)', async () => {
     const source = makeFakeSource()
     const queueJoiner = Object.assign(new EventEmitter(), {
       start: vi.fn(),
@@ -150,7 +157,9 @@ describe('TaskManager central monitoring', () => {
       notificationEngine: { fire: vi.fn() },
       browserPool: {},
       getDb: () => makeStubDb(),
-      getSettings: () => ({}),
+      // Under the default HTTP transport this branch does not run at all;
+      // WalmartQueueHost surfaces the missing-session error instead.
+      getSettings: () => ({ walmartQueueTransport: 'browser' }),
       createSupabaseSource: async () => source,
       queueJoiner
     })

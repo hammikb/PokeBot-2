@@ -4,7 +4,13 @@ const RECOVERABLE_FAILURES = [
   /target high-demand add-to-cart retry window expired/i,
   /target fulfillment is still loading/i,
   /target availability did not settle/i,
-  /net::err_aborted/i
+  /net::err_aborted/i,
+  // Target redirects the slugless /p/-/A-<tcin> form to its canonical URL, which aborts
+  // the in-flight goto. The session is untouched, so keep the warm page.
+  /interrupted by another navigation/i,
+  // TargetCartBudgetError exhaustion: pre-submission and retryable, so keep the warm
+  // session rather than discarding the page and re-solving the queue from scratch.
+  /target cart acquisition exhausted (deadline|retry-limit|no-response-limit|reload-limit)/i
 ]
 
 const UNSAFE_FAILURES = [

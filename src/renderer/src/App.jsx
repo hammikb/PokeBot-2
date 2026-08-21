@@ -10,6 +10,7 @@ import PaymentMethods from './pages/PaymentMethods'
 import ShippingAddresses from './pages/ShippingAddresses'
 import Login from './pages/Login'
 import CheckoutAnalytics from './pages/CheckoutAnalytics'
+import QueueHost from './pages/QueueHost'
 import { IPC } from '../../shared/constants'
 
 export default function App() {
@@ -18,6 +19,8 @@ export default function App() {
     checkAuthStatus,
     setAuthState,
     loadTasks,
+    loadQueueTickets,
+    applyQueueSnapshot,
     loadMonitors,
     loadAccounts,
     loadCatalog,
@@ -45,8 +48,10 @@ export default function App() {
     loadAccounts()
     loadCatalog()
     loadSettings()
+    loadQueueTickets()
     const unsubscribers = ipc
       ? [
+          ipc.on(IPC.QUEUE_UPDATED, (snapshot) => applyQueueSnapshot(snapshot)),
           ipc.on(IPC.FEED_EVENT, (data) => pushFeedEvent(data)),
           ipc.on(IPC.TASK_STATUS, ({ taskId, status }) => setTaskStatus(taskId, status)),
           ipc.on(IPC.QUEUE_PROGRESS, (data) => pushQueueProgress(data)),
@@ -99,6 +104,7 @@ export default function App() {
           {[
             ['/', 'Dashboard'],
             ['/tasks', 'Tasks'],
+            ['/queue', 'Queue'],
             ['/accounts', 'Accounts'],
             ['/payments', 'Payments'],
             ['/shipping', 'Shipping'],
@@ -130,6 +136,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/tasks" element={<Tasks />} />
+            <Route path="/queue" element={<QueueHost />} />
             <Route path="/catalog" element={<Navigate to="/tasks" replace />} />
             <Route path="/accounts" element={<Accounts />} />
             <Route path="/payments" element={<PaymentMethods />} />

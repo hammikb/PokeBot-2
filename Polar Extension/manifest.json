@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "Polar Assist Bot Free",
+  "version": "4.07",
+  "minimum_chrome_version": "116",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAz8W5LcNhV3dNlZfJM7dUvJRxwGxpFnLxVn2Qj5b6sYXsRpKvVmCzIkN8vCw3K4RdpnXgFhLQ6bK3NwS5jUzHfKdv6LV9xYhZw0aM3dEcP8TnZJnKm8Fj9LzPx3zQ2sF5kW4hN6vRcXzY8dMJnG7pPq9sVwE3jHk8LmN2fDx5YvZ6bC4tRz7gPo9sWnK3mX8jFvL5dQ2eH4nY6pR3kC8wT7gM9oW5sK2mX4jN6vR8dP3bE5yZ7gM2nL6fC9sW4kJ3hQ8oR5pT7gN2bM6vF9xY3dC8sK4wJ6hN9pR2fT5gL7mV3bX8sC4wK6jN9oR5pT2gM7bL3fV8xY4dC9sK2wJ6hN5pR3fT8gL7mV2bX4sCwQIDAQAB",
+  "description": "Automates Target checkout. Premium monitoring is available separately.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "tabs",
+    "proxy",
+    "webRequest",
+    "webRequestAuthProvider"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "*://www.target.com/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://api.openai.com;"
+  },
+  "action": {
+    "default_popup": "ui/popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "options_page": "ui/options/options.html"
+}

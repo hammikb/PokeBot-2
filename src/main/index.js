@@ -148,7 +148,8 @@ async function createMainWindow(encryptionKey) {
   })
   monitorHealth = new MonitorHealth({
     authSessionManager,
-    taskManager
+    taskManager,
+    notificationEngine
   })
   taskManager.retryPendingUnsubscribes().catch((error) => {
     logger.warn('TaskManager', 'Could not clear pending central monitor stops yet', {
@@ -280,6 +281,7 @@ async function createMainWindow(encryptionKey) {
   })
 
   registerIpcHandlers({
+    encryptionKey,
     getDb,
     accountManager,
     paymentManager,

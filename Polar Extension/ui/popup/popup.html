@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+<head>
+  
+  <title>Polar Assist Bot Free</title>
+  <link rel="stylesheet" href="popup.css">
+  <link rel="stylesheet" href="price-check.css">
+  <meta charset="UTF-8">
+</head>
+<body>
+  <div class="header">
+    
+    <h1>Polar Assist Bot Free <span class="version-display"></span></h1>
+    
+  </div>
+
+  
+  <div class="sites-config">
+    <div class="site-config" data-site="target">
+      <img src="../../icons/target_logo.png" alt="Target Logo" class="site-logo">
+      <div class="site-controls">
+        <label class="site-toggle-switch">
+          <input type="checkbox" class="site-toggle">
+          <span class="site-slider"></span>
+        </label>
+        <div class="site-input-group">
+          <label for="target-quantity" class="sr-only">Target Quantity</label>
+          <input type="number" id="target-quantity" class="site-quantity" min="1" value="1" title="Quantity">
+          <label for="target-profile-select" class="sr-only">Target Profile</label>
+          <select id="target-profile-select" class="site-profile-select" title="Profile">
+            <option value="">Default Profile</option>
+            
+          </select>
+        </div>
+      </div>
+    </div>
+    
+  </div>
+
+  
+  <div class="section" id="global-settings">
+    <h2>Checkout Behavior</h2>
+    <div class="form-row checkout-tooltip-row">
+      <input type="checkbox" id="auto-submit" checked>
+      <label for="auto-submit">Checkout automatically</label>
+      <span class="tooltip-icon" tabindex="0" data-tooltip="Turning this on will click the final &quot;Place order&quot; button on the checkout page. If you want to test the speed and functionality of the bot, leave this turned off." aria-label="Turning this on will click the final Place order button on the checkout page. If you want to test the speed and functionality of the bot, leave this turned off.">i</span>
+    </div>
+    <div class="form-row checkout-tooltip-row">
+      <input type="checkbox" id="auto-close-oos">
+      <label for="auto-close-oos">Close tab if OOS</label>
+      <span class="tooltip-icon" tabindex="0" data-tooltip="This will automatically close the tab if the item is deemed to be out of stock. NOTE: This will close the tab when you go to the cart page since the only time the bot goes to the cart page during a checkout flow is if the item goes out of stock while you're on the checkout page." aria-label="This will automatically close the tab if the item is deemed to be out of stock. NOTE: This will close the tab when you go to the cart page since the only time the bot goes to the cart page during a checkout flow is if the item goes out of stock while you're on the checkout page.">i</span>
+    </div>
+    <div class="form-row checkout-tooltip-row">
+      <input type="checkbox" id="force-shipping">
+      <label for="force-shipping">Force Shipping</label>
+      <span class="tooltip-icon" tabindex="0" data-tooltip="Some items have cart options such as Pick up, Delivery, and Shipping. Enabling this will force the extension to always select the shipping option before proceeding to add to cart. Enabling this will slightly slow down checkout and is not required for most TCG products. Only turn this on if one or more items in your SKU list include the three option choices." aria-label="Some items have cart options such as Pick up, Delivery, and Shipping. Enabling this will force the extension to always select the shipping option before proceeding to add to cart. Enabling this will slightly slow down checkout and is not required for most TCG products. Only turn this on if one or more items in your SKU list include the three option choices.">i</span>
+    </div>
+    <div class="form-row checkout-tooltip-row">
+      <input type="checkbox" id="auto-login">
+      <label for="auto-login">Auto-login</label>
+      <span class="tooltip-icon" tabindex="0" data-tooltip="Will automatically login if you get logged out or if your login session expires. Set your login credentials in the settings area." aria-label="Will automatically login if you get logged out or if your login session expires. Set your login credentials in the settings area.">i</span>
+    </div>
+    <div class="form-row checkout-tooltip-row">
+      <input type="checkbox" id="ai-helper-enabled">
+      <label for="ai-helper-enabled">AI Assistant</label>
+      <span class="beta-badge">BETA</span>
+      <span class="tooltip-icon" tabindex="0" data-tooltip="Beta feature. Helps recover Target checkout when progress stalls by choosing safe next steps, such as retrying or dismissing interruptions. Requires AI assistant setup in settings." aria-label="Beta feature. Helps recover Target checkout when progress stalls by choosing safe next steps, such as retrying or dismissing interruptions. Requires AI assistant setup in settings.">i</span>
+    </div>
+  </div>
+
+  
+  <div class="section premium-feature-card" id="premium-monitor-card">
+    <div class="premium-badge">Premium Exclusive Feature</div>
+    <h2>Auto-Monitoring</h2>
+    <p class="premium-description">Auto-open product links and attempt checkouts, even while away from your computer.</p>
+    <a href="https://www.polarchefs.com/" target="_blank" rel="noopener noreferrer" class="premium-button">Upgrade to Premium</a>
+  </div>
+
+  
+  <div class="section" id="proxy-settings-section">
+    <h2>Proxy Settings (optional)</h2>
+    <div class="form-row proxy-control-row">
+      <input type="text" id="proxy-input" placeholder="host:port or host:port:username:password" class="full-width-input">
+      <button id="proxy-rotate-btn" class="proxy-icon-btn" type="button" title="Rotate saved proxy" aria-label="Rotate saved proxy">&#8635;</button>
+      <button id="proxy-list-btn" class="proxy-list-btn" type="button">List</button>
+    </div>
+    <div class="form-row proxy-target-only-row">
+      <input type="checkbox" id="proxy-target-only">
+      <label for="proxy-target-only">Apply to Target only</label>
+      <span class="beta-badge">BETA</span>
+      <span class="tooltip-icon" tabindex="0" data-tooltip="When enabled, only target.com and *.target.com requests use the proxy. All other requests connect directly." aria-label="When enabled, only target.com and *.target.com requests use the proxy. All other requests connect directly.">i</span>
+    </div>
+    <div id="proxy-status" class="proxy-status" aria-live="polite"></div>
+  </div>
+
+  
+  <div class="section" id="price-check-main-view">
+    <div class="price-check-heading">
+      <h2>Price Check</h2>
+      <span class="price-check-warning tooltip-trigger" tabindex="0" data-tooltip="Target rarely sells products for significantly above MSRP anymore. Enabling this is no longer necessary in the vast majority of situations, and enabling this will also slow down checkout speeds by a little bit, therefore using this feature is no longer necessary" aria-label="Target rarely sells products for significantly above MSRP anymore. Enabling this is no longer necessary in the vast majority of situations, and enabling this will also slow down checkout speeds by a little bit, therefore using this feature is no longer necessary">NO LONGER RECOMMENDED</span>
+      <span class="tooltip-icon tooltip-trigger" tabindex="0" data-tooltip="Target rarely sells products for significantly above MSRP anymore. Enabling this is no longer necessary in the vast majority of situations, and enabling this will also slow down checkout speeds by a little bit, therefore using this feature is no longer necessary" aria-label="Target rarely sells products for significantly above MSRP anymore. Enabling this is no longer necessary in the vast majority of situations, and enabling this will also slow down checkout speeds by a little bit, therefore using this feature is no longer necessary">i</span>
+    </div>
+    <div class="status-item" style="margin-bottom: 8px;">
+        <span>Status:</span>
+        <span id="price-check-status-main">Inactive</span>
+    </div>
+    <div class="form-row" style="display: flex; justify-content: space-between; align-items: center;">
+      <div style="display: flex; align-items: center;">
+        <span style="margin-right: 8px;">Active:</span>
+        <label class="toggle" for="price-check-active-toggle">
+          <input type="checkbox" id="price-check-active-toggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <button id="price-check-settings-btn" class="btn-icon" title="Price Check Settings" style="background: none; border: none; font-size: 1.5em; cursor: pointer; color: #555; padding: 0 8px;">⚙️</button>
+    </div>
+  </div>
+
+  
+  <div id="price-check-settings-view" style="display: none;">
+    <div class="container">
+      <div class="header">
+        <button id="price-check-back-btn" class="btn btn-secondary btn-small">← Back</button>
+        <h1>Price Check Settings</h1>
+      </div>
+
+      <div id="price-check-status-container" class="section">
+        <div class="status-item">
+          <span>Status:</span>
+          <span id="price-check-status" class="status-offline">Inactive</span>
+        </div>
+        <div class="status-item">
+          <label class="toggle-container">
+            <span>Active:</span>
+            <div class="toggle-wrapper">
+              <input type="checkbox" id="price-check-active-toggle-settings">
+              <span class="toggle-slider"></span>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Price Check Settings</h2>
+        <div class="toggle-container">
+          <span>Close tab if price check fails:</span>
+          <div class="toggle-wrapper">
+            <input type="checkbox" id="price-check-close-tab-toggle">
+            <span class="toggle-slider"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Add Price Check</h2>
+        <div class="price-check-input-form">
+          <div class="input-row">
+            <input type="text" id="price-check-sku-input" placeholder="SKU/TCIN" style="flex: 2;">
+            <input type="number" id="price-check-price-input" placeholder="Max Price" min="0" step="0.01" style="flex: 1;">
+            <button id="price-check-add-btn">Add</button>
+          </div>
+        </div>
+
+        <div class="mass-input-container">
+          <h3>Mass Input</h3>
+          <p><small>Format: SKU;maxprice (one per line, e.g. 12345;30.99)</small></p>
+          <textarea id="price-check-mass-input" placeholder="Enter multiple items in SKU;maxprice format, one per line"></textarea>
+          <button id="price-check-mass-add-btn" style="margin-top: 8px;">Add All</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Current Price Checks</h2>
+        <div id="price-check-items-container" class="price-check-items">
+          
+        </div>
+        <div class="copy-buttons-container">
+          <button id="copy-skus-btn">Copy SKUs</button>
+          <button id="copy-max-price-btn">Copy Max Price</button>
+        </div>
+      </div>
+
+      
+    </div>
+  </div>
+  
+
+  
+  <div class="status status-waiting" style="display: none;">
+    <div class="status-indicator"></div>
+    <span id="status-text">Waiting for supported page...</span>
+  </div>
+
+  <div class="footer">
+    <a href="../options/options.html" target="_blank">Manage Profiles & Settings</a>
+    
+    <span id="version"></span>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

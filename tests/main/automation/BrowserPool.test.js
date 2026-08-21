@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { BrowserPool } from '../../../src/main/automation/BrowserPool.js'
+import {
+  BrowserPool,
+  clearTargetCartBeforeWarmup
+} from '../../../src/main/automation/BrowserPool.js'
 
 const mocks = vi.hoisted(() => ({
   launchPersistentContext: vi.fn()
@@ -31,6 +34,29 @@ function makeContext({ open = true } = {}) {
 }
 
 describe('BrowserPool', () => {
+  it('clears stale Target cart items before warming the monitored product', async () => {
+    const removeButton = {
+      isVisible: vi.fn(async () => true),
+      click: vi.fn(async () => {})
+    }
+    const buttons = {
+      count: vi.fn().mockResolvedValueOnce(1).mockResolvedValueOnce(0),
+      nth: vi.fn(() => removeButton)
+    }
+    const page = {
+      goto: vi.fn(async () => {}),
+      locator: vi.fn(() => buttons),
+      waitForTimeout: vi.fn(async () => {})
+    }
+
+    await expect(clearTargetCartBeforeWarmup(page)).resolves.toBe(1)
+    expect(page.goto).toHaveBeenCalledWith(
+      'https://www.target.com/cart',
+      expect.objectContaining({ waitUntil: 'domcontentloaded' })
+    )
+    expect(removeButton.click).toHaveBeenCalledOnce()
+  })
+
   it('relaunches a saved profile when the cached context was closed manually', async () => {
     const pool = new BrowserPool({ setupWarmupMs: 0, setupMouseDelayMs: 0 })
     const closedContext = makeContext({ open: false })

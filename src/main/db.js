@@ -13,7 +13,7 @@ import { createRequire } from 'module'
 import { runMigrations } from './db/migrations.js'
 import { createModuleLogger } from './utils/logger.js'
 
-const require = createRequire(import.meta.url)
+const nodeRequire = createRequire(import.meta.url)
 const log = createModuleLogger('Database')
 
 const TABLE_COLUMNS = {
@@ -338,7 +338,7 @@ function createSqliteDb(dbPath) {
 
   let candidate
   try {
-    const Database = require('better-sqlite3')
+    const Database = nodeRequire('better-sqlite3')
     candidate = new Database(dbPath)
 
     // better-sqlite3 opens some malformed/legacy files successfully and only

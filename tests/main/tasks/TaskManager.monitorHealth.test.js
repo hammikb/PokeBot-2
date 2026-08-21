@@ -99,7 +99,7 @@ describe('TaskManager monitor health snapshot', () => {
     expect(manager.getMonitorHealthSnapshot().openCircuits).toBe(0)
   })
 
-  it('refreshes monitor channels after a disconnected realtime heartbeat', async () => {
+  it('delegates heartbeat recovery without replacing the Supabase source', async () => {
     vi.useFakeTimers()
     const manager = new TaskManager({
       accountManager: {},
@@ -108,13 +108,47 @@ describe('TaskManager monitor health snapshot', () => {
       getDb: () => ({})
     })
     manager._tasks.set('task-1', {})
+    const source = {
+      recoverInterruptedChannels: vi.fn(async () => ({ recovered: 1 })),
+      stop: vi.fn(async () => {})
+    }
+    manager._supabaseSource = source
     manager.refreshMonitorConnections = vi.fn(async () => ({}))
 
     manager.handleRealtimeHeartbeat('disconnected')
     await vi.advanceTimersByTimeAsync(1500)
 
-    expect(manager.refreshMonitorConnections).toHaveBeenCalledWith('realtime-disconnected')
+    expect(source.recoverInterruptedChannels).toHaveBeenCalledWith({ minInterruptedMs: 30_000 })
+    expect(source.stop).not.toHaveBeenCalled()
+    expect(manager.refreshMonitorConnections).not.toHaveBeenCalled()
     expect(manager.getMonitorHealthSnapshot().heartbeat.status).toBe('disconnected')
+    vi.useRealTimers()
+  })
+
+  it('debounces repeated disconnected heartbeats while recovery is pending', async () => {
+    vi.useFakeTimers()
+    let finishRecovery
+    const source = {
+      recoverInterruptedChannels: vi.fn(() => new Promise((resolve) => { finishRecovery = resolve }))
+    }
+    const manager = new TaskManager({
+      accountManager: {},
+      notificationEngine: {},
+      browserPool: {},
+      getDb: () => ({})
+    })
+    manager._tasks.set('task-1', {})
+    manager._supabaseSource = source
+
+    manager.handleRealtimeHeartbeat('disconnected')
+    manager.handleRealtimeHeartbeat('disconnected')
+    await vi.advanceTimersByTimeAsync(1500)
+    manager.handleRealtimeHeartbeat('disconnected')
+    await vi.advanceTimersByTimeAsync(1500)
+
+    expect(source.recoverInterruptedChannels).toHaveBeenCalledOnce()
+    finishRecovery({ recovered: 0 })
+    await vi.runAllTimersAsync()
     vi.useRealTimers()
   })
 })

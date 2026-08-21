@@ -69,4 +69,12 @@ describe('TargetPageReusePolicy', () => {
       })
     ).toEqual({ preserve: false, reason: 'non-target-origin' })
   })
+
+  it('preserves the warm page when the cart budget is exhausted pre-submission', () => {
+    const page = { isClosed: () => false, url: () => 'https://www.target.com/p/x/-/A-1' }
+    for (const code of ['deadline', 'retry-limit', 'no-response-limit', 'reload-limit']) {
+      const error = new Error(`Target cart acquisition exhausted ${code}`)
+      expect(classifyTargetPageReuse({ error, page })).toMatchObject({ preserve: true })
+    }
+  })
 })

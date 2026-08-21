@@ -16,6 +16,8 @@ function invoke(channel, ...args) {
 
 export const useAppStore = create((set, get) => ({
   tasks: [],
+  queueTickets: [],
+  queueStats: {},
   monitors: [],
   accounts: [],
   paymentMethods: [],
@@ -45,6 +47,38 @@ export const useAppStore = create((set, get) => ({
   checkoutAnalyticsLoading: false,
   checkoutAnalyticsError: '',
 
+  loadQueueTickets: async () => {
+    const snapshot = await invoke(IPC.QUEUE_LIST)
+    set({ queueTickets: snapshot?.tickets || [], queueStats: snapshot?.stats || {} })
+  },
+  applyQueueSnapshot: (snapshot) =>
+    set({ queueTickets: snapshot?.tickets || [], queueStats: snapshot?.stats || {} }),
+  setQueueAutoCheckout: async (queueId, enabled) => {
+    await invoke(IPC.QUEUE_SET_AUTO_CHECKOUT, queueId, enabled)
+    await get().loadQueueTickets()
+  },
+  removeQueueTicket: async (queueId) => {
+    await invoke(IPC.QUEUE_REMOVE, queueId)
+    await get().loadQueueTickets()
+  },
+  queueSession: {},
+  queueScanResult: null,
+  scanAndJoinQueues: async (itemIds = []) => {
+    const result = await invoke(IPC.QUEUE_SCAN_JOIN, itemIds)
+    set({ queueScanResult: result })
+    await get().loadQueueTickets()
+    return result
+  },
+  refreshQueueSession: async (accountId = null) => {
+    const status = await invoke(IPC.QUEUE_SESSION_REFRESH, accountId)
+    set({ queueSession: status || {} })
+    await get().loadQueueTickets()
+    return status
+  },
+  refreshQueueTickets: async () => {
+    await invoke(IPC.QUEUE_POLL_NOW)
+    await get().loadQueueTickets()
+  },
   loadTasks: async () => {
     const tasks = await invoke(IPC.TASKS_GET)
     set((state) => ({
@@ -233,6 +267,8 @@ export const useAppStore = create((set, get) => ({
     await invoke(IPC.TASKS_START, id)
   },
   testTask: async (id) => invoke(IPC.TASKS_TEST, id),
+  runTaskNow: async (id) => invoke(IPC.TASKS_RUN_NOW, id),
+  focusCheckout: async (id) => invoke(IPC.TASKS_FOCUS_CHECKOUT, id),
   saveTaskTestResult: async (id, result) => {
     const taskTestResults = {
       ...(get().settings.taskTestResults || {}),

@@ -16,10 +16,11 @@ following groups.
 ## Production Pi monitoring
 
 - `pokemon_center_queue_monitor.py` — persistent, proxy-only Chromium detector for the Pokemon Center waiting room.
-- `walmart_restock_scanner.py` — low-bandwidth Walmart restock scanner.
-- `walmart_queue_rank_tracker.mjs` — broad, low-bandwidth Walmart category and queue detector.
-- `monitor_walmart_pokemon.mjs` — legacy Node Walmart monitor.
 - `pokebot_drop_pusher.py` — reusable Supabase drop publishing module.
+
+The production Walmart Pi monitor is maintained in the separate `WalmartMonitor.py`
+checkout. The old fixed-item and rank-tracker monitors were removed from this
+repository to avoid running competing Walmart data paths.
 
 These monitors are proxy-sensitive. Review their environment variables and
 fail-closed behavior before installing them on a Pi.

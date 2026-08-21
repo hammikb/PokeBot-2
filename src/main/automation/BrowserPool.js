@@ -1,7 +1,12 @@
 import { launchPersistentContext } from 'cloakbrowser'
 import { mkdirSync } from 'fs'
+import { dirname } from 'node:path'
 import { createModuleLogger } from '../utils/logger.js'
-import { buildCloakBrowserOptions, redactProxyUrl } from './cloakBrowserConfig.js'
+import {
+  buildCloakBrowserOptions,
+  logRemoteDebuggingEndpoint,
+  redactProxyUrl
+} from './cloakBrowserConfig.js'
 import { isCaptchaPresent } from './captcha.js'
 import { regenerateTargetSensorData, hasAbckCookie } from './akamaiSensor.js'
 
@@ -318,7 +323,8 @@ export class BrowserPool {
       ...buildCloakBrowserOptions({
         identity: `account:${accountId}:${profilePath}`,
         proxyUrl,
-        headless: false
+        headless: false,
+        debugMarkerDir: dirname(dirname(profilePath))
       }),
       userDataDir: profilePath
       // Persistent profiles preserve the retailer session and the fixed
@@ -340,6 +346,7 @@ export class BrowserPool {
         proxy: Boolean(proxyUrl)
       })
       const context = await launchPersistentContext(contextOptions)
+      logRemoteDebuggingEndpoint(accountId, profilePath)
       this._trackContextDownloads(accountId, context)
 
       const originWarmupUrl = warmupUrl || RETAILER_HOME[retailer]
@@ -347,6 +354,19 @@ export class BrowserPool {
         const setupPage = await context.newPage()
         const keepWarmPage = this._pinned.has(accountId)
         try {
+          if (retailer === 'target' && warmupUrl) {
+            const removedItems = await clearTargetCartBeforeWarmup(setupPage).catch((error) => {
+              log.warn('Could not clear Target cart before product warmup', {
+                accountId,
+                error: error.message
+              })
+              return 0
+            })
+            log.info('Target pre-drop cart preparation completed', {
+              accountId,
+              removedItems
+            })
+          }
           log.info('Preparing retailer origin', { accountId, retailer })
           await setupPage.goto(originWarmupUrl, {
             waitUntil: 'domcontentloaded',
@@ -560,6 +580,48 @@ export class BrowserPool {
       waiter.resolve(token)
     }
   }
+}
+
+/**
+ * Remove stale Target cart items before a monitored task is armed, then let the
+ * caller return this same persistent page to the exact product URL. Cleanup is
+ * deliberately best-effort and runs only during pre-warm, never after a drop.
+ */
+export async function clearTargetCartBeforeWarmup(page, { maxItems = 20 } = {}) {
+  await page.goto('https://www.target.com/cart', {
+    waitUntil: 'domcontentloaded',
+    timeout: 30_000
+  })
+
+  const removeSelector = [
+    'button[data-test="cartItem-deleteBtn"]',
+    'button[aria-label*=" from Cart" i]',
+    '[data-test*="cartItem" i] button[aria-label*="remove" i]',
+    '[data-test*="cart-item" i] button[aria-label*="remove" i]',
+    'article button[aria-label*="remove" i]',
+    'button[data-test*="remove" i]'
+  ].join(', ')
+  let removed = 0
+
+  while (removed < maxItems) {
+    const buttons = page.locator(removeSelector)
+    const count = await buttons.count().catch(() => 0)
+    let removeButton = null
+    for (let index = 0; index < count; index += 1) {
+      const candidate = buttons.nth(index)
+      if (await candidate.isVisible().catch(() => false)) {
+        removeButton = candidate
+        break
+      }
+    }
+    if (!removeButton) break
+
+    await removeButton.click({ timeout: 5000 })
+    removed += 1
+    await page.waitForTimeout?.(300)
+  }
+
+  return removed
 }
 
 function isContextOpen(context) {

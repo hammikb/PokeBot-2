@@ -1,0 +1,1537 @@
+{
+  ".vscode/extensions.json": {
+    "mtime": 1780028999.6489818,
+    "ast_hash": "74a56d7bbbf177ae6339c026934ee00b",
+    "semantic_hash": "74a56d7bbbf177ae6339c026934ee00b"
+  },
+  ".vscode/launch.json": {
+    "mtime": 1780028999.6499832,
+    "ast_hash": "c7826d06165bf4890ba638f23b066a6d",
+    "semantic_hash": "c7826d06165bf4890ba638f23b066a6d"
+  },
+  ".vscode/settings.json": {
+    "mtime": 1780028999.6589825,
+    "ast_hash": "39dc44bd672f9ef8bd33a4140e7cd61c",
+    "semantic_hash": "39dc44bd672f9ef8bd33a4140e7cd61c"
+  },
+  "Polar Extension/background.js": {
+    "mtime": 1786424392.4692142,
+    "ast_hash": "ee62dbe43754c6e424c5e6b7786d54b7",
+    "semantic_hash": "ee62dbe43754c6e424c5e6b7786d54b7"
+  },
+  "Polar Extension/common/checkout-base.js": {
+    "mtime": 1786424392.4837317,
+    "ast_hash": "0de5d6f3e635a44ac3121c27896e0067",
+    "semantic_hash": "0de5d6f3e635a44ac3121c27896e0067"
+  },
+  "Polar Extension/common/element-finder.js": {
+    "mtime": 1786424392.4866242,
+    "ast_hash": "8dd249a2842fe6d0ae24940ef9852eca",
+    "semantic_hash": "8dd249a2842fe6d0ae24940ef9852eca"
+  },
+  "Polar Extension/common/storage.js": {
+    "mtime": 1786424392.4891317,
+    "ast_hash": "1b0fdc360e4c6bf5fc762da49d059d60",
+    "semantic_hash": "1b0fdc360e4c6bf5fc762da49d059d60"
+  },
+  "Polar Extension/common/utils.js": {
+    "mtime": 1786424392.4931438,
+    "ast_hash": "f6891cdee6248e1f156d10ab12f737a0",
+    "semantic_hash": "f6891cdee6248e1f156d10ab12f737a0"
+  },
+  "Polar Extension/manifest.json": {
+    "mtime": 1786424392.4782207,
+    "ast_hash": "8cc025919fc4ad4e0bd30756c267edc9",
+    "semantic_hash": "8cc025919fc4ad4e0bd30756c267edc9"
+  },
+  "Polar Extension/ui/options/options.js": {
+    "mtime": 1786424392.5587246,
+    "ast_hash": "5f5186bbca3618b24cfa66afc7f1ee13",
+    "semantic_hash": "5f5186bbca3618b24cfa66afc7f1ee13"
+  },
+  "Polar Extension/ui/popup/popup.js": {
+    "mtime": 1786424392.579241,
+    "ast_hash": "c303be2b86e40bd2fbb334c3f1474bb1",
+    "semantic_hash": "c303be2b86e40bd2fbb334c3f1474bb1"
+  },
+  "deploy/pi-health-reporter-go/disk_linux.go": {
+    "mtime": 1786399528.7225792,
+    "ast_hash": "444c51678960b3a088c2e45856b7a229",
+    "semantic_hash": "444c51678960b3a088c2e45856b7a229"
+  },
+  "deploy/pi-health-reporter-go/disk_other.go": {
+    "mtime": 1786399528.7235785,
+    "ast_hash": "3c2d52840a9e46042538e08480163dd6",
+    "semantic_hash": "3c2d52840a9e46042538e08480163dd6"
+  },
+  "deploy/pi-health-reporter-go/go.mod": {
+    "mtime": 1786399528.7214203,
+    "ast_hash": "92bdd6a7456c88a2c5c75c09d1a8b18b",
+    "semantic_hash": "92bdd6a7456c88a2c5c75c09d1a8b18b"
+  },
+  "deploy/pi-health-reporter-go/main.go": {
+    "mtime": 1786399676.7377257,
+    "ast_hash": "84482c7f1fee9ee4f1eff7e3b88e3218",
+    "semantic_hash": "84482c7f1fee9ee4f1eff7e3b88e3218"
+  },
+  "deploy/target-stock-observer-go/go.mod": {
+    "mtime": 1786400827.010628,
+    "ast_hash": "dce70441b9484ea2477bc349d1bc5696",
+    "semantic_hash": "dce70441b9484ea2477bc349d1bc5696"
+  },
+  "deploy/target-stock-observer-go/main.go": {
+    "mtime": 1786400919.9933484,
+    "ast_hash": "53bdabf6ea92d10f85b60f03a78e875a",
+    "semantic_hash": "53bdabf6ea92d10f85b60f03a78e875a"
+  },
+  "electron.vite.config.js": {
+    "mtime": 1785111529.4598403,
+    "ast_hash": "c69a1c48eaa245cee60777a4e92d8ff3",
+    "semantic_hash": "c69a1c48eaa245cee60777a4e92d8ff3"
+  },
+  "eslint.config.mjs": {
+    "mtime": 1785029377.735229,
+    "ast_hash": "4b18d49483ac0ab10a40083fe065ed3a",
+    "semantic_hash": "4b18d49483ac0ab10a40083fe065ed3a"
+  },
+  "package.json": {
+    "mtime": 1785821427.1734114,
+    "ast_hash": "be17ac9b428a34580c09e6e3710aba20",
+    "semantic_hash": "be17ac9b428a34580c09e6e3710aba20"
+  },
+  "scripts/check-repository-structure.mjs": {
+    "mtime": 1785126961.0649137,
+    "ast_hash": "5555b092853af69c9a22095a69366ee0",
+    "semantic_hash": "5555b092853af69c9a22095a69366ee0"
+  },
+  "scripts/clean-build-artifacts.mjs": {
+    "mtime": 1785029377.7377372,
+    "ast_hash": "dc6f7d48e969b995f0f0739056472b05",
+    "semantic_hash": "dc6f7d48e969b995f0f0739056472b05"
+  },
+  "scripts/diagnostics/diagnose_pokemon_center_queue.py": {
+    "mtime": 1785258171.603886,
+    "ast_hash": "0daf9e641e83eaecce2cbd769c43de97",
+    "semantic_hash": "0daf9e641e83eaecce2cbd769c43de97"
+  },
+  "scripts/diagnostics/diagnose_proxy_connectivity.py": {
+    "mtime": 1785258242.9693964,
+    "ast_hash": "13760bfa666c607a25e58b27825b6975",
+    "semantic_hash": "13760bfa666c607a25e58b27825b6975"
+  },
+  "scripts/diagnostics/inspect_walmart_discovery_candidate.mjs": {
+    "mtime": 1785374049.7894914,
+    "ast_hash": "03e0b367a2a10b9a1786a87c4576e2d9",
+    "semantic_hash": "03e0b367a2a10b9a1786a87c4576e2d9"
+  },
+  "scripts/diagnostics/inspect_walmart_queue_gate.mjs": {
+    "mtime": 1785374222.4797785,
+    "ast_hash": "392b207566f220ef3f16104d1ad74e5a",
+    "semantic_hash": "392b207566f220ef3f16104d1ad74e5a"
+  },
+  "scripts/diagnostics/monitor_sams_drop.mjs": {
+    "mtime": 1785126892.196411,
+    "ast_hash": "aa994d88cc8414201a40bfe405f86888",
+    "semantic_hash": "aa994d88cc8414201a40bfe405f86888"
+  },
+  "scripts/maintenance/patch_pokealert_agent_schedule.py": {
+    "mtime": 1786470650.519236,
+    "ast_hash": "f7a71332dc26eec86a2756eb7de82bb8",
+    "semantic_hash": "f7a71332dc26eec86a2756eb7de82bb8"
+  },
+  "scripts/maintenance/patch_samsclub_proxy_only.py": {
+    "mtime": 1785126606.7995443,
+    "ast_hash": "843fc7d697fbdd7e9990f74533413681",
+    "semantic_hash": "843fc7d697fbdd7e9990f74533413681"
+  },
+  "scripts/maintenance/patch_target_monitor_reliability.py": {
+    "mtime": 1786470650.519236,
+    "ast_hash": "75c628d24c9b6c6a09e4e6e0e90fe1dc",
+    "semantic_hash": "75c628d24c9b6c6a09e4e6e0e90fe1dc"
+  },
+  "scripts/maintenance/patch_walmart_linker_proxy_only.py": {
+    "mtime": 1785126606.8015666,
+    "ast_hash": "35b32cbdeff96b1560dd2be1b7000c8c",
+    "semantic_hash": "35b32cbdeff96b1560dd2be1b7000c8c"
+  },
+  "scripts/maintenance/update_products.py": {
+    "mtime": 1785126606.8045678,
+    "ast_hash": "bdc6847b2256c8e7accdbef02ef5e977",
+    "semantic_hash": "bdc6847b2256c8e7accdbef02ef5e977"
+  },
+  "scripts/monitor_walmart_pokemon.mjs": {
+    "mtime": 1785029377.74024,
+    "ast_hash": "cc77f2dde9758cdcb037465ae77ca4b8",
+    "semantic_hash": "cc77f2dde9758cdcb037465ae77ca4b8"
+  },
+  "scripts/optional-native-rebuild.js": {
+    "mtime": 1780282503.6535766,
+    "ast_hash": "0e8445722215d677dc0ac104abc488e4",
+    "semantic_hash": "0e8445722215d677dc0ac104abc488e4"
+  },
+  "scripts/pi/__init__.py": {
+    "mtime": 1786470650.520239,
+    "ast_hash": "81051bcc2cf1bedf378224b0a93e2877",
+    "semantic_hash": "81051bcc2cf1bedf378224b0a93e2877"
+  },
+  "scripts/pi/target_reliability.py": {
+    "mtime": 1786470650.521237,
+    "ast_hash": "e21e7d73730145cbc09ef09b5a3e2b97",
+    "semantic_hash": "e21e7d73730145cbc09ef09b5a3e2b97"
+  },
+  "scripts/pokebot_drop_pusher.py": {
+    "mtime": 1785029377.7422445,
+    "ast_hash": "f099ff14baf4b0467c7cbf470fc20f4d",
+    "semantic_hash": "f099ff14baf4b0467c7cbf470fc20f4d"
+  },
+  "scripts/pokemon_center_queue_core.py": {
+    "mtime": 1786953826.1005712,
+    "ast_hash": "1d50c4bc24775b1124dd537f03f5eab1",
+    "semantic_hash": "1d50c4bc24775b1124dd537f03f5eab1"
+  },
+  "scripts/pokemon_center_queue_monitor.py": {
+    "mtime": 1786954181.6497662,
+    "ast_hash": "5157715e89730caad76fd835bd0ef82e",
+    "semantic_hash": "5157715e89730caad76fd835bd0ef82e"
+  },
+  "scripts/run-electron-vite.mjs": {
+    "mtime": 1785111400.1510403,
+    "ast_hash": "e45b7aa189f53dba5cfa4eb78cd8ba88",
+    "semantic_hash": "e45b7aa189f53dba5cfa4eb78cd8ba88"
+  },
+  "scripts/scrapling_lookup.py": {
+    "mtime": 1780533627.5377407,
+    "ast_hash": "6f5a42f7496aa28fe69ce58816d7948e",
+    "semantic_hash": "6f5a42f7496aa28fe69ce58816d7948e"
+  },
+  "scripts/target_stock_observer.py": {
+    "mtime": 1785197778.636093,
+    "ast_hash": "79fb77d3ea7218e11849f1f3a5f027d2",
+    "semantic_hash": "79fb77d3ea7218e11849f1f3a5f027d2"
+  },
+  "scripts/tests/import_drop_pusher.py": {
+    "mtime": 1785126606.807567,
+    "ast_hash": "d5601d85e67ac840d608b9ffad92027f",
+    "semantic_hash": "d5601d85e67ac840d608b9ffad92027f"
+  },
+  "scripts/tests/import_walmart_scanner.py": {
+    "mtime": 1785126606.806568,
+    "ast_hash": "d4860ffcc29758d8699ba99b93068b0b",
+    "semantic_hash": "d4860ffcc29758d8699ba99b93068b0b"
+  },
+  "scripts/tests/test_pokebot_push.py": {
+    "mtime": 1785126606.8085673,
+    "ast_hash": "1981e4401bbe0597026439572ee060bb",
+    "semantic_hash": "1981e4401bbe0597026439572ee060bb"
+  },
+  "scripts/tests/test_pokemon_center_queue_browser.py": {
+    "mtime": 1786954164.1764512,
+    "ast_hash": "7b2b338ffe6926c116ccb9204ca62b07",
+    "semantic_hash": "7b2b338ffe6926c116ccb9204ca62b07"
+  },
+  "scripts/tests/test_pokemon_center_queue_classifier.py": {
+    "mtime": 1786953806.8433783,
+    "ast_hash": "15e9982aae694331fed0a7784affc8cd",
+    "semantic_hash": "15e9982aae694331fed0a7784affc8cd"
+  },
+  "scripts/tests/test_target_stock_observer.py": {
+    "mtime": 1785197778.6375499,
+    "ast_hash": "5f69df561ea70ea91f9820c12effea29",
+    "semantic_hash": "5f69df561ea70ea91f9820c12effea29"
+  },
+  "scripts/validate-release-env.mjs": {
+    "mtime": 1785038438.140615,
+    "ast_hash": "11f21fa9a939a01f2294d30d0570deaa",
+    "semantic_hash": "11f21fa9a939a01f2294d30d0570deaa"
+  },
+  "scripts/verify-electron-preload.mjs": {
+    "mtime": 1785137835.7844462,
+    "ast_hash": "7671ec0dedbd2c016f9fc869d0a68e16",
+    "semantic_hash": "7671ec0dedbd2c016f9fc869d0a68e16"
+  },
+  "scripts/walmart_queue_rank_tracker.mjs": {
+    "mtime": 1785377207.4295917,
+    "ast_hash": "71790b0333c5291b4ebdcc7c0bf4abca",
+    "semantic_hash": "71790b0333c5291b4ebdcc7c0bf4abca"
+  },
+  "scripts/walmart_restock_scanner.py": {
+    "mtime": 1785029377.7502453,
+    "ast_hash": "429dd247dd5a17814425ba0d147d1df6",
+    "semantic_hash": "429dd247dd5a17814425ba0d147d1df6"
+  },
+  "src/main/accounts/AccountManager.js": {
+    "mtime": 1785029377.751245,
+    "ast_hash": "7491cb6f83a08b9b70f756182166bf8a",
+    "semantic_hash": "7491cb6f83a08b9b70f756182166bf8a"
+  },
+  "src/main/automation/BrowserPool.js": {
+    "mtime": 1786152094.303219,
+    "ast_hash": "84ef9c3b76485f17d74457d3ecd8aae2",
+    "semantic_hash": "84ef9c3b76485f17d74457d3ecd8aae2"
+  },
+  "src/main/automation/CheckoutDiagnostics.js": {
+    "mtime": 1785958987.1262777,
+    "ast_hash": "3aeb505118ac07b7483916a5e8c181f7",
+    "semantic_hash": "3aeb505118ac07b7483916a5e8c181f7"
+  },
+  "src/main/automation/CheckoutSafety.js": {
+    "mtime": 1785053038.0408063,
+    "ast_hash": "28a319e7866452099ce186fc34fcdabf",
+    "semantic_hash": "28a319e7866452099ce186fc34fcdabf"
+  },
+  "src/main/automation/NativeInputBridge.js": {
+    "mtime": 1785029377.7532458,
+    "ast_hash": "95e420ccfcf677635c1aa20a9e8ef676",
+    "semantic_hash": "95e420ccfcf677635c1aa20a9e8ef676"
+  },
+  "src/main/automation/PokemonCenterQueueJoiner.js": {
+    "mtime": 1785052205.3778963,
+    "ast_hash": "513b9cb2d916401fb4551443dbb4bfea",
+    "semantic_hash": "513b9cb2d916401fb4551443dbb4bfea"
+  },
+  "src/main/automation/QueueJoiner.js": {
+    "mtime": 1785122058.7641401,
+    "ast_hash": "ce583aaf8a1582c521669cbf745bdc84",
+    "semantic_hash": "ce583aaf8a1582c521669cbf745bdc84"
+  },
+  "src/main/automation/TargetPageCoordinator.js": {
+    "mtime": 1785958987.1262777,
+    "ast_hash": "532fb17f2d55f01cc9de643c24f22f39",
+    "semantic_hash": "532fb17f2d55f01cc9de643c24f22f39"
+  },
+  "src/main/automation/TraceRecorder.js": {
+    "mtime": 1785138114.7555585,
+    "ast_hash": "cd5c404e11d0c3a4b4c1d550d8c38b44",
+    "semantic_hash": "cd5c404e11d0c3a4b4c1d550d8c38b44"
+  },
+  "src/main/automation/akamaiSensor.js": {
+    "mtime": 1785958987.1262777,
+    "ast_hash": "8a3444220d887a6143c85fa68c7a16c1",
+    "semantic_hash": "8a3444220d887a6143c85fa68c7a16c1"
+  },
+  "src/main/automation/api/targetApi.js": {
+    "mtime": 1785029377.756753,
+    "ast_hash": "8f9b6f69bf3ac74e8597a8243346aa74",
+    "semantic_hash": "8f9b6f69bf3ac74e8597a8243346aa74"
+  },
+  "src/main/automation/api/walmartApi.js": {
+    "mtime": 1785029377.756753,
+    "ast_hash": "0fe68b994754574e6f5bb09c383ce0e6",
+    "semantic_hash": "0fe68b994754574e6f5bb09c383ce0e6"
+  },
+  "src/main/automation/captcha.js": {
+    "mtime": 1785521057.7757921,
+    "ast_hash": "6e86affa475ca1e86068f73efebe5189",
+    "semantic_hash": "6e86affa475ca1e86068f73efebe5189"
+  },
+  "src/main/automation/cloakBrowserConfig.js": {
+    "mtime": 1785104982.427672,
+    "ast_hash": "0c689566b19710e8b9cf28487fdce82f",
+    "semantic_hash": "0c689566b19710e8b9cf28487fdce82f"
+  },
+  "src/main/automation/cookieManager.js": {
+    "mtime": 1785029377.7587533,
+    "ast_hash": "f3c9b01301fa646b6e70876f44c73715",
+    "semantic_hash": "f3c9b01301fa646b6e70876f44c73715"
+  },
+  "src/main/automation/flows/check-target-session.js": {
+    "mtime": 1785958987.1262777,
+    "ast_hash": "a78b7e1163d9b811672e342684dab58a",
+    "semantic_hash": "a78b7e1163d9b811672e342684dab58a"
+  },
+  "src/main/automation/flows/checkout-fields.js": {
+    "mtime": 1785958987.1262777,
+    "ast_hash": "dd8685836782db29497977b0e27c7619",
+    "semantic_hash": "dd8685836782db29497977b0e27c7619"
+  },
+  "src/main/automation/flows/checkout-utils.js": {
+    "mtime": 1785029377.759754,
+    "ast_hash": "f9fd861beccd31aa3623fdd09b24fe98",
+    "semantic_hash": "f9fd861beccd31aa3623fdd09b24fe98"
+  },
+  "src/main/automation/flows/costco.js": {
+    "mtime": 1780148822.864719,
+    "ast_hash": "128497a8eff6cf95024849f20f949cf8",
+    "semantic_hash": "128497a8eff6cf95024849f20f949cf8"
+  },
+  "src/main/automation/flows/pokemon-center.js": {
+    "mtime": 1785137673.975138,
+    "ast_hash": "6432ff90598ec28733ba967974ea250a",
+    "semantic_hash": "6432ff90598ec28733ba967974ea250a"
+  },
+  "src/main/automation/flows/register-target.js": {
+    "mtime": 1780282823.8125381,
+    "ast_hash": "fe7cdb14e63a71eba0d256fca157b573",
+    "semantic_hash": "fe7cdb14e63a71eba0d256fca157b573"
+  },
+  "src/main/automation/flows/register-walmart.js": {
+    "mtime": 1780195354.6739087,
+    "ast_hash": "580e9ce8c8ca946a3f81edaad71bf202",
+    "semantic_hash": "580e9ce8c8ca946a3f81edaad71bf202"
+  },
+  "src/main/automation/flows/samsclub.js": {
+    "mtime": 1785137673.975138,
+    "ast_hash": "1872065613a588c35a677a45a719b63c",
+    "semantic_hash": "1872065613a588c35a677a45a719b63c"
+  },
+  "src/main/automation/flows/target-auto-login.js": {
+    "mtime": 1784523877.2052164,
+    "ast_hash": "f59686479ec8c81264217c7e22773073",
+    "semantic_hash": "f59686479ec8c81264217c7e22773073"
+  },
+  "src/main/automation/flows/target-page-utils.js": {
+    "mtime": 1785029377.7617657,
+    "ast_hash": "b5240678af57060e1b2466a13209b180",
+    "semantic_hash": "b5240678af57060e1b2466a13209b180"
+  },
+  "src/main/automation/flows/target.js": {
+    "mtime": 1786854165.8484104,
+    "ast_hash": "cca4f13f628963d9388d577f1a539f26",
+    "semantic_hash": "cca4f13f628963d9388d577f1a539f26"
+  },
+  "src/main/automation/flows/walmart-page-utils.js": {
+    "mtime": 1785029377.7632694,
+    "ast_hash": "7bdf6e20229c908d99f0d908b3bee34c",
+    "semantic_hash": "7bdf6e20229c908d99f0d908b3bee34c"
+  },
+  "src/main/automation/flows/walmart.js": {
+    "mtime": 1785137673.974134,
+    "ast_hash": "24f56c23f8819181f44d3747826e04f8",
+    "semantic_hash": "24f56c23f8819181f44d3747826e04f8"
+  },
+  "src/main/automation/profileWarmup.js": {
+    "mtime": 1785104833.565806,
+    "ast_hash": "d781b1ec6c7c42ab2a8c00ea63d44674",
+    "semantic_hash": "d781b1ec6c7c42ab2a8c00ea63d44674"
+  },
+  "src/main/automation/targetQueueBypass.js": {
+    "mtime": 1785958987.1262777,
+    "ast_hash": "459de14fe68b2a34fb196b4857b8f9c5",
+    "semantic_hash": "459de14fe68b2a34fb196b4857b8f9c5"
+  },
+  "src/main/automation/walmartQueue.js": {
+    "mtime": 1785029377.7642746,
+    "ast_hash": "6c61aac862ada7df5642756760ff8e0e",
+    "semantic_hash": "6c61aac862ada7df5642756760ff8e0e"
+  },
+  "src/main/crypto.js": {
+    "mtime": 1785038739.760144,
+    "ast_hash": "d9d2a5b9dc67962a153fce42a1b73809",
+    "semantic_hash": "d9d2a5b9dc67962a153fce42a1b73809"
+  },
+  "src/main/db.js": {
+    "mtime": 1786845321.8040757,
+    "ast_hash": "1c31b5493ef0bc23f8a313b844bc7841",
+    "semantic_hash": "1c31b5493ef0bc23f8a313b844bc7841"
+  },
+  "src/main/db/migrations.js": {
+    "mtime": 1786845321.8075902,
+    "ast_hash": "0ae1401f799ce6f6df51286ab40f0d2f",
+    "semantic_hash": "0ae1401f799ce6f6df51286ab40f0d2f"
+  },
+  "src/main/experimental/DebugManager.js": {
+    "mtime": 1785126892.276597,
+    "ast_hash": "2e8f448f0609f23497efec64dd29a19b",
+    "semantic_hash": "2e8f448f0609f23497efec64dd29a19b"
+  },
+  "src/main/experimental/QueueOptimizer.js": {
+    "mtime": 1785126892.2825966,
+    "ast_hash": "5d933f12e62941b8fe35d2025f4f2211",
+    "semantic_hash": "5d933f12e62941b8fe35d2025f4f2211"
+  },
+  "src/main/experimental/RateLimiter.js": {
+    "mtime": 1785126892.2895982,
+    "ast_hash": "07092876cb2a46d0ac401abd07111fec",
+    "semantic_hash": "07092876cb2a46d0ac401abd07111fec"
+  },
+  "src/main/experimental/RestockPredictor.js": {
+    "mtime": 1785126892.3016348,
+    "ast_hash": "cfac6870dd213fe04a42a6a694b1e24b",
+    "semantic_hash": "cfac6870dd213fe04a42a6a694b1e24b"
+  },
+  "src/main/health/MonitorHealth.js": {
+    "mtime": 1786470650.5227427,
+    "ast_hash": "e414f91b13ffaa0a2dfd6243d4d487b2",
+    "semantic_hash": "e414f91b13ffaa0a2dfd6243d4d487b2"
+  },
+  "src/main/health/StartupDiagnostics.js": {
+    "mtime": 1785038396.6325867,
+    "ast_hash": "9097627fc26c541b41bdaf9f1632940e",
+    "semantic_hash": "9097627fc26c541b41bdaf9f1632940e"
+  },
+  "src/main/index.js": {
+    "mtime": 1786470650.5227427,
+    "ast_hash": "584384820267c212664bacddcc40bbfc",
+    "semantic_hash": "584384820267c212664bacddcc40bbfc"
+  },
+  "src/main/ipc.js": {
+    "mtime": 1786697295.234403,
+    "ast_hash": "0395d4052e6637ba2e8bba4d7100c818",
+    "semantic_hash": "0395d4052e6637ba2e8bba4d7100c818"
+  },
+  "src/main/lifecycle/RendererRecovery.js": {
+    "mtime": 1785206460.6431437,
+    "ast_hash": "7df87b5f0938e1d4b79b55babcc59353",
+    "semantic_hash": "7df87b5f0938e1d4b79b55babcc59353"
+  },
+  "src/main/monitor/DropEvent.js": {
+    "mtime": 1780032796.7912126,
+    "ast_hash": "e32e11e0d8d018cd6179aae48ac1c156",
+    "semantic_hash": "e32e11e0d8d018cd6179aae48ac1c156"
+  },
+  "src/main/monitor/MonitorBrowserContext.js": {
+    "mtime": 1785029377.7688086,
+    "ast_hash": "10949420ca082ead3f211a1d5a0f4157",
+    "semantic_hash": "10949420ca082ead3f211a1d5a0f4157"
+  },
+  "src/main/monitor/MonitorEngine.js": {
+    "mtime": 1785029377.769808,
+    "ast_hash": "1044ee4f3e02eff5e32d572952a8c5c6",
+    "semantic_hash": "1044ee4f3e02eff5e32d572952a8c5c6"
+  },
+  "src/main/monitor/PokemonFinder.js": {
+    "mtime": 1785029377.7708087,
+    "ast_hash": "24f3691cdc96a8f59ec20408d7116bd5",
+    "semantic_hash": "24f3691cdc96a8f59ec20408d7116bd5"
+  },
+  "src/main/monitor/SupabaseMonitorSource.js": {
+    "mtime": 1786470650.5237496,
+    "ast_hash": "0e193b059dbe1dc9a8ec14463f2becb1",
+    "semantic_hash": "0e193b059dbe1dc9a8ec14463f2becb1"
+  },
+  "src/main/monitor/retailers/bestbuy.js": {
+    "mtime": 1781413578.7071288,
+    "ast_hash": "d3588bab898ce7480ef3de7a435e0155",
+    "semantic_hash": "d3588bab898ce7480ef3de7a435e0155"
+  },
+  "src/main/monitor/retailers/costco.js": {
+    "mtime": 1781413578.7071288,
+    "ast_hash": "c09722c5b5f21e70e7e3e86d6b107754",
+    "semantic_hash": "c09722c5b5f21e70e7e3e86d6b107754"
+  },
+  "src/main/monitor/retailers/gamestop.js": {
+    "mtime": 1781413578.7071288,
+    "ast_hash": "236e387b06418d7fd6019a092b3c7088",
+    "semantic_hash": "236e387b06418d7fd6019a092b3c7088"
+  },
+  "src/main/monitor/retailers/pokemon-center.js": {
+    "mtime": 1785029377.7718081,
+    "ast_hash": "84a85b6235fcdff701d602e1483b9694",
+    "semantic_hash": "84a85b6235fcdff701d602e1483b9694"
+  },
+  "src/main/monitor/retailers/samsclub.js": {
+    "mtime": 1785029377.7718081,
+    "ast_hash": "2f85258287f3bd28f6ec9443813d93ec",
+    "semantic_hash": "2f85258287f3bd28f6ec9443813d93ec"
+  },
+  "src/main/monitor/retailers/target.js": {
+    "mtime": 1781419630.7064457,
+    "ast_hash": "f32268d434cf8f44d6efcdd88e4f1862",
+    "semantic_hash": "f32268d434cf8f44d6efcdd88e4f1862"
+  },
+  "src/main/monitor/retailers/walmart.js": {
+    "mtime": 1784523877.4085095,
+    "ast_hash": "bb13a5c157daff2c08e31c2efe0cb2ec",
+    "semantic_hash": "bb13a5c157daff2c08e31c2efe0cb2ec"
+  },
+  "src/main/notify/NotificationEngine.js": {
+    "mtime": 1786470650.5237496,
+    "ast_hash": "f890964a9e9893a4a36f5a5ff00f5576",
+    "semantic_hash": "f890964a9e9893a4a36f5a5ff00f5576"
+  },
+  "src/main/notify/desktop.js": {
+    "mtime": 1786470650.5237496,
+    "ast_hash": "0b524b3e55403c758d38fce60b185101",
+    "semantic_hash": "0b524b3e55403c758d38fce60b185101"
+  },
+  "src/main/payments/PaymentManager.js": {
+    "mtime": 1785029377.7743173,
+    "ast_hash": "b9fd013ec7c79044d376a997229f37c4",
+    "semantic_hash": "b9fd013ec7c79044d376a997229f37c4"
+  },
+  "src/main/products/ProductCatalog.js": {
+    "mtime": 1780291646.8962734,
+    "ast_hash": "5203c31c8457db56c03889c0304bd730",
+    "semantic_hash": "5203c31c8457db56c03889c0304bd730"
+  },
+  "src/main/products/ProductLookup.js": {
+    "mtime": 1780291738.1691163,
+    "ast_hash": "946009a382863c088e06affa1baa2ccb",
+    "semantic_hash": "946009a382863c088e06affa1baa2ccb"
+  },
+  "src/main/products/ProductMetadata.js": {
+    "mtime": 1780178194.6916125,
+    "ast_hash": "fdbb4aefaee0c6ca29c8142b85517714",
+    "semantic_hash": "fdbb4aefaee0c6ca29c8142b85517714"
+  },
+  "src/main/products/ProductPageLookup.js": {
+    "mtime": 1785104982.465232,
+    "ast_hash": "960bf4702ae52b64e3d81c892e7967c6",
+    "semantic_hash": "960bf4702ae52b64e3d81c892e7967c6"
+  },
+  "src/main/products/ProductSearch.js": {
+    "mtime": 1785029377.775317,
+    "ast_hash": "0bbd710cbf50cbbc3ec6c2c6a9bca884",
+    "semantic_hash": "0bbd710cbf50cbbc3ec6c2c6a9bca884"
+  },
+  "src/main/products/ScraplingLookup.js": {
+    "mtime": 1780291626.7216973,
+    "ast_hash": "a52e7ca9ff72cd32d31c7b30deba2406",
+    "semantic_hash": "a52e7ca9ff72cd32d31c7b30deba2406"
+  },
+  "src/main/products/WalmartMatch.js": {
+    "mtime": 1785029377.7763171,
+    "ast_hash": "2508f43c41130265f5af879c1329105c",
+    "semantic_hash": "2508f43c41130265f5af879c1329105c"
+  },
+  "src/main/products/htmlUtils.js": {
+    "mtime": 1785029377.777317,
+    "ast_hash": "c0df038ec4b59f009e6691a2168c1f35",
+    "semantic_hash": "c0df038ec4b59f009e6691a2168c1f35"
+  },
+  "src/main/products/productKey.js": {
+    "mtime": 1785029377.7783175,
+    "ast_hash": "9a1001f732319ba4b8eef00c8130adef",
+    "semantic_hash": "9a1001f732319ba4b8eef00c8130adef"
+  },
+  "src/main/proxies/ProxyHealthMonitor.js": {
+    "mtime": 1785029377.7783175,
+    "ast_hash": "aa062835594625a1983accee7fad4c35",
+    "semantic_hash": "aa062835594625a1983accee7fad4c35"
+  },
+  "src/main/proxies/ProxyImport.js": {
+    "mtime": 1780108606.1971624,
+    "ast_hash": "d61b9f8405f441ac87bba9c8ae859842",
+    "semantic_hash": "d61b9f8405f441ac87bba9c8ae859842"
+  },
+  "src/main/proxies/ProxyTest.js": {
+    "mtime": 1785029377.7793176,
+    "ast_hash": "5177e35381f4782d2424fb1c1857c21f",
+    "semantic_hash": "5177e35381f4782d2424fb1c1857c21f"
+  },
+  "src/main/security/RendererSecurity.js": {
+    "mtime": 1785135187.8038244,
+    "ast_hash": "fe962715288788adff027454f56e3b0e",
+    "semantic_hash": "fe962715288788adff027454f56e3b0e"
+  },
+  "src/main/security/VaultKeyManager.js": {
+    "mtime": 1785038746.509311,
+    "ast_hash": "d48eb1d77824eee49ab7a095b0ff9b37",
+    "semantic_hash": "d48eb1d77824eee49ab7a095b0ff9b37"
+  },
+  "src/main/shipping/ShippingManager.js": {
+    "mtime": 1784523877.4924254,
+    "ast_hash": "a2ab9873180ef8f44583fc600b2cd0c5",
+    "semantic_hash": "a2ab9873180ef8f44583fc600b2cd0c5"
+  },
+  "src/main/supabase/AuthSessionManager.js": {
+    "mtime": 1785137707.8599546,
+    "ast_hash": "defda4f2a9837368be90738e50686afc",
+    "semantic_hash": "defda4f2a9837368be90738e50686afc"
+  },
+  "src/main/supabase/SupabaseClient.js": {
+    "mtime": 1785137707.8584447,
+    "ast_hash": "692e4516d771875c789b6b0e40ed3b3d",
+    "semantic_hash": "692e4516d771875c789b6b0e40ed3b3d"
+  },
+  "src/main/supabase/config.js": {
+    "mtime": 1781509287.4834604,
+    "ast_hash": "8e29fa8088cf2c6c4daaf3c1a2df4cfd",
+    "semantic_hash": "8e29fa8088cf2c6c4daaf3c1a2df4cfd"
+  },
+  "src/main/supabase/publicClient.js": {
+    "mtime": 1785126565.7160783,
+    "ast_hash": "3462ecaf066c2f58ab285f3686bec7f7",
+    "semantic_hash": "3462ecaf066c2f58ab285f3686bec7f7"
+  },
+  "src/main/tasks/DropEventLedger.js": {
+    "mtime": 1785125891.4278402,
+    "ast_hash": "bd1c9d45c0da165ab6ea59faa2c24170",
+    "semantic_hash": "bd1c9d45c0da165ab6ea59faa2c24170"
+  },
+  "src/main/tasks/OrderSubmissionGate.js": {
+    "mtime": 1785078449.7601666,
+    "ast_hash": "adc68cb323c8716643bae39ab955d110",
+    "semantic_hash": "adc68cb323c8716643bae39ab955d110"
+  },
+  "src/main/tasks/RetailerCircuitBreaker.js": {
+    "mtime": 1785521173.1415915,
+    "ast_hash": "0f621e2218024c32c3a08db38c648c06",
+    "semantic_hash": "0f621e2218024c32c3a08db38c648c06"
+  },
+  "src/main/tasks/TaskManager.js": {
+    "mtime": 1786854177.5939043,
+    "ast_hash": "c19b91d7ecd4f72c3e4feda47a2165f7",
+    "semantic_hash": "c19b91d7ecd4f72c3e4feda47a2165f7"
+  },
+  "src/main/tasks/TaskReadiness.js": {
+    "mtime": 1785125891.4729607,
+    "ast_hash": "4183495331980d508e6c0809bf7942f0",
+    "semantic_hash": "4183495331980d508e6c0809bf7942f0"
+  },
+  "src/main/tasks/TaskState.js": {
+    "mtime": 1785029377.783317,
+    "ast_hash": "a011c81a009afc52fdc650e925365668",
+    "semantic_hash": "a011c81a009afc52fdc650e925365668"
+  },
+  "src/main/telemetry/CheckoutEventMetadata.js": {
+    "mtime": 1786845896.002054,
+    "ast_hash": "f3e6588a60e865f98abd4b6d9bfcc948",
+    "semantic_hash": "f3e6588a60e865f98abd4b6d9bfcc948"
+  },
+  "src/main/telemetry/CheckoutTelemetry.js": {
+    "mtime": 1786847754.9235656,
+    "ast_hash": "7fe8ced1b8850bfb6b75be279f52e86b",
+    "semantic_hash": "7fe8ced1b8850bfb6b75be279f52e86b"
+  },
+  "src/main/thumbnails/ThumbnailCache.js": {
+    "mtime": 1784523877.5510826,
+    "ast_hash": "fbb12bd6c378ad6633ac3e5262aab7a4",
+    "semantic_hash": "fbb12bd6c378ad6633ac3e5262aab7a4"
+  },
+  "src/main/utils/logger.js": {
+    "mtime": 1784523903.0796318,
+    "ast_hash": "67377068fa30ae4ee92d9449be693c34",
+    "semantic_hash": "67377068fa30ae4ee92d9449be693c34"
+  },
+  "src/main/utils/progressStreamer.js": {
+    "mtime": 1784523903.132477,
+    "ast_hash": "351a490a20d0c711e79dec037c77b419",
+    "semantic_hash": "351a490a20d0c711e79dec037c77b419"
+  },
+  "src/main/utils/retryManager.js": {
+    "mtime": 1785029377.7878273,
+    "ast_hash": "cda805216e72f7e4b7f7dde3f10e154c",
+    "semantic_hash": "cda805216e72f7e4b7f7dde3f10e154c"
+  },
+  "src/main/utils/smartRetry.js": {
+    "mtime": 1785029377.7888296,
+    "ast_hash": "e5f71793b1b60a84b895b8359e9d64fb",
+    "semantic_hash": "e5f71793b1b60a84b895b8359e9d64fb"
+  },
+  "src/preload/index.js": {
+    "mtime": 1785137673.9646037,
+    "ast_hash": "1e636609e4976512ba28fb629001b100",
+    "semantic_hash": "1e636609e4976512ba28fb629001b100"
+  },
+  "src/renderer/src/App.jsx": {
+    "mtime": 1785137673.9661129,
+    "ast_hash": "d5bca8719d84014bf421cf6fc390da55",
+    "semantic_hash": "d5bca8719d84014bf421cf6fc390da55"
+  },
+  "src/renderer/src/components/CheckoutAttemptObservability.jsx": {
+    "mtime": 1786854060.751133,
+    "ast_hash": "0b0e40097b11651c930924da80c17490",
+    "semantic_hash": "0b0e40097b11651c930924da80c17490"
+  },
+  "src/renderer/src/components/MonitorBuilder.jsx": {
+    "mtime": 1786694311.9527233,
+    "ast_hash": "1885b5ffd8555ea09a028424739b61a0",
+    "semantic_hash": "1885b5ffd8555ea09a028424739b61a0"
+  },
+  "src/renderer/src/components/QueuePanel.jsx": {
+    "mtime": 1785029377.7913375,
+    "ast_hash": "2616a4abb437f4a9b0a2d6ae86e9288d",
+    "semantic_hash": "2616a4abb437f4a9b0a2d6ae86e9288d"
+  },
+  "src/renderer/src/main.jsx": {
+    "mtime": 1780062704.4888854,
+    "ast_hash": "824f9cb2ac639bb34a841492b7047898",
+    "semantic_hash": "824f9cb2ac639bb34a841492b7047898"
+  },
+  "src/renderer/src/pages/Accounts.jsx": {
+    "mtime": 1785125891.5406778,
+    "ast_hash": "43029464559ba820740faf9ea4a72eb6",
+    "semantic_hash": "43029464559ba820740faf9ea4a72eb6"
+  },
+  "src/renderer/src/pages/CheckoutAnalytics.jsx": {
+    "mtime": 1786850124.2018077,
+    "ast_hash": "dc131411e2b9733d932c2c175f42f269",
+    "semantic_hash": "dc131411e2b9733d932c2c175f42f269"
+  },
+  "src/renderer/src/pages/Dashboard.jsx": {
+    "mtime": 1786470650.52475,
+    "ast_hash": "e159790f2c50748cf370e1b100a7df31",
+    "semantic_hash": "e159790f2c50748cf370e1b100a7df31"
+  },
+  "src/renderer/src/pages/Login.jsx": {
+    "mtime": 1784523877.685321,
+    "ast_hash": "dc251ce37a8b6adf97ba5b7f42adc75d",
+    "semantic_hash": "dc251ce37a8b6adf97ba5b7f42adc75d"
+  },
+  "src/renderer/src/pages/PaymentMethods.jsx": {
+    "mtime": 1785029377.7953875,
+    "ast_hash": "422e1c1e4e1710b0a9d6a852e80d9f69",
+    "semantic_hash": "422e1c1e4e1710b0a9d6a852e80d9f69"
+  },
+  "src/renderer/src/pages/Proxies.jsx": {
+    "mtime": 1780122686.5147326,
+    "ast_hash": "7347199acb0efa4b08fa10227d1d8119",
+    "semantic_hash": "7347199acb0efa4b08fa10227d1d8119"
+  },
+  "src/renderer/src/pages/Settings.jsx": {
+    "mtime": 1785375364.7646072,
+    "ast_hash": "ae49908a27f19096c4c89b2087ca2b8a",
+    "semantic_hash": "ae49908a27f19096c4c89b2087ca2b8a"
+  },
+  "src/renderer/src/pages/ShippingAddresses.jsx": {
+    "mtime": 1784523877.7118664,
+    "ast_hash": "0a310e9eef3367ce1425ad53eae16490",
+    "semantic_hash": "0a310e9eef3367ce1425ad53eae16490"
+  },
+  "src/renderer/src/pages/Tasks.jsx": {
+    "mtime": 1786697323.812066,
+    "ast_hash": "6266b33f0d5c020f5d6bbfc8178df136",
+    "semantic_hash": "6266b33f0d5c020f5d6bbfc8178df136"
+  },
+  "src/renderer/src/store/appStore.js": {
+    "mtime": 1786697295.235406,
+    "ast_hash": "5b5438f082cb3cccd780feb09e1e3dfb",
+    "semantic_hash": "5b5438f082cb3cccd780feb09e1e3dfb"
+  },
+  "src/renderer/src/utils/time.js": {
+    "mtime": 1785249140.9300015,
+    "ast_hash": "7a18afe98f8acf439ba3db0c3a296163",
+    "semantic_hash": "7a18afe98f8acf439ba3db0c3a296163"
+  },
+  "src/shared/constants.js": {
+    "mtime": 1786697295.2328935,
+    "ast_hash": "13ea9c0d49e8bb795090f6f11d800850",
+    "semantic_hash": "13ea9c0d49e8bb795090f6f11d800850"
+  },
+  "supabase/migrations/20260727023650_durable_drop_delivery.sql": {
+    "mtime": 1785119870.5553365,
+    "ast_hash": "3a85a07a6515ce98840608fa5f2fbb0c",
+    "semantic_hash": "3a85a07a6515ce98840608fa5f2fbb0c"
+  },
+  "supabase/migrations/20260727025318_add_drop_cycles.sql": {
+    "mtime": 1785120837.21012,
+    "ast_hash": "32cbaf42f55e65708f862b41087ac070",
+    "semantic_hash": "32cbaf42f55e65708f862b41087ac070"
+  },
+  "supabase/migrations/20260727032000_authenticated_least_privilege.sql": {
+    "mtime": 1785125791.860867,
+    "ast_hash": "f42fe1f6aab296674ecdb9bae761e73e",
+    "semantic_hash": "f42fe1f6aab296674ecdb9bae761e73e"
+  },
+  "supabase/migrations/20260727032500_fix_drop_cycle_window.sql": {
+    "mtime": 1785125739.1155274,
+    "ast_hash": "398999e74d29a3b2b0c828bdf796b2aa",
+    "semantic_hash": "398999e74d29a3b2b0c828bdf796b2aa"
+  },
+  "supabase/migrations/20260730013856_add_walmart_queue_feed.sql": {
+    "mtime": 1785375581.4983082,
+    "ast_hash": "2dd95a165dfb9f75a75dbf7e03e6d899",
+    "semantic_hash": "2dd95a165dfb9f75a75dbf7e03e6d899"
+  },
+  "supabase/migrations/20260811165458_target_hotset_delivery.sql": {
+    "mtime": 1786470650.5257504,
+    "ast_hash": "e6165079f7e075058078d3fdd1dee344",
+    "semantic_hash": "e6165079f7e075058078d3fdd1dee344"
+  },
+  "supabase/migrations/20260811171200_target_hotset_rules_policy.sql": {
+    "mtime": 1786470650.5257504,
+    "ast_hash": "264dc40c05f06d1023d74cc022fe30f7",
+    "semantic_hash": "264dc40c05f06d1023d74cc022fe30f7"
+  },
+  "supabase/seed.sql": {
+    "mtime": 1785120837.21012,
+    "ast_hash": "597604774c430f73922c55827dd8a4b2",
+    "semantic_hash": "597604774c430f73922c55827dd8a4b2"
+  },
+  "tests/main/accounts/AccountManager.test.js": {
+    "mtime": 1785038691.437178,
+    "ast_hash": "f372d66f175b78fc76f596010d77f4a9",
+    "semantic_hash": "f372d66f175b78fc76f596010d77f4a9"
+  },
+  "tests/main/automation/BrowserPool.test.js": {
+    "mtime": 1786152094.3062174,
+    "ast_hash": "1c564bf26b1358369fc4184044a18e97",
+    "semantic_hash": "1c564bf26b1358369fc4184044a18e97"
+  },
+  "tests/main/automation/CheckoutDiagnostics.test.js": {
+    "mtime": 1785029377.8024063,
+    "ast_hash": "f89ae79d0a1914d9cd304e216949e251",
+    "semantic_hash": "f89ae79d0a1914d9cd304e216949e251"
+  },
+  "tests/main/automation/CheckoutSafety.test.js": {
+    "mtime": 1785052945.4644504,
+    "ast_hash": "4ae3fa3fa7a66adb71c59006ded1967a",
+    "semantic_hash": "4ae3fa3fa7a66adb71c59006ded1967a"
+  },
+  "tests/main/automation/PokemonCenterQueueJoiner.test.js": {
+    "mtime": 1785029377.8034067,
+    "ast_hash": "0e537ef1984871d62d0ac852b60bae65",
+    "semantic_hash": "0e537ef1984871d62d0ac852b60bae65"
+  },
+  "tests/main/automation/QueueJoiner.test.js": {
+    "mtime": 1785121712.860046,
+    "ast_hash": "b03f23de2704fd8cbf63776ad3422e70",
+    "semantic_hash": "b03f23de2704fd8cbf63776ad3422e70"
+  },
+  "tests/main/automation/TargetPageCoordinator.test.js": {
+    "mtime": 1785029377.804406,
+    "ast_hash": "cb4b3526b04b670c7b446f51856dbb91",
+    "semantic_hash": "cb4b3526b04b670c7b446f51856dbb91"
+  },
+  "tests/main/automation/TraceRecorder.test.js": {
+    "mtime": 1785138114.756593,
+    "ast_hash": "b69927783f6739373e65d3633b27fa44",
+    "semantic_hash": "b69927783f6739373e65d3633b27fa44"
+  },
+  "tests/main/automation/api/targetApi.test.js": {
+    "mtime": 1784523877.768648,
+    "ast_hash": "46292467dda2c9295c2ff9486bef7edd",
+    "semantic_hash": "46292467dda2c9295c2ff9486bef7edd"
+  },
+  "tests/main/automation/cloakBrowserConfig.test.js": {
+    "mtime": 1785104833.5678108,
+    "ast_hash": "e4d24f555d556e7156ea73078e06c364",
+    "semantic_hash": "e4d24f555d556e7156ea73078e06c364"
+  },
+  "tests/main/automation/cookieManager.test.js": {
+    "mtime": 1785029377.8054056,
+    "ast_hash": "329bb660bc8ed3aa6e4d9343d6fde03d",
+    "semantic_hash": "329bb660bc8ed3aa6e4d9343d6fde03d"
+  },
+  "tests/main/automation/flows/check-target-session.test.js": {
+    "mtime": 1785959291.8997655,
+    "ast_hash": "485c685dc4cbd45bd1c747ab34de6813",
+    "semantic_hash": "485c685dc4cbd45bd1c747ab34de6813"
+  },
+  "tests/main/automation/flows/checkout-test-mode.test.js": {
+    "mtime": 1785052849.4552045,
+    "ast_hash": "3f9aa9458c5af599a7b99515527a269e",
+    "semantic_hash": "3f9aa9458c5af599a7b99515527a269e"
+  },
+  "tests/main/automation/flows/register-target.test.js": {
+    "mtime": 1780282844.3902416,
+    "ast_hash": "69b6044dc9146c4fbbd7e43b4f71a31c",
+    "semantic_hash": "69b6044dc9146c4fbbd7e43b4f71a31c"
+  },
+  "tests/main/automation/flows/register-walmart.test.js": {
+    "mtime": 1780195395.748387,
+    "ast_hash": "e767c5eac810e76dc54ac72ebf51b840",
+    "semantic_hash": "e767c5eac810e76dc54ac72ebf51b840"
+  },
+  "tests/main/automation/flows/samsclub-checkout.test.js": {
+    "mtime": 1785029377.80691,
+    "ast_hash": "95ea7416d866e6752a486387d7b4dde8",
+    "semantic_hash": "95ea7416d866e6752a486387d7b4dde8"
+  },
+  "tests/main/automation/flows/submission-safety.test.js": {
+    "mtime": 1785125891.6133316,
+    "ast_hash": "1a01ccee49bb028d3c86a23f679a6bb9",
+    "semantic_hash": "1a01ccee49bb028d3c86a23f679a6bb9"
+  },
+  "tests/main/automation/flows/target-auto-login.test.js": {
+    "mtime": 1784523877.799405,
+    "ast_hash": "f101227299ac3ab24fa8c4f34e4edee0",
+    "semantic_hash": "f101227299ac3ab24fa8c4f34e4edee0"
+  },
+  "tests/main/automation/flows/target-high-demand.test.js": {
+    "mtime": 1786854165.8504105,
+    "ast_hash": "f59225c6aa6657acc2b5b967b05b4b56",
+    "semantic_hash": "f59225c6aa6657acc2b5b967b05b4b56"
+  },
+  "tests/main/automation/flows/walmart-checkout.test.js": {
+    "mtime": 1785052973.46826,
+    "ast_hash": "8a9c19448a7e37134e79d9bec9d9a87e",
+    "semantic_hash": "8a9c19448a7e37134e79d9bec9d9a87e"
+  },
+  "tests/main/automation/profileWarmup.test.js": {
+    "mtime": 1785078765.0046525,
+    "ast_hash": "d42d3da689ee3ef22610ae87c8bbca84",
+    "semantic_hash": "d42d3da689ee3ef22610ae87c8bbca84"
+  },
+  "tests/main/automation/retailer-fixtures.test.js": {
+    "mtime": 1785038527.4912722,
+    "ast_hash": "d325032ea85e05b1c60f3619d6614c92",
+    "semantic_hash": "d325032ea85e05b1c60f3619d6614c92"
+  },
+  "tests/main/automation/targetCartQuantity.test.js": {
+    "mtime": 1785029377.8099146,
+    "ast_hash": "470547b70eab03be60ca9a14ca266064",
+    "semantic_hash": "470547b70eab03be60ca9a14ca266064"
+  },
+  "tests/main/automation/walmartQueue.test.js": {
+    "mtime": 1785029377.810916,
+    "ast_hash": "021c0639c4a867025b5a27957c4883f7",
+    "semantic_hash": "021c0639c4a867025b5a27957c4883f7"
+  },
+  "tests/main/crypto.test.js": {
+    "mtime": 1785038610.2576828,
+    "ast_hash": "4db6331aaf188a83b7eb298b0ccf927a",
+    "semantic_hash": "4db6331aaf188a83b7eb298b0ccf927a"
+  },
+  "tests/main/db.jsondb.test.js": {
+    "mtime": 1786845310.5615392,
+    "ast_hash": "8fe3d96dc3925c0dc13337ac2d6224dd",
+    "semantic_hash": "8fe3d96dc3925c0dc13337ac2d6224dd"
+  },
+  "tests/main/db.test.js": {
+    "mtime": 1786845310.5625393,
+    "ast_hash": "b90e0f5d1c80f48519b2fa71f1072624",
+    "semantic_hash": "b90e0f5d1c80f48519b2fa71f1072624"
+  },
+  "tests/main/health/MonitorHealth.test.js": {
+    "mtime": 1786470650.526749,
+    "ast_hash": "19d357f8d27b27cd4f42e1eafcc607ce",
+    "semantic_hash": "19d357f8d27b27cd4f42e1eafcc607ce"
+  },
+  "tests/main/ipc.monitorHealth.test.js": {
+    "mtime": 1785120052.7587752,
+    "ast_hash": "f7c07f1b069adc146f0e77cf3c1a74c4",
+    "semantic_hash": "f7c07f1b069adc146f0e77cf3c1a74c4"
+  },
+  "tests/main/ipc.supabase.test.js": {
+    "mtime": 1785029377.8129148,
+    "ast_hash": "33234528c85390d47ce55b6f6bd06f58",
+    "semantic_hash": "33234528c85390d47ce55b6f6bd06f58"
+  },
+  "tests/main/ipc.walmartMatch.test.js": {
+    "mtime": 1785029377.8129148,
+    "ast_hash": "6dd48cf7ff523dbfbcb8e7be9acb2ab5",
+    "semantic_hash": "6dd48cf7ff523dbfbcb8e7be9acb2ab5"
+  },
+  "tests/main/lifecycle/RendererRecovery.test.js": {
+    "mtime": 1785206460.6446478,
+    "ast_hash": "65e6936ad997c663361ea60261dba10f",
+    "semantic_hash": "65e6936ad997c663361ea60261dba10f"
+  },
+  "tests/main/monitor/MonitorEngine.test.js": {
+    "mtime": 1785029377.8144186,
+    "ast_hash": "13ff733a7f69660c3587096b4c243ef2",
+    "semantic_hash": "13ff733a7f69660c3587096b4c243ef2"
+  },
+  "tests/main/monitor/SupabaseMonitorSource.test.js": {
+    "mtime": 1786470650.5277493,
+    "ast_hash": "8056b68e1f249705f1a71e0ea4d9bdef",
+    "semantic_hash": "8056b68e1f249705f1a71e0ea4d9bdef"
+  },
+  "tests/main/monitor/retailers/pokemon-center.test.js": {
+    "mtime": 1780148785.460263,
+    "ast_hash": "4f6a8d5609ac35ab044d8a6fdc9f5cfb",
+    "semantic_hash": "4f6a8d5609ac35ab044d8a6fdc9f5cfb"
+  },
+  "tests/main/monitor/retailers/samsclub.test.js": {
+    "mtime": 1785029377.8164241,
+    "ast_hash": "4209a99a0a5ed211aaba6f58ca415529",
+    "semantic_hash": "4209a99a0a5ed211aaba6f58ca415529"
+  },
+  "tests/main/monitor/retailers/target.test.js": {
+    "mtime": 1781419468.8522706,
+    "ast_hash": "91c14796d8a8751241df6e3c11109e43",
+    "semantic_hash": "91c14796d8a8751241df6e3c11109e43"
+  },
+  "tests/main/monitor/retailers/walmart.test.js": {
+    "mtime": 1780148785.460263,
+    "ast_hash": "ebbbd825068a5a2b7cd4cd02ecb7d08e",
+    "semantic_hash": "ebbbd825068a5a2b7cd4cd02ecb7d08e"
+  },
+  "tests/main/notify/NotificationEngine.test.js": {
+    "mtime": 1786470650.5277493,
+    "ast_hash": "50cd94a9214026e6b01308585ac2fafe",
+    "semantic_hash": "50cd94a9214026e6b01308585ac2fafe"
+  },
+  "tests/main/notify/desktop.test.js": {
+    "mtime": 1786470650.5277493,
+    "ast_hash": "6b1795b71c4e599e751590245f06095f",
+    "semantic_hash": "6b1795b71c4e599e751590245f06095f"
+  },
+  "tests/main/payments/PaymentManager.test.js": {
+    "mtime": 1785126565.7260773,
+    "ast_hash": "61577c8d57b6e426fe41366fa96a632f",
+    "semantic_hash": "61577c8d57b6e426fe41366fa96a632f"
+  },
+  "tests/main/products/ProductCatalog.test.js": {
+    "mtime": 1780291700.101457,
+    "ast_hash": "58eae83cba573aeddf6bc1c867fa5822",
+    "semantic_hash": "58eae83cba573aeddf6bc1c867fa5822"
+  },
+  "tests/main/products/ProductLookup.test.js": {
+    "mtime": 1780291712.6441016,
+    "ast_hash": "79399badf32e27a4868d8adab418e4c1",
+    "semantic_hash": "79399badf32e27a4868d8adab418e4c1"
+  },
+  "tests/main/products/ProductPageLookup.test.js": {
+    "mtime": 1785104982.4857736,
+    "ast_hash": "247fe56da48d3a6c6f8d07babaaeb833",
+    "semantic_hash": "247fe56da48d3a6c6f8d07babaaeb833"
+  },
+  "tests/main/products/ProductSearch.test.js": {
+    "mtime": 1780149883.5943508,
+    "ast_hash": "f7b8d402631877eb72b3082f3b968b1d",
+    "semantic_hash": "f7b8d402631877eb72b3082f3b968b1d"
+  },
+  "tests/main/products/ScraplingLookup.test.js": {
+    "mtime": 1780291688.4971874,
+    "ast_hash": "b3a450dfcf4861f8d7e2866faeab543a",
+    "semantic_hash": "b3a450dfcf4861f8d7e2866faeab543a"
+  },
+  "tests/main/products/WalmartMatch.test.js": {
+    "mtime": 1783738205.0554042,
+    "ast_hash": "298558f4035317ac36725f6f7fccc468",
+    "semantic_hash": "298558f4035317ac36725f6f7fccc468"
+  },
+  "tests/main/products/productKey.test.js": {
+    "mtime": 1785029377.8189335,
+    "ast_hash": "56984ce810e079ff517a7433da17a69d",
+    "semantic_hash": "56984ce810e079ff517a7433da17a69d"
+  },
+  "tests/main/proxies/ProxyImport.test.js": {
+    "mtime": 1780108585.1087577,
+    "ast_hash": "3950765604fce622fba8edd0774d0526",
+    "semantic_hash": "3950765604fce622fba8edd0774d0526"
+  },
+  "tests/main/proxies/ProxyTest.test.js": {
+    "mtime": 1785029377.8204381,
+    "ast_hash": "ec867550d2f64d8ccf54a333b0827a24",
+    "semantic_hash": "ec867550d2f64d8ccf54a333b0827a24"
+  },
+  "tests/main/security/RendererSecurity.test.js": {
+    "mtime": 1785135187.806828,
+    "ast_hash": "9dcca96da036251f55ec88ad7049096e",
+    "semantic_hash": "9dcca96da036251f55ec88ad7049096e"
+  },
+  "tests/main/security/VaultKeyManager.test.js": {
+    "mtime": 1785038549.3003976,
+    "ast_hash": "efd894edddde45c7697c7521b9f392af",
+    "semantic_hash": "efd894edddde45c7697c7521b9f392af"
+  },
+  "tests/main/supabase/AuthSessionManager.test.js": {
+    "mtime": 1785137835.781438,
+    "ast_hash": "f1ace85ad03bd7980ed451ddd1a33393",
+    "semantic_hash": "f1ace85ad03bd7980ed451ddd1a33393"
+  },
+  "tests/main/supabase/SupabaseClient.test.js": {
+    "mtime": 1785137835.781438,
+    "ast_hash": "feac87a8d68ee5a058f052852d695065",
+    "semantic_hash": "feac87a8d68ee5a058f052852d695065"
+  },
+  "tests/main/supabase/config.test.js": {
+    "mtime": 1781509293.728798,
+    "ast_hash": "62882231505e54e68ae21342a0418344",
+    "semantic_hash": "62882231505e54e68ae21342a0418344"
+  },
+  "tests/main/tasks/AccountCheckoutLease.test.js": {
+    "mtime": 1786853825.0936577,
+    "ast_hash": "d0ed072bf05e35066fe3645cb216d16a",
+    "semantic_hash": "d0ed072bf05e35066fe3645cb216d16a"
+  },
+  "tests/main/tasks/DropEventLedger.test.js": {
+    "mtime": 1786470650.5287502,
+    "ast_hash": "e8efc853aa2c93edb1b4a0598381331f",
+    "semantic_hash": "e8efc853aa2c93edb1b4a0598381331f"
+  },
+  "tests/main/tasks/OrderSubmissionGate.test.js": {
+    "mtime": 1785078449.7611682,
+    "ast_hash": "e0f968ff7506d764c883aeb10d627e7d",
+    "semantic_hash": "e0f968ff7506d764c883aeb10d627e7d"
+  },
+  "tests/main/tasks/RetailerCircuitBreaker.test.js": {
+    "mtime": 1785521236.1066146,
+    "ast_hash": "0d9594726189fdef290628c1eeaf689c",
+    "semantic_hash": "0d9594726189fdef290628c1eeaf689c"
+  },
+  "tests/main/tasks/TaskManager.monitorHealth.test.js": {
+    "mtime": 1786470650.5287502,
+    "ast_hash": "fe491a8e6bc9da7c246ef883f1843a68",
+    "semantic_hash": "fe491a8e6bc9da7c246ef883f1843a68"
+  },
+  "tests/main/tasks/TaskManager.supabase.test.js": {
+    "mtime": 1786470650.5287502,
+    "ast_hash": "ebfced998eada0cd8b6ad5afc4a34b01",
+    "semantic_hash": "ebfced998eada0cd8b6ad5afc4a34b01"
+  },
+  "tests/main/tasks/TaskManager.test.js": {
+    "mtime": 1786849597.221036,
+    "ast_hash": "e170d05a8654275263a739ca24edc567",
+    "semantic_hash": "e170d05a8654275263a739ca24edc567"
+  },
+  "tests/main/tasks/TaskReadiness.test.js": {
+    "mtime": 1785029377.8234446,
+    "ast_hash": "bc37b6e697178cf3e8a4f3115da8d588",
+    "semantic_hash": "bc37b6e697178cf3e8a4f3115da8d588"
+  },
+  "tests/main/tasks/TaskState.test.js": {
+    "mtime": 1785029377.8244443,
+    "ast_hash": "fafddde7da69b771d70f0410127f70a9",
+    "semantic_hash": "fafddde7da69b771d70f0410127f70a9"
+  },
+  "tests/main/telemetry/CheckoutEventMetadata.test.js": {
+    "mtime": 1786845994.6202066,
+    "ast_hash": "a2eac00a64c95b5a0c01662a96420c4b",
+    "semantic_hash": "a2eac00a64c95b5a0c01662a96420c4b"
+  },
+  "tests/main/telemetry/CheckoutTelemetry.test.js": {
+    "mtime": 1786854165.8504105,
+    "ast_hash": "3ee8269cc210b874a13b1ac7257ee972",
+    "semantic_hash": "3ee8269cc210b874a13b1ac7257ee972"
+  },
+  "tests/pi/__init__.py": {
+    "mtime": 1786470650.5297494,
+    "ast_hash": "81051bcc2cf1bedf378224b0a93e2877",
+    "semantic_hash": "81051bcc2cf1bedf378224b0a93e2877"
+  },
+  "tests/pi/test_patch_pokealert_agent_schedule.py": {
+    "mtime": 1786470650.5307488,
+    "ast_hash": "508a2fa2c93f72b09dae80e68c90e1e3",
+    "semantic_hash": "508a2fa2c93f72b09dae80e68c90e1e3"
+  },
+  "tests/pi/test_patch_target_monitor_reliability.py": {
+    "mtime": 1786470650.5307488,
+    "ast_hash": "f11f60074a8da1049ff76d1a87a16eef",
+    "semantic_hash": "f11f60074a8da1049ff76d1a87a16eef"
+  },
+  "tests/pi/test_target_reliability.py": {
+    "mtime": 1786470650.5317488,
+    "ast_hash": "70ac0cae0d6a3538e3d8dd0e1db6a4ee",
+    "semantic_hash": "70ac0cae0d6a3538e3d8dd0e1db6a4ee"
+  },
+  "tests/renderer/CheckoutAttemptObservability.test.js": {
+    "mtime": 1786854165.8514109,
+    "ast_hash": "3dd0520fb75606100d51e621686e27c9",
+    "semantic_hash": "3dd0520fb75606100d51e621686e27c9"
+  },
+  "tests/renderer/MonitorBuilder.test.js": {
+    "mtime": 1786694311.9517171,
+    "ast_hash": "1338c84851e90dbbcbbf2927cbbfe6e6",
+    "semantic_hash": "1338c84851e90dbbcbbf2927cbbfe6e6"
+  },
+  "tests/renderer/time.test.js": {
+    "mtime": 1785249170.6428983,
+    "ast_hash": "b7b106a1d37ce6bdba66e05e95cd19a3",
+    "semantic_hash": "b7b106a1d37ce6bdba66e05e95cd19a3"
+  },
+  "vitest.config.js": {
+    "mtime": 1786854692.433061,
+    "ast_hash": "9452deeb13de4e5b061c86d93847f8f8",
+    "semantic_hash": "9452deeb13de4e5b061c86d93847f8f8"
+  },
+  ".prettierrc.yaml": {
+    "mtime": 1780028999.7579815,
+    "ast_hash": "0494080f0af72e414e6fb29f89c49d89",
+    "semantic_hash": "0494080f0af72e414e6fb29f89c49d89"
+  },
+  "Polar Extension/ui/options/options.html": {
+    "mtime": 1786424392.5532188,
+    "ast_hash": "5f14c6ff494f794bb74d6bfc3953132d",
+    "semantic_hash": "5f14c6ff494f794bb74d6bfc3953132d"
+  },
+  "Polar Extension/ui/popup/popup.html": {
+    "mtime": 1786424392.5742404,
+    "ast_hash": "cee0305b798b0621cf9325372e51d844",
+    "semantic_hash": "cee0305b798b0621cf9325372e51d844"
+  },
+  "README.md": {
+    "mtime": 1785126679.0521517,
+    "ast_hash": "d99254a522db7af4bf096d133f6ad555",
+    "semantic_hash": "d99254a522db7af4bf096d133f6ad555"
+  },
+  "docs/README.md": {
+    "mtime": 1785126679.047146,
+    "ast_hash": "6645136e9f279ddfcf1abac2dea70ae9",
+    "semantic_hash": "6645136e9f279ddfcf1abac2dea70ae9"
+  },
+  "docs/guides/MCP_SETUP.md": {
+    "mtime": 1785126547.7496479,
+    "ast_hash": "cc3e7d1ae019058b75cc00bb7f1f748e",
+    "semantic_hash": "cc3e7d1ae019058b75cc00bb7f1f748e"
+  },
+  "docs/guides/MULTI_ACCOUNT_SETUP.md": {
+    "mtime": 1785126547.75066,
+    "ast_hash": "c39fd92f2d9a5737afe7e698b1ffa76c",
+    "semantic_hash": "c39fd92f2d9a5737afe7e698b1ffa76c"
+  },
+  "docs/guides/RESTOCK_MONITORING.md": {
+    "mtime": 1785126547.75166,
+    "ast_hash": "d800e32004a8da1e30b36768124eadbc",
+    "semantic_hash": "d800e32004a8da1e30b36768124eadbc"
+  },
+  "docs/guides/SCRAPLING.md": {
+    "mtime": 1785126547.7536564,
+    "ast_hash": "72c89e97f155c26d9f9026af24ed18d0",
+    "semantic_hash": "72c89e97f155c26d9f9026af24ed18d0"
+  },
+  "docs/guides/TARGET_CHECKOUT.md": {
+    "mtime": 1785126547.7546544,
+    "ast_hash": "9ddd12dae034b753ba845e4e114e5cf9",
+    "semantic_hash": "9ddd12dae034b753ba845e4e114e5cf9"
+  },
+  "docs/guides/TESTING_GUIDE.md": {
+    "mtime": 1785126547.7556548,
+    "ast_hash": "c204942e6951a98622b734d6376aa5f5",
+    "semantic_hash": "c204942e6951a98622b734d6376aa5f5"
+  },
+  "docs/guides/WALMART_FAST_CHECKOUT.md": {
+    "mtime": 1785126547.7576582,
+    "ast_hash": "7092c9783dc6223422ea925899331523",
+    "semantic_hash": "7092c9783dc6223422ea925899331523"
+  },
+  "docs/guides/WARMUP_WORKAROUND.md": {
+    "mtime": 1785126547.758657,
+    "ast_hash": "5660cca9bcb778d397db444cc5e4c5d4",
+    "semantic_hash": "5660cca9bcb778d397db444cc5e4c5d4"
+  },
+  "docs/operations/2026-08-11-target-reliability-rollout.md": {
+    "mtime": 1786471606.0039468,
+    "ast_hash": "69f56e8e409e2d2132f19bca5a977f6d",
+    "semantic_hash": "69f56e8e409e2d2132f19bca5a977f6d"
+  },
+  "docs/reference/DEBUG_API.md": {
+    "mtime": 1785126547.7606595,
+    "ast_hash": "e4d7a3f6f9e93ff0f1e2f895efff6645",
+    "semantic_hash": "e4d7a3f6f9e93ff0f1e2f895efff6645"
+  },
+  "docs/reference/WALMART_AUTOMATION_NOTES.md": {
+    "mtime": 1785126547.7616558,
+    "ast_hash": "b385402d67011b569a49747e594227fb",
+    "semantic_hash": "b385402d67011b569a49747e594227fb"
+  },
+  "docs/roadmaps/ADVANCED_FEATURES_ROADMAP.md": {
+    "mtime": 1785126547.7410772,
+    "ast_hash": "bb45e67f7a9d15b75f078cc2d4d46d9a",
+    "semantic_hash": "bb45e67f7a9d15b75f078cc2d4d46d9a"
+  },
+  "docs/roadmaps/COMPLETE_IMPLEMENTATION_PLAN.md": {
+    "mtime": 1785126547.7420776,
+    "ast_hash": "b2e7dccd8e7f764b015dea552d993dec",
+    "semantic_hash": "b2e7dccd8e7f764b015dea552d993dec"
+  },
+  "docs/roadmaps/FUTURE_IMPROVEMENTS.md": {
+    "mtime": 1785126547.7441216,
+    "ast_hash": "9302f5bc9c3ec18f62d48bf7b5b93651",
+    "semantic_hash": "9302f5bc9c3ec18f62d48bf7b5b93651"
+  },
+  "docs/roadmaps/GITHUB_IMPROVEMENTS.md": {
+    "mtime": 1785126547.7456355,
+    "ast_hash": "3933e8c4bdc525841eeff40b620cce90",
+    "semantic_hash": "3933e8c4bdc525841eeff40b620cce90"
+  },
+  "docs/roadmaps/IMPROVEMENTS.md": {
+    "mtime": 1785126876.941669,
+    "ast_hash": "49d73f169dc88fa67c5a911ed440e609",
+    "semantic_hash": "49d73f169dc88fa67c5a911ed440e609"
+  },
+  "docs/superpowers/plans/2026-05-29-account-registration.md": {
+    "mtime": 1785125869.4515939,
+    "ast_hash": "278f83db5eb53993e4016abb1a8ed15a",
+    "semantic_hash": "278f83db5eb53993e4016abb1a8ed15a"
+  },
+  "docs/superpowers/plans/2026-06-15-supabase-monitor-mode-b2.md": {
+    "mtime": 1785125869.4526992,
+    "ast_hash": "06f9541af4a026fcacf2b4796d074ead",
+    "semantic_hash": "06f9541af4a026fcacf2b4796d074ead"
+  },
+  "docs/superpowers/plans/2026-06-25-pokebot-central-monitoring-worker.md": {
+    "mtime": 1785029377.7282097,
+    "ast_hash": "cccea57d51cf331cddb89864d0be52e0",
+    "semantic_hash": "cccea57d51cf331cddb89864d0be52e0"
+  },
+  "docs/superpowers/plans/2026-06-25-pokebot-control-plane.md": {
+    "mtime": 1782425078.6607597,
+    "ast_hash": "4c6549ea3d9b55064a1dad613a9052fe",
+    "semantic_hash": "4c6549ea3d9b55064a1dad613a9052fe"
+  },
+  "docs/superpowers/plans/2026-07-11-electron-app-auth.md": {
+    "mtime": 1785125869.4546957,
+    "ast_hash": "4877ff314a640d57d3ec783ed7ac6ade",
+    "semantic_hash": "4877ff314a640d57d3ec783ed7ac6ade"
+  },
+  "docs/superpowers/plans/2026-07-14-ref-counted-central-monitoring.md": {
+    "mtime": 1785125869.4546957,
+    "ast_hash": "fea6631d3adcd2ba88c6f65a89816411",
+    "semantic_hash": "fea6631d3adcd2ba88c6f65a89816411"
+  },
+  "docs/superpowers/plans/2026-08-10-target-polar-like-cart-retries.md": {
+    "mtime": 1786426499.0487108,
+    "ast_hash": "160137004672db19b13fcf11647eeee7",
+    "semantic_hash": "160137004672db19b13fcf11647eeee7"
+  },
+  "docs/superpowers/plans/2026-08-11-target-electron-resilience.md": {
+    "mtime": 1786467142.8785155,
+    "ast_hash": "502756311b0e026df364eabfaa3c893d",
+    "semantic_hash": "502756311b0e026df364eabfaa3c893d"
+  },
+  "docs/superpowers/plans/2026-08-11-target-monitoring-delivery.md": {
+    "mtime": 1786467381.3836799,
+    "ast_hash": "e30163c3a9f1fd25febf1e500d215604",
+    "semantic_hash": "e30163c3a9f1fd25febf1e500d215604"
+  },
+  "docs/superpowers/plans/2026-08-11-target-production-rollout.md": {
+    "mtime": 1786467358.4182234,
+    "ast_hash": "5aaed693f7cb186643aaff415cfd5c6b",
+    "semantic_hash": "5aaed693f7cb186643aaff415cfd5c6b"
+  },
+  "docs/superpowers/plans/2026-08-14-retailer-controls-and-previews.md": {
+    "mtime": 1786694120.9178612,
+    "ast_hash": "d417b3b57e9feb21d43abda42d665b3a",
+    "semantic_hash": "d417b3b57e9feb21d43abda42d665b3a"
+  },
+  "docs/superpowers/plans/2026-08-15-checkout-account-ownership-plan.md": {
+    "mtime": 1786820447.845154,
+    "ast_hash": "b4119521b29d8c1e997e9d161b1636ac",
+    "semantic_hash": "b4119521b29d8c1e997e9d161b1636ac"
+  },
+  "docs/superpowers/plans/2026-08-15-checkout-observability.md": {
+    "mtime": 1786851995.2799728,
+    "ast_hash": "7ba69b136dc14a59044d63f90c2fb7c8",
+    "semantic_hash": "7ba69b136dc14a59044d63f90c2fb7c8"
+  },
+  "docs/superpowers/plans/2026-08-17-pokemon-center-queue-monitor.md": {
+    "mtime": 1786952608.1600964,
+    "ast_hash": "e3d3f4bdc49d93c9df5672e5dae400a4",
+    "semantic_hash": "e3d3f4bdc49d93c9df5672e5dae400a4"
+  },
+  "docs/superpowers/specs/2026-05-29-account-registration-design.md": {
+    "mtime": 1785029377.7307181,
+    "ast_hash": "98e4c9e4e5420d7e3cac6eeb941a8b43",
+    "semantic_hash": "98e4c9e4e5420d7e3cac6eeb941a8b43"
+  },
+  "docs/superpowers/specs/2026-06-15-supabase-monitor-mode-b2-design.md": {
+    "mtime": 1785125869.456086,
+    "ast_hash": "f8d8627488914cb402a2ef54a03c142e",
+    "semantic_hash": "f8d8627488914cb402a2ef54a03c142e"
+  },
+  "docs/superpowers/specs/2026-06-25-pokebot-control-plane-design.md": {
+    "mtime": 1782424667.3917587,
+    "ast_hash": "45a84c365d5f3aab49be96ca89f1e755",
+    "semantic_hash": "45a84c365d5f3aab49be96ca89f1e755"
+  },
+  "docs/superpowers/specs/2026-07-11-electron-app-auth-design.md": {
+    "mtime": 1785126707.644591,
+    "ast_hash": "5964b2f63db1403c5d4b54bedf320e44",
+    "semantic_hash": "5964b2f63db1403c5d4b54bedf320e44"
+  },
+  "docs/superpowers/specs/2026-07-14-ref-counted-central-monitoring-design.md": {
+    "mtime": 1785125869.456086,
+    "ast_hash": "711a98aa99b26655327d5b171ce82f32",
+    "semantic_hash": "711a98aa99b26655327d5b171ce82f32"
+  },
+  "docs/superpowers/specs/2026-07-15-admin-pin-website-toggle-design.md": {
+    "mtime": 1785029377.7342296,
+    "ast_hash": "cb0ab7877cf96ebc78969c8459a2f26b",
+    "semantic_hash": "cb0ab7877cf96ebc78969c8459a2f26b"
+  },
+  "docs/superpowers/specs/2026-08-10-target-checkout-success-speed-design.md": {
+    "mtime": 1786425674.9063914,
+    "ast_hash": "7479b9ce0ba3d73708876a6ac9bdd12b",
+    "semantic_hash": "7479b9ce0ba3d73708876a6ac9bdd12b"
+  },
+  "docs/superpowers/specs/2026-08-11-target-hot-set-durable-notifications-design.md": {
+    "mtime": 1786466717.4579647,
+    "ast_hash": "6084918b51b6b7682a2c15f3fea4ca70",
+    "semantic_hash": "6084918b51b6b7682a2c15f3fea4ca70"
+  },
+  "docs/superpowers/specs/2026-08-15-checkout-account-ownership-design.md": {
+    "mtime": 1786820412.5786338,
+    "ast_hash": "0129403be0de45493036ebee912672c8",
+    "semantic_hash": "0129403be0de45493036ebee912672c8"
+  },
+  "docs/superpowers/specs/2026-08-15-checkout-observability-design.md": {
+    "mtime": 1786839212.959236,
+    "ast_hash": "bc5f4d472458048bc66e624643e77b99",
+    "semantic_hash": "bc5f4d472458048bc66e624643e77b99"
+  },
+  "docs/superpowers/specs/2026-08-17-pokemon-center-queue-monitor-design.md": {
+    "mtime": 1786952505.501708,
+    "ast_hash": "b0f52da6376e4371c4afb7172a7bbde2",
+    "semantic_hash": "b0f52da6376e4371c4afb7172a7bbde2"
+  },
+  "electron-builder.yml": {
+    "mtime": 1785038549.3194525,
+    "ast_hash": "9cad1c5ab324a4b5ba03bfb325ff6540",
+    "semantic_hash": "9cad1c5ab324a4b5ba03bfb325ff6540"
+  },
+  "scripts/README.md": {
+    "mtime": 1786953178.7042668,
+    "ast_hash": "1c272c28c8175f5edf4ff82d5d16c791",
+    "semantic_hash": "1c272c28c8175f5edf4ff82d5d16c791"
+  },
+  "src/main/README.md": {
+    "mtime": 1785126762.2545512,
+    "ast_hash": "c96f0a925a56b4b56420e46d92f6ffe6",
+    "semantic_hash": "c96f0a925a56b4b56420e46d92f6ffe6"
+  },
+  "src/main/experimental/README.md": {
+    "mtime": 1785126679.0481474,
+    "ast_hash": "ab94bd2f3e2f6d36f3236f76f63e6871",
+    "semantic_hash": "ab94bd2f3e2f6d36f3236f76f63e6871"
+  },
+  "src/renderer/README.md": {
+    "mtime": 1785126762.2550547,
+    "ast_hash": "10790ca9a505028c57dc50eb73815508",
+    "semantic_hash": "10790ca9a505028c57dc50eb73815508"
+  },
+  "src/renderer/index.html": {
+    "mtime": 1785135187.806828,
+    "ast_hash": "62317242ca23d330f12bc0f7682d650d",
+    "semantic_hash": "62317242ca23d330f12bc0f7682d650d"
+  },
+  "supabase/README.md": {
+    "mtime": 1785120837.2111266,
+    "ast_hash": "cfb18079396e37111c0758f9a9aa9dad",
+    "semantic_hash": "cfb18079396e37111c0758f9a9aa9dad"
+  },
+  "tests/README.md": {
+    "mtime": 1785126679.0511508,
+    "ast_hash": "e534503e33f0bc681aac2d70cd618fa3",
+    "semantic_hash": "e534503e33f0bc681aac2d70cd618fa3"
+  },
+  "tests/fixtures/retailers/pokemon-center-queue.html": {
+    "mtime": 1785038527.4872723,
+    "ast_hash": "a2593d1a99d90b15379fb09ac8997caa",
+    "semantic_hash": "a2593d1a99d90b15379fb09ac8997caa"
+  },
+  "tests/fixtures/retailers/sams-traffic-gate.html": {
+    "mtime": 1785038527.4902723,
+    "ast_hash": "fa8063a83d3a447ad5a88120bb6da46c",
+    "semantic_hash": "fa8063a83d3a447ad5a88120bb6da46c"
+  },
+  "tests/fixtures/retailers/target-high-demand.html": {
+    "mtime": 1785038527.4902723,
+    "ast_hash": "20d6e07ea6197ae6db7dd3efb3cf2144",
+    "semantic_hash": "20d6e07ea6197ae6db7dd3efb3cf2144"
+  },
+  "tests/fixtures/retailers/walmart-queue.html": {
+    "mtime": 1785038527.4862647,
+    "ast_hash": "c4e26d207c497953c21e17356433379c",
+    "semantic_hash": "c4e26d207c497953c21e17356433379c"
+  },
+  "Polar Extension/icons/icon128.png": {
+    "mtime": 1786424392.5011585,
+    "ast_hash": "b4e5ad28d15bb04b0347a8ea7489c26e",
+    "semantic_hash": "b4e5ad28d15bb04b0347a8ea7489c26e"
+  },
+  "Polar Extension/icons/icon16.png": {
+    "mtime": 1786424392.5056598,
+    "ast_hash": "33612009d5e6732e042c07dd26d86335",
+    "semantic_hash": "33612009d5e6732e042c07dd26d86335"
+  },
+  "Polar Extension/icons/icon48.png": {
+    "mtime": 1786424392.5091722,
+    "ast_hash": "94c933c3ecfe82fb0c138678b9833733",
+    "semantic_hash": "94c933c3ecfe82fb0c138678b9833733"
+  },
+  "Polar Extension/icons/target_logo.png": {
+    "mtime": 1786424392.513677,
+    "ast_hash": "32944de21481942d23f57caaf6c0bfc1",
+    "semantic_hash": "32944de21481942d23f57caaf6c0bfc1"
+  },
+  "resources/icon.png": {
+    "mtime": 1780028999.6919816,
+    "ast_hash": "a2cf889708d9c4959c6808b4584848e4",
+    "semantic_hash": "a2cf889708d9c4959c6808b4584848e4"
+  },
+  "src/renderer/src/assets/electron.svg": {
+    "mtime": 1780028999.6989818,
+    "ast_hash": "7e350671f4993b01b6110e283cb7ab02",
+    "semantic_hash": "7e350671f4993b01b6110e283cb7ab02"
+  },
+  "src/renderer/src/assets/wavy-lines.svg": {
+    "mtime": 1780028999.7139823,
+    "ast_hash": "990cf549e920e993d4c1998c217661c6",
+    "semantic_hash": "990cf549e920e993d4c1998c217661c6"
+  }
+}

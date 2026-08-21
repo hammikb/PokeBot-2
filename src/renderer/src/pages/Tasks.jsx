@@ -63,6 +63,8 @@ export default function Tasks() {
     accounts,
     startTask,
     testTask,
+    runTaskNow,
+    focusCheckout,
     stopTask,
     deleteTask,
     createTask,
@@ -332,6 +334,36 @@ export default function Tasks() {
     }
   }
 
+  const runTaskNowManually = async (task) => {
+    if (!CHECKOUT_TEST_RETAILERS.has(task.retailer)) {
+      setTaskActionMessage(`${task.retailer} checkout automation is not supported.`)
+      return
+    }
+    if (task.mode === 'alert-only') {
+      setTaskActionMessage('Change this task to Auto-checkout before using Run now.')
+      return
+    }
+    const accountCount = getTaskAccountCount(task)
+    if (accountCount === 0) {
+      setTaskActionMessage('Edit this task and select at least one account before running checkout.')
+      return
+    }
+    setTaskActionMessage(`Running full checkout for ${task.product_name || 'task'}...`)
+    try {
+      const result = await runTaskNow(task.id)
+      if (result?.success) {
+        setTaskActionMessage('Checkout completed successfully.')
+      } else if (result?.requiresManualCheckout || result?.submissionUncertain) {
+        setTaskActionMessage('Checkout needs manual review. The browser was left open safely.')
+      } else {
+        const error = result?.results?.find((entry) => entry.error)?.error || result?.error || 'Checkout failed; monitoring remains active.'
+        setTaskActionMessage(`${error}. Monitoring remains active.`)
+      }
+    } catch (err) {
+      setTaskActionMessage(`${err.message || 'Checkout failed'}. Monitoring remains active.`)
+    }
+  }
+
   return (
     <div className="p-4 space-y-4 overflow-y-auto h-full">
       <section className="max-w-5xl mx-auto pt-3 pb-2">
@@ -370,7 +402,7 @@ export default function Tasks() {
                     <img
                       src={item.image}
                       alt=""
-                      className="w-9 h-9 object-contain bg-white rounded"
+                      className="w-12 h-12 object-contain bg-white rounded"
                     />
                   ) : (
                     <span className="w-9 h-9 rounded bg-white/10" />
@@ -658,7 +690,7 @@ export default function Tasks() {
           return (
             <div
               key={task.id}
-              className="bg-[#111318] border border-white/10 rounded-xl px-4 py-4 text-sm space-y-3"
+              className="bg-[#111318] border border-white/10 rounded-xl px-4 py-2 text-sm space-y-2"
             >
               <div className="flex items-center gap-4">
                 <span
@@ -674,7 +706,7 @@ export default function Tasks() {
                   <img
                     src={task.product_image_url}
                     alt={task.product_name || 'Product'}
-                    className="w-10 h-10 object-contain bg-white rounded-lg shrink-0"
+                    className="w-16 h-16 object-contain bg-white rounded-lg shrink-0"
                   />
                 )}
                 <span className="text-gray-500 text-xs shrink-0 border border-white/10 rounded-full px-2 py-0.5">
@@ -717,6 +749,20 @@ export default function Tasks() {
                   >
                     test
                   </button>
+                  <button
+                    onClick={() => runTaskNowManually(task)}
+                    disabled={accountCount === 0 || !CHECKOUT_TEST_RETAILERS.has(task.retailer) || task.mode === 'alert-only'}
+                    title={
+                      task.mode === 'alert-only'
+                        ? 'Change this task to Auto-checkout first'
+                        : accountCount === 0
+                          ? 'Edit task and select an account first'
+                          : 'Attempt a full checkout immediately'
+                    }
+                    className="text-red-400 hover:text-red-300 disabled:text-gray-700 transition-colors"
+                  >
+                    run now
+                  </button>
                   {status === 'idle' || status === 'error' ? (
                     <button
                       onClick={() => startTask(task.id)}
@@ -738,6 +784,21 @@ export default function Tasks() {
                       className="text-amber-400 hover:text-amber-300 transition-colors"
                     >
                       stop
+                    </button>
+                  )}
+                  {(status === 'manual_required' || status === 'error') && (
+                    <button
+                      onClick={async () => {
+                        const result = await focusCheckout(task.id)
+                        setTaskActionMessage(
+                          result?.success
+                            ? 'Checkout browser focused. Complete the cart manually.'
+                            : result?.message || 'No active checkout browser is available.'
+                        )
+                      }}
+                      className="text-amber-300 hover:text-amber-200 transition-colors"
+                    >
+                      take over
                     </button>
                   )}
                   <button

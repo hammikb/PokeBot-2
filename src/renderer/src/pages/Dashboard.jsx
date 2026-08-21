@@ -25,6 +25,16 @@ const MONITOR_STATUS_STYLE = {
   unavailable: 'border-gray-800 text-gray-500 bg-gray-950/20'
 }
 
+function desktopAlertEvidence(notifications) {
+  const failed = notifications?.lastFailed
+  const shown = notifications?.lastShown
+  if (failed && (!shown || failed.at >= shown.at)) {
+    return `failed at ${formatAppTime(failed.at)}${failed.reason ? ` — ${failed.reason}` : ''}`
+  }
+  if (shown) return `shown at ${formatAppTime(shown.at)}`
+  return 'no evidence yet'
+}
+
 export default function Dashboard() {
   const {
     feedEvents,
@@ -105,6 +115,9 @@ export default function Dashboard() {
                 (monitorHealthLoading
                   ? 'Checking the Pi and Electron channels...'
                   : 'No monitor health data yet.')}
+            </div>
+            <div className="mt-1 truncate text-xs text-gray-500">
+              Desktop alert: {desktopAlertEvidence(monitorHealth?.notifications)}
             </div>
           </div>
           {monitorHealth?.worker && (

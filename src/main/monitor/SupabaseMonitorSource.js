@@ -24,10 +24,12 @@ export class SupabaseMonitorSource extends EventEmitter {
   constructor({ client, catchUpWindowMs = DEFAULT_CATCH_UP_WINDOW_MS, now = () => Date.now() }) {
     super()
     this._client = client
-    this._channels = new Map() // productUrl → { channel, productId }
+    this._channels = new Map() // productUrl → { channel, productId, generation }
     this._byProduct = new Map() // productId → { productUrl, maxPrice }
-    this._reconnectTimers = new Map()
+    this._generations = new Map()
     this._health = new Map()
+    this._inventory = new Map()
+    this._recoveryPromise = null
     this._catchUpWindowMs = Math.max(0, Number(catchUpWindowMs) || 0)
     this._now = now
     this._catchUpPromises = new Map()
@@ -124,8 +126,9 @@ export class SupabaseMonitorSource extends EventEmitter {
       maxPrice: maxPrice ?? null
     })
 
-    const channel = this._subscribeProductChannel(productId)
-    this._channels.set(productUrl, { channel, productId })
+    const generation = this._nextGeneration(productId)
+    const channel = this._subscribeProductChannel(productId, generation)
+    this._channels.set(productUrl, { channel, productId, generation })
 
     return { subscribed: true, productId }
   }
@@ -293,17 +296,85 @@ export class SupabaseMonitorSource extends EventEmitter {
     return true
   }
 
+  _handleInventory(productId, payload, { delivery = 'realtime' } = {}) {
+    const meta = this._byProduct.get(productId)
+    if (!meta || meta.retailer !== 'target' || typeof payload?.available !== 'boolean') return false
+    const receivedAt = this._now()
+    const observedAt = normalizeObservedAt(
+      payload?.observed_at ?? payload?.created_at ?? payload?.timestamp,
+      receivedAt
+    )
+    const inventory = {
+      available: payload.available,
+      observedAt,
+      receivedAt,
+      delivery,
+      availabilityStatus: payload?.availability_status || null,
+      quantity: payload?.available_to_promise_quantity ?? null,
+      reasonCode: payload?.reason_code || null
+    }
+    const previous = this._inventory.get(productId)
+    if (!previous || observedAt >= previous.observedAt) this._inventory.set(productId, inventory)
+    this.emit('inventory', { productId, productUrl: meta.productUrl, ...inventory })
+    return true
+  }
+
+  getInventoryGate(productUrl, dropObservedAt) {
+    const entry = this._channels.get(productUrl)
+    const meta = entry ? this._byProduct.get(entry.productId) : null
+    if (!entry || meta?.retailer !== 'target') {
+      return { mode: 'fallback', available: null, observedAt: null, reason: 'inventory-unavailable' }
+    }
+    const health = this._health.get(entry.productId) || {}
+    if (health.interruptedAt != null || health.status !== 'SUBSCRIBED') {
+      return { mode: 'fallback', available: null, observedAt: null, reason: 'channel-interrupted' }
+    }
+    if (health.catchingUp || health.catchUpError) {
+      return {
+        mode: 'fallback',
+        available: null,
+        observedAt: null,
+        reason: 'inventory-catch-up-unhealthy'
+      }
+    }
+    const inventory = this._inventory.get(entry.productId)
+    if (!inventory) {
+      return { mode: 'fallback', available: null, observedAt: null, reason: 'inventory-missing' }
+    }
+    const dropAt = Date.parse(dropObservedAt)
+    const inventoryAt = Date.parse(inventory.observedAt)
+    if (!Number.isFinite(dropAt) || !Number.isFinite(inventoryAt) || inventoryAt < dropAt) {
+      return {
+        mode: 'fallback',
+        available: inventory.available,
+        observedAt: inventory.observedAt,
+        reason: 'inventory-predates-drop'
+      }
+    }
+    return inventory.available
+      ? {
+          mode: 'extend',
+          available: true,
+          observedAt: inventory.observedAt,
+          reason: 'confirmed-in-stock'
+        }
+      : {
+          mode: 'stop',
+          available: false,
+          observedAt: inventory.observedAt,
+          reason: 'confirmed-out-of-stock'
+        }
+  }
+
   // Tear down the realtime channel for a product without touching the central
   // subscription row. Used on app quit: closing the app is not "stop watching" —
   // the Pi should keep monitoring while the user's task still exists.
   async releaseChannel(productUrl) {
     const entry = this._channels.get(productUrl)
     if (!entry) return
-    const reconnectTimer = this._reconnectTimers.get(entry.productId)
-    if (reconnectTimer) clearTimeout(reconnectTimer)
+    this._nextGeneration(entry.productId)
     const catchUpRetryTimer = this._catchUpRetryTimers.get(entry.productId)
     if (catchUpRetryTimer) clearTimeout(catchUpRetryTimer)
-    this._reconnectTimers.delete(entry.productId)
     this._catchUpRetryTimers.delete(entry.productId)
     this._catchUpRetryAttempts.delete(entry.productId)
     this._health.delete(entry.productId)
@@ -311,6 +382,7 @@ export class SupabaseMonitorSource extends EventEmitter {
     this._byProduct.delete(entry.productId)
     this._cursors.delete(entry.productId)
     this._seenEventIds.delete(entry.productId)
+    this._inventory.delete(entry.productId)
     await this._client.removeChannel(entry.channel)
   }
 
@@ -368,31 +440,48 @@ export class SupabaseMonitorSource extends EventEmitter {
     )
   }
 
-  _subscribeProductChannel(productId) {
+  _subscribeProductChannel(productId, generation) {
     const meta = this._byProduct.get(productId)
     const channel = this._client
       .channel(`drops:product:${productId}`, { config: { private: true } })
-      .on('broadcast', { event: 'drop' }, ({ payload }) => this._handleDrop(productId, payload))
+      .on('broadcast', { event: 'drop' }, ({ payload }) => {
+        if (this._generations.get(productId) === generation) this._handleDrop(productId, payload)
+      })
+      .on('broadcast', { event: 'inventory' }, ({ payload }) => {
+        if (this._generations.get(productId) === generation) {
+          this._handleInventory(productId, payload)
+        }
+      })
 
     channel.subscribe((status, error) => {
+      if (this._generations.get(productId) !== generation) return
       const previous = this._health.get(productId) || {}
+      const interrupted = ['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'].includes(status)
       this._health.set(productId, {
         ...previous,
         status,
-        lastStatusAt: Date.now(),
-        error: error?.message || null
+        lastStatusAt: this._now(),
+        error: error?.message || null,
+        interruptedAt: interrupted ? (previous.interruptedAt ?? this._now()) : previous.interruptedAt
       })
       this.emit('health', { productId, productUrl: meta?.productUrl, status, error })
-      if (['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'].includes(status)) {
-        this._scheduleReconnect(productId)
-      } else if (status === 'SUBSCRIBED') {
-        const timer = this._reconnectTimers.get(productId)
-        if (timer) clearTimeout(timer)
-        this._reconnectTimers.delete(productId)
-        this._catchUpProduct(productId)
+      if (status === 'SUBSCRIBED') {
+        this._catchUpAfterSubscribe(productId, generation)
       }
     })
     return channel
+  }
+
+  async _catchUpAfterSubscribe(productId, generation) {
+    await this._catchUpProduct(productId)
+    if (this._generations.get(productId) !== generation) return
+    const health = this._health.get(productId) || {}
+    // A new generation may subscribe while the previous generation's catch-up
+    // promise is still settling. Run once more so this subscription proves its
+    // own durable gap is closed before the inventory gate becomes authoritative.
+    if (health.status === 'SUBSCRIBED' && health.interruptedAt != null && !health.catchUpError) {
+      await this._catchUpProduct(productId)
+    }
   }
 
   _catchUpProduct(productId) {
@@ -472,6 +561,7 @@ export class SupabaseMonitorSource extends EventEmitter {
     for (const row of rows) {
       if (this._handleDrop(productId, row, { delivery: 'catch_up' })) recovered += 1
     }
+    await this._runInventoryCatchUp(productId)
 
     const completedAt = this._now()
     const latest = this._health.get(productId) || {}
@@ -480,7 +570,8 @@ export class SupabaseMonitorSource extends EventEmitter {
       catchingUp: false,
       lastCatchUpCompletedAt: completedAt,
       lastCatchUpRecovered: recovered,
-      catchUpError: null
+      catchUpError: null,
+      interruptedAt: latest.status === 'SUBSCRIBED' ? null : latest.interruptedAt
     })
     const retryTimer = this._catchUpRetryTimers.get(productId)
     if (retryTimer) clearTimeout(retryTimer)
@@ -494,6 +585,24 @@ export class SupabaseMonitorSource extends EventEmitter {
       catchingUp: false,
       catchUpRecovered: recovered
     })
+  }
+
+  async _runInventoryCatchUp(productId) {
+    const meta = this._byProduct.get(productId)
+    if (!meta || meta.retailer !== 'target') return
+    const { data, error } = await this._client
+      .from('target_inventory_observations')
+      .select(
+        'tcin,available,observed_at,availability_status,available_to_promise_quantity,reason_code'
+      )
+      .eq('tcin', meta.productKey)
+      .order('observed_at', { ascending: false })
+      .limit(1)
+    if (error) throw new Error(`Supabase inventory catch-up failed: ${error.message}`)
+    const row = data?.[0]
+    if (row && this._byProduct.has(productId)) {
+      this._handleInventory(productId, { ...row, product_id: productId }, { delivery: 'catch_up' })
+    }
   }
 
   _hasSeenEvent(productId, eventId) {
@@ -523,23 +632,42 @@ export class SupabaseMonitorSource extends EventEmitter {
     }
   }
 
-  _scheduleReconnect(productId) {
-    if (this._reconnectTimers.has(productId)) return
-    const timer = setTimeout(async () => {
-      this._reconnectTimers.delete(productId)
-      const meta = this._byProduct.get(productId)
-      const current = meta ? this._channels.get(meta.productUrl) : null
-      if (!meta || !current) return
-      await this._client.removeChannel(current.channel).catch(() => {})
-      const channel = this._subscribeProductChannel(productId)
-      this._channels.set(meta.productUrl, { channel, productId })
-      this.emit('notice', {
-        productUrl: meta.productUrl,
-        message: 'Realtime monitor reconnected after a channel interruption.'
-      })
-    }, 1500)
-    timer.unref?.()
-    this._reconnectTimers.set(productId, timer)
+  _nextGeneration(productId) {
+    const generation = (this._generations.get(productId) || 0) + 1
+    this._generations.set(productId, generation)
+    return generation
+  }
+
+  recoverInterruptedChannels({ minInterruptedMs = 30_000 } = {}) {
+    if (this._recoveryPromise) return this._recoveryPromise
+    this._recoveryPromise = (async () => {
+      let recovered = 0
+      for (const [productUrl, entry] of [...this._channels.entries()]) {
+        const health = this._health.get(entry.productId) || {}
+        if (
+          health.interruptedAt == null ||
+          this._now() - health.interruptedAt < Math.max(0, Number(minInterruptedMs) || 0)
+        ) {
+          continue
+        }
+        if (this._channels.get(productUrl)?.generation !== entry.generation) continue
+
+        const generation = this._nextGeneration(entry.productId)
+        await this._client.removeChannel(entry.channel).catch(() => {})
+        if (!this._byProduct.has(entry.productId)) continue
+        const channel = this._subscribeProductChannel(entry.productId, generation)
+        this._channels.set(productUrl, { channel, productId: entry.productId, generation })
+        recovered += 1
+        this.emit('notice', {
+          productUrl,
+          message: 'Realtime monitor recovered a channel that remained interrupted.'
+        })
+      }
+      return { recovered }
+    })().finally(() => {
+      this._recoveryPromise = null
+    })
+    return this._recoveryPromise
   }
 
   _scheduleCatchUpRetry(productId) {

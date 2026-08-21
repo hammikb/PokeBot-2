@@ -12,11 +12,18 @@ import { resolveTargetCartState } from './target/TargetCartEvidence.js'
 import { TARGET_CART_STRATEGY } from './target/TargetCartPolicy.js'
 import { classifyTargetPageReuse } from './target/TargetPageReusePolicy.js'
 import {
+  TARGET_QUANTITY_CONTROL_SELECTORS,
+  TARGET_QUANTITY_INCREMENT_SELECTOR,
+  TARGET_QUANTITY_INPUT_SELECTOR,
+  TARGET_QUANTITY_OPTION_SELECTOR,
+  TARGET_QUANTITY_SELECT_SELECTOR,
+  TARGET_QUANTITY_TRIGGER_SELECTOR,
   TRANSIENT_CART_DIALOG_SELECTOR,
   clickAndObserveTargetCart,
   dismissVisibleTargetCartTransient,
   getTargetProbableCartEvidence,
-  getVisibleTargetAddToCartButton
+  getVisibleTargetAddToCartButton,
+  readTargetHeaderCartQuantity
 } from './target/TargetCartSignals.js'
 import { attemptTargetQueueBypass, isTargetQueueActive } from '../targetQueueBypass.js'
 import { validateTargetSession } from '../akamaiSensor.js'
@@ -60,6 +67,7 @@ export async function runTargetFlow(
     onStep = () => {},
     onBeforeSubmit = () => {},
     onMilestone = () => {},
+    getInventoryGate = async () => ({ mode: 'fallback', reason: 'inventory-gate-unavailable' }),
     browserPool = null, // [TARGET] Pass the BrowserPool instance
     accountId = null // [TARGET] Pass the account ID for Shape tracking
   }
@@ -67,10 +75,9 @@ export async function runTargetFlow(
   const usesPooledCheckoutPage = Boolean(
     browserPool && accountId && typeof browserPool.getCheckoutPage === 'function'
   )
-  const page =
-    usesPooledCheckoutPage
-      ? await browserPool.getCheckoutPage(accountId, context)
-      : await context.newPage()
+  const page = usesPooledCheckoutPage
+    ? await browserPool.getCheckoutPage(accountId, context)
+    : await context.newPage()
   const coordinator = await TargetPageCoordinator.attach(page)
   onStep('Target live page coordinator active')
 
@@ -313,7 +320,8 @@ export async function runTargetFlow(
               dropEvent,
               coordinator,
               onMilestone,
-              navigationWaitUntil
+              navigationWaitUntil,
+              getInventoryGate
             )
           }
         } else if (isTargetHighTrafficError(result.error)) {
@@ -345,7 +353,8 @@ export async function runTargetFlow(
               dropEvent,
               coordinator,
               onMilestone,
-              navigationWaitUntil
+              navigationWaitUntil,
+              getInventoryGate
             )
           }
         } else {
@@ -362,7 +371,8 @@ export async function runTargetFlow(
             dropEvent,
             coordinator,
             onMilestone,
-            navigationWaitUntil
+            navigationWaitUntil,
+            getInventoryGate
           )
         }
       } catch (err) {
@@ -382,7 +392,8 @@ export async function runTargetFlow(
         dropEvent,
         coordinator,
         onMilestone,
-        navigationWaitUntil
+        navigationWaitUntil,
+        getInventoryGate
       )
     }
 
@@ -1338,6 +1349,149 @@ async function isTargetSignedIn(page) {
 }
 
 /**
+ * Read the quantity Target currently shows on the product page, whichever control
+ * it renders. Returns null when no quantity control exists at all.
+ */
+/**
+ * Wait for the quantity control to mount. Target renders it a beat after the Add to
+ * cart button, so a single point-in-time read reported 'control-not-found' on 14 of 17
+ * live attempts while the control was about to appear.
+ */
+export async function waitForTargetQuantityControl(page, { timeoutMs = 3000, pollMs = 100 } = {}) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const observed = await readTargetProductQuantity(page)
+    if (observed !== null) return observed
+    if (Date.now() >= deadline) return null
+    await page.waitForTimeout(pollMs)
+  }
+}
+
+export async function readTargetProductQuantity(page) {
+  for (const selector of TARGET_QUANTITY_CONTROL_SELECTORS) {
+    const control = page.locator(selector).first()
+    if (!(await control.count().catch(() => 0))) continue
+    const raw = await control
+      .evaluate((el) =>
+        el.tagName === 'SELECT' || el.tagName === 'INPUT'
+          ? el.value
+          : el.getAttribute('aria-valuenow') ||
+            el.getAttribute('data-quantity') ||
+            (el.innerText ?? el.textContent ?? '')
+      )
+      .catch(() => null)
+    const parsed = Number(String(raw ?? '').match(/\d{1,2}/)?.[0])
+    if (Number.isInteger(parsed) && parsed > 0) return parsed
+  }
+  return null
+}
+
+/**
+ * Set the product-page quantity to `wanted`. Target has shipped this control as a
+ * <select>, a numeric input, and a +/- stepper at various times, so try each and
+ * verify the result rather than assuming the click landed. Returns the quantity
+ * actually showing afterwards, or null when no control was found.
+ */
+/** Read the value shown inside a single quantity trigger. */
+async function readTargetTriggerQuantity(trigger) {
+  const raw = await trigger
+    .evaluate(
+      (el) => el.querySelector('[class*="quantityValue"]')?.textContent ?? el.innerText ?? ''
+    )
+    .catch(() => null)
+  const parsed = Number(String(raw ?? '').match(/\d{1,2}/)?.[0])
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+/**
+ * Wait only as long as the control actually needs. A flat sleep after every option
+ * click paid the worst case every time, on the critical path before Add to cart.
+ */
+async function settleTargetTriggerQuantity(page, trigger, wanted, { timeoutMs = 400 } = {}) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    if ((await readTargetTriggerQuantity(trigger)) === wanted) return true
+    if (Date.now() >= deadline) return false
+    // Measured on a live PDP: the control settles in ~11ms, so poll tight.
+    await page.waitForTimeout(10)
+  }
+}
+
+export async function setTargetProductQuantity(page, wanted) {
+  const current = await waitForTargetQuantityControl(page)
+  if (current === null) return null
+  if (current === wanted) return wanted
+
+  const select = page.locator(TARGET_QUANTITY_SELECT_SELECTOR).first()
+  if (await select.count().catch(() => 0)) {
+    await select.selectOption({ value: String(wanted) }).catch(() => {})
+    await page.waitForTimeout(250)
+    if ((await readTargetProductQuantity(page)) === wanted) return wanted
+  }
+
+  const input = page.locator(TARGET_QUANTITY_INPUT_SELECTOR).first()
+  if (await input.count().catch(() => 0)) {
+    await input.fill(String(wanted)).catch(() => {})
+    await input.press('Enter').catch(() => {})
+    await page.waitForTimeout(250)
+    if ((await readTargetProductQuantity(page)) === wanted) return wanted
+  }
+
+  // Custom listbox. Target renders one quantity control PER fulfillment section
+  // (@web/AddToCart/Fulfillment/ShippingSection and StickyAddToCartFulfillmentSection),
+  // each with its own independent value and its own Add to cart / Preorder button that
+  // shares the same element id. Setting only the first left the sticky bar on 1, so a
+  // click that landed there added 1 item. Set every one of them.
+  const triggers = page.locator(TARGET_QUANTITY_TRIGGER_SELECTOR)
+  const triggerCount = await triggers.count().catch(() => 0)
+  for (let index = 0; index < triggerCount; index += 1) {
+    const trigger = triggers.nth(index)
+    if ((await readTargetTriggerQuantity(trigger)) === wanted) continue
+    // Only visible triggers reach here, so a slow click means a real problem, not a
+    // hidden element we were never going to reach.
+    await trigger.click({ timeout: 800 }).catch(() => {})
+    // Only the list that just opened. Each section renders its own options <ul>, and a
+    // page-wide .first() can land on the other section's hidden entry and do nothing.
+    const option = page.locator(TARGET_QUANTITY_OPTION_SELECTOR(wanted)).first()
+    await option.click({ timeout: 800 }).catch(() => {})
+    await settleTargetTriggerQuantity(page, trigger, wanted)
+
+    if ((await readTargetTriggerQuantity(trigger)) !== wanted) {
+      const popup = await page
+        .locator('ul[class*="Options_styles_options"], [role="listbox"]')
+        .first()
+        .evaluate((el) => el.outerHTML.slice(0, 600))
+        .catch(() => null)
+      log.warn('Target quantity listbox did not accept the option click', {
+        wanted,
+        triggerIndex: index,
+        triedSelector: TARGET_QUANTITY_OPTION_SELECTOR(wanted),
+        popupHtml: popup
+      })
+    }
+  }
+  if (triggerCount > 0) {
+    const settled = await readTargetProductQuantity(page)
+    if (settled === wanted) return wanted
+  }
+
+  // ponytail: stepper clicks are capped at wanted+2 tries; a stepper that needs more
+  // than that is broken, not slow.
+  const increment = page.locator(TARGET_QUANTITY_INCREMENT_SELECTOR).first()
+  if (await increment.count().catch(() => 0)) {
+    for (let attempt = 0; attempt < wanted + 2; attempt += 1) {
+      const observed = await readTargetProductQuantity(page)
+      if (observed === wanted) return wanted
+      if (observed === null || observed > wanted) break
+      await increment.click({ timeout: 1000 }).catch(() => {})
+      await page.waitForTimeout(150)
+    }
+  }
+
+  return await readTargetProductQuantity(page)
+}
+
+/**
  * Browser-based add to cart (fallback method)
  */
 export async function browserAddToCart(
@@ -1349,7 +1503,8 @@ export async function browserAddToCart(
   dropEvent,
   coordinator = null,
   onMilestone = () => {},
-  navigationWaitUntil = 'domcontentloaded'
+  navigationWaitUntil = 'domcontentloaded',
+  getInventoryGate = async () => ({ mode: 'fallback', reason: 'inventory-gate-unavailable' })
 ) {
   // The fast path may have navigated us to the cart page (which has no Add to cart button),
   // and the API may have failed, so always ensure we're on the product page before clicking.
@@ -1373,25 +1528,53 @@ export async function browserAddToCart(
   })
   onMilestone('availability_ready', 'Target fulfillment and Add to cart controls ready')
 
+  let quantityControlFailure = null
+  // Whole-cart total before we click, so an ambiguous click can be judged by the
+  // header badge moving rather than by opening the cart page.
+  let baselineCartQuantity = await readTargetHeaderCartQuantity(page)
+
   // Target often renders quantity only after fulfillment settles. Selecting it
   // before hydration silently did nothing during live drops.
   const selectRequestedQuantity = async () => {
     if (buyLimit <= 1) return
     onStep(`Setting quantity to ${buyLimit}`)
-    const quantitySelect = page.locator('select[data-test="@web/QuantitySelector"]')
-    if ((await quantitySelect.count()) > 0) {
-      await quantitySelect.selectOption({ value: String(buyLimit) })
-      await page.waitForTimeout(250)
-      await waitForTargetAddToCartReady(page, {
-        onStep,
-        notificationEngine,
-        dropEvent,
-        coordinator,
-        timeoutMs: 3000,
-        tcin
+    const applied = await setTargetProductQuantity(page, buyLimit)
+    if (applied !== buyLimit) {
+      // Loud on purpose: this used to no-op in silence whenever Target renamed the
+      // control, and every order shipped at quantity 1 while the UI claimed otherwise.
+      quantityControlFailure = applied === null ? 'control-not-found' : `stuck-at-${applied}`
+      log.warn('Target product quantity was not applied', {
+        tcin,
+        requested: buyLimit,
+        observed: applied,
+        reason: quantityControlFailure
       })
+      onStep(
+        applied === null
+          ? `Could not find Target's quantity control - continuing at quantity 1`
+          : `Target quantity stayed at ${applied} instead of ${buyLimit} - continuing`
+      )
+      return
     }
+    quantityControlFailure = null
+    await waitForTargetAddToCartReady(page, {
+      onStep,
+      notificationEngine,
+      dropEvent,
+      coordinator,
+      timeoutMs: 3000,
+      tcin
+    })
   }
+  // Cheap re-assert before every click. Target resets the picker to 1 after a refused
+  // add, and the retry loop reuses the same warm page - without this, attempt 1 asks for
+  // 2 and every attempt after it silently asks for 1. A read is ~11ms, so this is free.
+  const ensureRequestedQuantity = async () => {
+    if (buyLimit <= 1) return
+    if ((await readTargetProductQuantity(page)) === buyLimit) return
+    await selectRequestedQuantity()
+  }
+
   await selectRequestedQuantity()
 
   const restoreProduct = async () => {
@@ -1410,15 +1593,16 @@ export async function browserAddToCart(
       tcin
     })
     await selectRequestedQuantity()
+    baselineCartQuantity = await readTargetHeaderCartQuantity(page)
   }
 
-  return runTargetCartAttempt({
+  const attempt = await runTargetCartAttempt({
     tcin,
     requestedQuantity: buyLimit,
     productUrl,
     sleep: (ms) => page.waitForTimeout(ms),
-    acquireButton: ({ pollMs }) =>
-      waitForTargetAddToCartReady(page, {
+    acquireButton: async ({ pollMs }) => {
+      const button = await waitForTargetAddToCartReady(page, {
         onStep,
         notificationEngine,
         dropEvent,
@@ -1426,7 +1610,10 @@ export async function browserAddToCart(
         timeoutMs: 5000,
         pollMs,
         tcin
-      }),
+      })
+      await ensureRequestedQuantity()
+      return button
+    },
     getProbableEvidence: () => getTargetProbableCartEvidence(page, tcin),
     clickAndObserve: (button, { outcomeMs }) =>
       clickAndObserveTargetCart({ page, button, tcin, outcomeMs }),
@@ -1443,21 +1630,27 @@ export async function browserAddToCart(
       return cartState
     },
     recoverAmbiguousCart: async () => {
-      onStep('Checking the Target cart after an unclear Add to cart response')
-      const recovered = await recoverAmbiguousTargetCart(page, tcin, { coordinator })
-      if (!recovered.present) {
-        onStep(
-          recovered.recoveryOutcome === 'timeout'
-            ? 'Quick cart check timed out - returning to the product'
-            : 'Requested item was not in the cart - returning to the product'
-        )
-        await restoreProduct()
+      onStep('Reading the Target header cart count after an unclear Add to cart response')
+      const recovered = await recoverAmbiguousTargetCart(page, tcin, {
+        coordinator,
+        baselineCartQuantity
+      })
+      if (recovered.present) {
+        // Our add landed; fold it into the baseline so the next click is judged fresh.
+        baselineCartQuantity += recovered.quantity
+      } else {
+        onStep('Header cart count did not move - staying on the product page')
       }
       return recovered
     },
-    dismissTransient: () => dismissVisibleTargetCartTransient(page),
+    dismissTransient: () =>
+      dismissVisibleTargetCartTransient(page, {
+        onDiagnostic: (detail) => log.info('Target cart panel dismissal', { tcin, ...detail })
+      }),
     restoreProduct,
     isProductPageValid: async () => /target\.com\/p\//i.test(page.url?.() || ''),
+    isSessionAlive: () => isTargetSignedIn(page).catch(() => false),
+    getInventoryGate,
     onEvent: (event) => {
       log.info('Target cart attempt event', event)
       if (event.state === 'cart_response_wait') {
@@ -1530,6 +1723,8 @@ export async function browserAddToCart(
       }
     }
   })
+
+  return { ...attempt, quantityControlFailure }
 }
 
 export async function waitForTargetAddToCartReady(
@@ -1655,14 +1850,23 @@ async function waitForTargetCartState(page, tcin, timeoutMs, coordinator = null)
   return lastState
 }
 
+/**
+ * Decide whether an unclear Add to cart click actually landed, WITHOUT navigating to
+ * the cart. The header badge is a whole-cart total, so only an increase over the
+ * pre-click baseline proves our add: a cart that already held other items would
+ * otherwise read as a false confirmation.
+ */
 export async function recoverAmbiguousTargetCart(
   page,
   tcin,
   {
     coordinator = null,
-    timeoutMs = 2000,
+    // Just a header-badge read on the page we are already on, so it does not need a
+    // 2s budget. This sits between clicks, so every ms here is a ms not spent clicking.
+    timeoutMs = 750,
+    baselineCartQuantity = null,
     now = () => Date.now(),
-    waitForCartState = waitForTargetCartState
+    readCartQuantity = readTargetHeaderCartQuantity
   } = {}
 ) {
   const startedAt = now()
@@ -1674,24 +1878,32 @@ export async function recoverAmbiguousTargetCart(
     recoveryOutcome
   })
 
-  try {
-    if (!/target\.com\/(co-cart|cart)/i.test(page.url?.() || '')) {
-      await page.goto('https://www.target.com/co-cart', {
-        waitUntil: 'commit',
-        timeout: Math.max(1, Math.min(1200, timeoutMs))
-      })
-    }
+  // No baseline means no safe comparison; say so rather than guessing from a total.
+  if (!Number.isInteger(baselineCartQuantity)) return unresolved('absent')
 
-    const remainingMs = Math.max(0, timeoutMs - (now() - startedAt))
-    if (remainingMs === 0) return unresolved('timeout')
-    const cartState = await waitForCartState(page, tcin, remainingMs, coordinator)
-    if (cartState?.present && Number.isInteger(cartState.quantity) && cartState.quantity > 0) {
-      return cartState
+  try {
+    while (now() - startedAt < timeoutMs) {
+      const observed = await readCartQuantity(page)
+      if (Number.isInteger(observed) && observed > baselineCartQuantity) {
+        return {
+          present: true,
+          quantity: observed - baselineCartQuantity,
+          unitPrice: null,
+          source: 'header-cart-badge',
+          recoveryOutcome: 'present'
+        }
+      }
+      const snapshot = await coordinator?.signalState()
+      const remainingMs = Math.max(0, timeoutMs - (now() - startedAt))
+      if (remainingMs === 0) break
+      await waitForTargetSignal(page, coordinator, snapshot, Math.min(250, remainingMs))
     }
-    return unresolved(now() - startedAt >= timeoutMs ? 'timeout' : 'absent')
+    return unresolved('timeout')
   } catch (error) {
     log.info('Target ambiguous cart recovery did not settle', {
-      reason: /timeout/i.test(String(error?.message || '')) ? 'timeout' : 'navigation-failed'
+      tcin,
+      reason: 'header-badge-unreadable',
+      error: error?.message
     })
     return unresolved('timeout')
   }

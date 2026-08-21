@@ -14,7 +14,10 @@ function makeFakeClient({
   deleteError = null,
   insertResult = { data: { id: 'prod-new' }, error: null },
   dropRows = [],
-  dropQueryError = null
+  dropQueryError = null,
+  inventoryRows = [],
+  inventoryQueryError = null,
+  closeOnRemove = false
 }) {
   const calls = {
     upserts: [],
@@ -22,9 +25,9 @@ function makeFakeClient({
     deletes: [],
     channels: [],
     dropQueries: [],
-    removed: 0
+    removed: 0,
+    inventoryQueries: []
   }
-  let dropHandler = null
   let selectCallCount = 0
   const client = {
     from: (table) => {
@@ -92,6 +95,33 @@ function makeFakeClient({
           }
         }
       }
+      if (table === 'target_inventory_observations') {
+        return {
+          select: (columns) => {
+            const filters = {}
+            const orders = []
+            const query = {
+              eq: (column, value) => {
+                filters[column] = value
+                return query
+              },
+              order: (column, options) => {
+                orders.push({ column, options })
+                return query
+              },
+              limit: async (limit) => {
+                calls.inventoryQueries.push({ columns, filters, orders, limit })
+                const rows = inventoryRows
+                  .filter((row) => !filters.tcin || row.tcin === filters.tcin)
+                  .sort((left, right) => String(right.observed_at).localeCompare(String(left.observed_at)))
+                  .slice(0, limit)
+                return { data: rows, error: inventoryQueryError }
+              }
+            }
+            return query
+          }
+        }
+      }
       return {
         upsert: async (row, opts) => {
           calls.upserts.push({ table, row, opts })
@@ -115,8 +145,9 @@ function makeFakeClient({
       const ch = {
         name,
         opts,
+        handlers: new Map(),
         on: (type, filter, cb) => {
-          if (type === 'broadcast') dropHandler = cb
+          if (type === 'broadcast') ch.handlers.set(filter.event, cb)
           return ch
         },
         subscribe: (callback) => {
@@ -128,19 +159,30 @@ function makeFakeClient({
       calls.channels.push(ch)
       return ch
     },
-    removeChannel: async () => {
+    removeChannel: async (channel) => {
       calls.removed += 1
+      if (closeOnRemove) channel?.statusCallback?.('CLOSED')
     }
   }
   return {
     client,
     calls,
-    fireDrop: (payload) => dropHandler({ payload }),
-    emitStatus: (status, error) => calls.channels.at(-1)?.statusCallback?.(status, error)
+    fireDrop: (payload, index = calls.channels.length - 1) =>
+      calls.channels[index]?.handlers.get('drop')?.({ payload }),
+    broadcast: (event, payload, index = calls.channels.length - 1) =>
+      calls.channels[index]?.handlers.get(event)?.({ payload }),
+    emitStatus: (status, error, index = calls.channels.length - 1) =>
+      calls.channels[index]?.statusCallback?.(status, error)
   }
 }
 
 const SEED = { id: 'prod-1' }
+const TARGET_PRODUCT = {
+  productUrl: 'https://www.target.com/p/A-94336414',
+  retailer: 'target',
+  productKey: '94336414',
+  maxPrice: null
+}
 
 describe('SupabaseMonitorSource', () => {
   afterEach(() => {
@@ -355,6 +397,9 @@ describe('SupabaseMonitorSource', () => {
         created_at_gte: '2026-07-27T02:00:00.000Z'
       },
       limit: 501
+    })
+    await vi.waitFor(() => {
+      expect(source.getHealth()['https://www.target.com/p/A-94336414'].catchingUp).toBe(false)
     })
     expect(source.getHealth()['https://www.target.com/p/A-94336414']).toMatchObject({
       status: 'SUBSCRIBED',
@@ -591,33 +636,100 @@ describe('SupabaseMonitorSource', () => {
     expect(calls.deletes).toEqual([])
   })
 
-  it('reports channel health and recreates an interrupted subscription', async () => {
-    vi.useFakeTimers()
-    const { client, calls, emitStatus } = makeFakeClient({ product: SEED })
+  it('returns an extended gate for a valid post-drop in-stock inventory event', async () => {
+    const { client, broadcast } = makeFakeClient({ product: SEED })
     const source = new SupabaseMonitorSource({ client })
-    await source.addProduct({
-      productUrl: 'https://www.target.com/p/A-94336414',
-      retailer: 'target',
-      productKey: '94336414',
-      maxPrice: null
+    await source.addProduct(TARGET_PRODUCT)
+    await vi.waitFor(() => expect(source.getHealth()[TARGET_PRODUCT.productUrl].catchingUp).toBe(false))
+
+    broadcast('inventory', {
+      product_id: 'prod-1',
+      tcin: '94336414',
+      available: true,
+      observed_at: '2026-08-11T08:36:12.000Z'
     })
+
+    expect(source.getInventoryGate(TARGET_PRODUCT.productUrl, '2026-08-11T08:36:11.000Z'))
+      .toMatchObject({ mode: 'extend', available: true })
+  })
+
+  it('stops for a newer out-of-stock observation and falls back for pre-drop evidence', async () => {
+    const { client, broadcast } = makeFakeClient({ product: SEED })
+    const source = new SupabaseMonitorSource({ client })
+    await source.addProduct(TARGET_PRODUCT)
+    await vi.waitFor(() => expect(source.getHealth()[TARGET_PRODUCT.productUrl].catchingUp).toBe(false))
+    broadcast('inventory', {
+      product_id: 'prod-1',
+      tcin: '94336414',
+      available: false,
+      observed_at: '2026-08-11T08:36:12.000Z'
+    })
+
+    expect(source.getInventoryGate(TARGET_PRODUCT.productUrl, '2026-08-11T08:36:11.000Z'))
+      .toMatchObject({ mode: 'stop', available: false })
+    expect(source.getInventoryGate(TARGET_PRODUCT.productUrl, '2026-08-11T08:36:13.000Z'))
+      .toMatchObject({ mode: 'fallback', reason: 'inventory-predates-drop' })
+  })
+
+  it('falls back while interrupted and restores an inventory gate after catch-up', async () => {
+    let now = Date.parse('2026-08-11T08:36:20.000Z')
+    const inventoryRows = [{
+      tcin: '94336414',
+      available: true,
+      observed_at: '2026-08-11T08:36:12.000Z'
+    }]
+    const { client, emitStatus } = makeFakeClient({ product: SEED, inventoryRows })
+    const source = new SupabaseMonitorSource({ client, now: () => now })
+    await source.addProduct(TARGET_PRODUCT)
+    await vi.waitFor(() => expect(source.getHealth()[TARGET_PRODUCT.productUrl].catchingUp).toBe(false))
+    expect(source.getInventoryGate(TARGET_PRODUCT.productUrl, '2026-08-11T08:36:11.000Z').mode)
+      .toBe('extend')
+
+    emitStatus('CHANNEL_ERROR', new Error('socket lost'))
+    expect(source.getInventoryGate(TARGET_PRODUCT.productUrl, '2026-08-11T08:36:11.000Z'))
+      .toMatchObject({ mode: 'fallback', reason: 'channel-interrupted' })
+
+    emitStatus('SUBSCRIBED')
+    await vi.waitFor(() => expect(source.getHealth()[TARGET_PRODUCT.productUrl].interruptedAt).toBe(null))
+    expect(source.getInventoryGate(TARGET_PRODUCT.productUrl, '2026-08-11T08:36:11.000Z').mode)
+      .toBe('extend')
+  })
+
+  it('recovers only a current interrupted generation and ignores stale CLOSED callbacks', async () => {
+    let now = 1_000
+    const { client, calls, emitStatus } = makeFakeClient({
+      product: SEED,
+      closeOnRemove: true
+    })
+    const source = new SupabaseMonitorSource({ client, now: () => now })
+    await source.addProduct(TARGET_PRODUCT)
 
     expect(source.getHealth()['https://www.target.com/p/A-94336414']).toMatchObject({
       productId: 'prod-1',
       status: 'SUBSCRIBED'
     })
     emitStatus('CHANNEL_ERROR', new Error('socket lost'))
-    await vi.advanceTimersByTimeAsync(1500)
+    now += 30_000
+    await expect(source.recoverInterruptedChannels({ minInterruptedMs: 30_000 }))
+      .resolves.toEqual({ recovered: 1 })
 
     expect(calls.removed).toBe(1)
     expect(calls.channels).toHaveLength(2)
     expect(source.getHealth()['https://www.target.com/p/A-94336414'].status).toBe('SUBSCRIBED')
+    await vi.waitFor(() => {
+      expect(source.getHealth()['https://www.target.com/p/A-94336414'].interruptedAt).toBe(null)
+    })
+    emitStatus('CLOSED', undefined, 0)
+    now += 30_000
+    await expect(source.recoverInterruptedChannels({ minInterruptedMs: 30_000 }))
+      .resolves.toEqual({ recovered: 0 })
+    expect(calls.channels).toHaveLength(2)
     await source.stop()
   })
 
   it('catches up a row missed during a channel interruption and deduplicates cursor overlap', async () => {
     vi.useFakeTimers()
-    const now = Date.parse('2026-07-27T02:05:00.000Z')
+    let now = Date.parse('2026-07-27T02:05:00.000Z')
     const dropRows = []
     const { client, calls, fireDrop, emitStatus } = makeFakeClient({ product: SEED, dropRows })
     const source = new SupabaseMonitorSource({ client, now: () => now })
@@ -653,7 +765,8 @@ describe('SupabaseMonitorSource', () => {
     })
 
     emitStatus('CHANNEL_ERROR', new Error('socket lost'))
-    await vi.advanceTimersByTimeAsync(1500)
+    now += 30_000
+    await source.recoverInterruptedChannels({ minInterruptedMs: 30_000 })
     await vi.advanceTimersByTimeAsync(0)
 
     expect(drops.map((event) => event.eventId)).toEqual(['drop-before-disconnect', 'drop-missed'])

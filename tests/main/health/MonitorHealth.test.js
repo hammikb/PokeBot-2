@@ -59,6 +59,15 @@ describe('MonitorHealth', () => {
     const service = new MonitorHealth({
       authSessionManager: auth.manager,
       taskManager: makeTaskManager(),
+      notificationEngine: {
+        getHealthSnapshot: () => ({
+          lastAttempt: { notificationId: 'drop-1', at: NOW - 2000 },
+          lastShown: { notificationId: 'drop-1', at: NOW - 1000 },
+          lastFailed: null,
+          lastClicked: null,
+          activeCount: 1
+        })
+      },
       now: () => NOW
     })
 
@@ -87,6 +96,10 @@ describe('MonitorHealth', () => {
         activeTaskCount: 2,
         sourceState: 'connected',
         channels: { total: 2, subscribed: 2 }
+      },
+      notifications: {
+        lastShown: { notificationId: 'drop-1', at: NOW - 1000 },
+        activeCount: 1
       }
     })
   })

@@ -8,12 +8,14 @@ export class MonitorHealth {
   constructor({
     authSessionManager,
     taskManager,
+    notificationEngine,
     now = () => Date.now(),
     staleAfterMs = DEFAULT_STALE_AFTER_MS,
     queryTimeoutMs = DEFAULT_QUERY_TIMEOUT_MS
   }) {
     this._auth = authSessionManager
     this._tasks = taskManager
+    this._notifications = notificationEngine
     this._now = now
     this._staleAfterMs = staleAfterMs
     this._queryTimeoutMs = queryTimeoutMs
@@ -23,10 +25,17 @@ export class MonitorHealth {
   async getSnapshot() {
     const checkedAtMs = this._now()
     const realtime = normalizeRealtime(this._tasks?.getMonitorHealthSnapshot?.())
+    let notifications
+    try {
+      notifications = normalizeNotificationHealth(this._notifications?.getHealthSnapshot?.())
+    } catch {
+      notifications = normalizeNotificationHealth()
+    }
     const base = {
       checkedAt: new Date(checkedAtMs).toISOString(),
       staleAfterMs: this._staleAfterMs,
-      realtime
+      realtime,
+      notifications
     }
 
     let authStatus
@@ -202,6 +211,27 @@ function normalizeRealtime(value = {}) {
       catchUpErrors: nonNegativeInteger(channels.catchUpErrors)
     },
     openCircuits: nonNegativeInteger(value?.openCircuits)
+  }
+}
+
+function normalizeNotificationHealth(value = {}) {
+  const evidence = (item, includeReason = false) => {
+    if (!item || !Number.isFinite(Number(item.at))) return null
+    const normalized = {
+      notificationId: item.notificationId ? String(item.notificationId).slice(0, 100) : null,
+      at: Number(item.at)
+    }
+    if (includeReason && item.reason) normalized.reason = String(item.reason).slice(0, 500)
+    if ('accepted' in item) normalized.accepted = item.accepted === true
+    if ('supported' in item) normalized.supported = item.supported === true
+    return normalized
+  }
+  return {
+    lastAttempt: evidence(value?.lastAttempt),
+    lastShown: evidence(value?.lastShown),
+    lastFailed: evidence(value?.lastFailed, true),
+    lastClicked: evidence(value?.lastClicked),
+    activeCount: nonNegativeInteger(value?.activeCount)
   }
 }
 

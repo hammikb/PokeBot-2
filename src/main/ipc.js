@@ -17,6 +17,8 @@ import { runTargetAutoLogin } from './automation/flows/target-auto-login.js'
 import { runTargetRegistration } from './automation/flows/register-target.js'
 import { runWalmartRegistration } from './automation/flows/register-walmart.js'
 import { cookieManager } from './automation/cookieManager.js'
+import { WalmartQueueHost } from './automation/WalmartQueueHost.js'
+import { WalmartCookieSource } from './automation/walmartSession.js'
 import { buildTaskReadiness } from './tasks/TaskReadiness.js'
 import { getPublicClient } from './supabase/publicClient.js'
 import { findWalmartMatch, findWalmartMatchCached } from './products/WalmartMatch.js'
@@ -81,6 +83,12 @@ const taskArgs = z.tuple([
     .passthrough()
 ])
 const IPC_ARG_SCHEMAS = {
+  [IPC.QUEUE_LIST]: emptyArgs,
+  [IPC.QUEUE_POLL_NOW]: emptyArgs,
+  [IPC.QUEUE_REMOVE]: z.tuple([z.string().min(1).max(120)]),
+  [IPC.QUEUE_SET_AUTO_CHECKOUT]: z.tuple([z.string().min(1).max(120), z.boolean()]),
+  [IPC.QUEUE_SESSION_REFRESH]: z.tuple([z.string().min(1).max(120).nullable().optional()]),
+  [IPC.QUEUE_SCAN_JOIN]: z.tuple([z.array(z.string().min(1).max(40)).max(100).optional()]),
   [IPC.SETTINGS_GET]: emptyArgs,
   [IPC.SETTINGS_SET]: z.tuple([z.string().min(1).max(100), z.unknown()]),
   [IPC.AUTH_GET_STATUS]: emptyArgs,
@@ -114,6 +122,8 @@ const IPC_ARG_SCHEMAS = {
   [IPC.TASKS_UPDATE]: idObjectArgs,
   [IPC.TASKS_START]: stringArg,
   [IPC.TASKS_TEST]: stringArg,
+  [IPC.TASKS_RUN_NOW]: stringArg,
+  [IPC.TASKS_FOCUS_CHECKOUT]: stringArg,
   [IPC.TASKS_STOP]: stringArg,
   [IPC.TASKS_DELETE]: stringArg,
   [IPC.MONITORS_LIST]: emptyArgs,
@@ -162,6 +172,7 @@ const IPC_ARG_SCHEMAS = {
 
 export function registerIpcHandlers({
   getDb,
+  encryptionKey,
   accountManager,
   paymentManager,
   shippingManager,
@@ -891,6 +902,16 @@ export function registerIpcHandlers({
     if (!task) throw new Error('Task not found')
     return taskManager.testTask(task)
   })
+  ipcMain.handle(IPC.TASKS_RUN_NOW, async (_, id) => {
+    const task = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(id)
+    if (!task) throw new Error('Task not found')
+    return taskManager.runTaskNow(task)
+  })
+  ipcMain.handle(IPC.TASKS_FOCUS_CHECKOUT, async (_, id) => {
+    const task = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(id)
+    if (!task) throw new Error('Task not found')
+    return taskManager.focusCheckoutForTask(task)
+  })
   ipcMain.handle(IPC.TASKS_STOP, async (_, id) => {
     const db = getDb()
     const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id)
@@ -1017,6 +1038,191 @@ export function registerIpcHandlers({
     return pokemonCenterQueueJoiner?.stop(id)
   })
 
+  /* ---------------- Walmart HTTP queue host ----------------
+   * validateTickets takes no parameters: one request refreshes every held
+   * ticket, so holding 14 queues costs the same as holding 1. That is why it
+   * replaces the browser-per-queue path for Walmart.
+   */
+  const walmartCookieSource = new WalmartCookieSource({
+    browserPool,
+    accountManager,
+    getDb,
+    encryptionKey
+  })
+  // Restore cookies saved by a previous run first, so held tickets survive an
+  // Electron restart or crash, then keep them warm in the background. Without
+  // this a drop would have to wait on a cold browser launch.
+  walmartCookieSource.load()
+  walmartCookieSource.startAutoRefresh()
+  const walmartQueueHost = new WalmartQueueHost({
+    getCookieHeader: () => walmartCookieSource.header(),
+    // Keep the browser session in sync: tickets are taken over HTTP, but the
+    // purchase happens in the browser and needs the same `wr` cookie.
+    onTicketCookie: (name, value) => walmartCookieSource.writeCookie(null, name, value)
+  })
+  walmartQueueHost.on('update', (snapshot) =>
+    mainWindow?.webContents?.send(IPC.QUEUE_UPDATED, snapshot)
+  )
+  walmartQueueHost.on('error', (error) =>
+    log.warn('Walmart queue host error', { error: error?.message })
+  )
+  walmartQueueHost.on('ready', (ticket) =>
+    notificationEngine?.fire({
+      retailer: 'walmart',
+      productName: 'YOUR TURN: ' + (ticket.itemName || ticket.itemId),
+      dropType: DROP_TYPES.QUEUE_OPEN,
+      price: ticket.price
+    })
+  )
+  ipcMain.handle(IPC.QUEUE_SESSION_REFRESH, async (_, accountId = null) => {
+    const status = await walmartCookieSource.refresh(accountId)
+    if (status.hasSession) await walmartQueueHost.pollOnce()
+    return status
+  })
+  const itemIdFromUrl = (url) => (url || '').match(/(?:^|\/)(\d{6,})(?:[/?#]|$)/)?.[1] || null
+
+  /**
+   * Every Walmart item worth checking for an open queue: current tasks plus
+   * anything recently alerted. Alerted items matter because a queue that is
+   * ALREADY open never produces a new out->in transition -- waiting for one
+   * means missing the drop entirely.
+   */
+  /**
+   * Items worth re-checking for an open queue.
+   *
+   * Discovery is the Pi monitor's job -- it has the working curl_cffi/safari
+   * bypass and publishes queue_open drops. This app only acts on those alerts,
+   * so candidates come from what it has already been told about. No local
+   * listing scraping: PerimeterX blocks it, and duplicating the Pi's work here
+   * only adds a second thing that can be wrong.
+   */
+  /**
+   * Queues that are open RIGHT NOW, from the Pi's published drops.
+   *
+   * Drops are events, so an app that was closed (or opened after the drop
+   * started) never sees them. Reading recent queue_open rows back out of
+   * Supabase turns that event stream into a standing "what is open" answer,
+   * which is what lets a late or restarted app catch up and join everything.
+   */
+  const walmartOpenQueueItems = async (withinHours = 3) => {
+    try {
+      const since = new Date(Date.now() - withinHours * 3600_000).toISOString()
+      // Must be the AUTHENTICATED client: RLS policy "authenticated users read
+      // Walmart queue drops" grants exactly this read, and the anon/public
+      // client is denied outright.
+      const client = authSessionManager?.getClient?.()
+      if (!client) {
+        log.warn('Not signed in; cannot read open Walmart queues')
+        return []
+      }
+      const { data, error } = await client
+        .from('drops')
+        .select('product_url, created_at, drop_type, retailer')
+        .eq('retailer', 'walmart')
+        .eq('drop_type', DROP_TYPES.QUEUE_OPEN)
+        .gte('created_at', since)
+        .order('created_at', { ascending: false })
+        .limit(100)
+      if (error) throw new Error(error.message)
+      const ids = (data || []).map((row) => itemIdFromUrl(row.product_url)).filter(Boolean)
+      return [...new Set(ids)]
+    } catch (error) {
+      log.warn('Could not read open Walmart queues from Supabase', { error: error.message })
+      return []
+    }
+  }
+
+  const walmartQueueCandidates = async () => {
+    const ids = new Set()
+    for (const id of await walmartOpenQueueItems()) ids.add(id)
+    try {
+      const db = getDb()
+      for (const row of db
+        .prepare("SELECT DISTINCT product_url FROM tasks WHERE retailer = 'walmart'")
+        .all()) {
+        const id = itemIdFromUrl(row.product_url)
+        if (id) ids.add(id)
+      }
+      for (const row of db
+        .prepare(
+          `SELECT DISTINCT product_url FROM drop_history
+           WHERE retailer = 'walmart' ORDER BY rowid DESC LIMIT 60`
+        )
+        .all()) {
+        const id = itemIdFromUrl(row.product_url)
+        if (id) ids.add(id)
+      }
+    } catch (error) {
+      log.warn('Could not gather Walmart queue candidates', { error: error.message })
+    }
+    return [...ids]
+  }
+
+  ipcMain.handle(IPC.QUEUE_SCAN_JOIN, async (_, itemIds = []) => {
+    const items = (Array.isArray(itemIds) ? itemIds.filter(Boolean) : []).length
+      ? itemIds.filter(Boolean)
+      : await walmartQueueCandidates()
+    if (!items.length) return { joined: [], noQueue: [], failed: [], scanned: 0 }
+    const result = await walmartQueueHost.scanAndJoin(items)
+    return { ...result, scanned: items.length }
+  })
+
+  // Catch-up on boot: join every queue that is already open. Without this an
+  // app started mid-drop holds nothing until the Pi happens to re-alert.
+  setTimeout(async () => {
+    try {
+      const ready = await walmartCookieSource.waitForSession()
+      if (!ready) return
+      const items = await walmartOpenQueueItems()
+      if (!items.length) return
+      log.info('Catching up on open Walmart queues', { count: items.length })
+      const result = await walmartQueueHost.scanAndJoin(items)
+      log.info('Startup queue catch-up complete', {
+        joined: result.joined.length,
+        noQueue: result.noQueue.length,
+        failed: result.failed.length
+      })
+    } catch (error) {
+      log.warn('Startup queue catch-up failed', { error: error.message })
+    }
+  }, 5000)
+
+  // Auto-scan: independent of the monitor's transition logic, so items that
+  // were already alerted (or already in stock) still get joined.
+  let walmartScanning = false
+  setInterval(async () => {
+    if (walmartScanning) return
+    if (!walmartCookieSource.header()) return // no session yet
+    walmartScanning = true
+    const items = await walmartQueueCandidates()
+    if (!items.length) {
+      walmartScanning = false
+      return
+    }
+    try {
+      const result = await walmartQueueHost.scanAndJoin(items)
+      if (result.joined.length) {
+        log.info('Auto-scan joined Walmart queues', { count: result.joined.length })
+      }
+    } catch (error) {
+      log.warn('Walmart auto-scan failed', { error: error.message })
+    } finally {
+      walmartScanning = false
+    }
+  }, 60_000)
+  ipcMain.handle(IPC.QUEUE_LIST, () => ({
+    tickets: walmartQueueHost.list(),
+    stats: walmartQueueHost.stats()
+  }))
+  ipcMain.handle(IPC.QUEUE_SET_AUTO_CHECKOUT, (_, queueId, enabled) =>
+    walmartQueueHost.setAutoCheckout(queueId, enabled)
+  )
+  ipcMain.handle(IPC.QUEUE_REMOVE, (_, queueId) => walmartQueueHost.remove(queueId))
+  ipcMain.handle(IPC.QUEUE_POLL_NOW, async () => {
+    await walmartQueueHost.pollOnce()
+    return { tickets: walmartQueueHost.list(), stats: walmartQueueHost.stats() }
+  })
+
   queueJoiner.on('progress', (p) => mainWindow?.webContents?.send(IPC.QUEUE_PROGRESS, p))
   queueJoiner.on('turn', ({ label, status }) =>
     notificationEngine?.fire({
@@ -1038,6 +1244,32 @@ export function registerIpcHandlers({
   )
 
   // Push events to renderer
+  // Auto-join: a Walmart queue_open drop only tells us the item, so resolve the
+  // queue id from its PDP (/qp redirect) and take a spot over HTTP. No browser
+  // per queue -- one validateTickets call then covers every ticket held.
+  taskManager.on('drop', (event) => {
+    if (event?.retailer !== 'walmart') return
+    if (event?.dropType !== DROP_TYPES.QUEUE_OPEN) return
+    const itemId =
+      event.productKey || (event.productUrl || '').match(/(?:^|\/)(\d{6,})(?:[/?#]|$)/)?.[1]
+    if (!itemId) return
+    // Cookies can still be loading when a drop lands; waiting beats failing.
+    walmartCookieSource
+      .waitForSession()
+      .then((ready) => {
+        if (!ready) throw new Error('Walmart session never became available')
+        return walmartQueueHost.joinByItem({
+          itemId,
+          itemName: event.productName,
+          price: event.price
+        })
+      })
+      .then((ticket) => {
+        if (ticket) log.info('Joined Walmart queue from drop', { itemId, queueId: ticket.queueId })
+      })
+      .catch((error) => log.warn('Walmart auto-join failed', { itemId, error: error.message }))
+  })
+
   taskManager.on('drop', (event) => mainWindow?.webContents?.send(IPC.FEED_EVENT, event))
   taskManager.on('taskStatus', (data) => mainWindow?.webContents?.send(IPC.TASK_STATUS, data))
 }

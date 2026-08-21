@@ -79,6 +79,7 @@ export class TaskManager extends EventEmitter {
     this._realtimeHeartbeatAt = null
     this._realtimeHeartbeatFailures = 0
     this._realtimeRecoveryTimer = null
+    this._realtimeRecoveryPromise = null
     this._monitorRefreshPromise = null
     this._pokemonCenterAutoJoinEnabled = false
     this._pokemonCenterQueueAlertedAt = 0
@@ -278,6 +279,17 @@ export class TaskManager extends EventEmitter {
     return result
   }
 
+  async focusCheckoutForTask(taskRow) {
+    const accountIds = parseAccountIds(taskRow?.account_ids)
+    for (const accountId of accountIds) {
+      if (await this._pool?.focusCheckoutPage?.(accountId)) {
+        this._emitStatus(taskRow.id, 'manual_required')
+        return { success: true, accountId }
+      }
+    }
+    return { success: false, message: 'No active checkout browser is available for this task' }
+  }
+
   stopTask(id, { unsubscribe = true } = {}) {
     const entry = this._tasks.get(id)
     if (!entry) {
@@ -344,6 +356,7 @@ export class TaskManager extends EventEmitter {
         !this._walmartJoinAllQueuesEnabled &&
         !this._pokemonCenterAutoJoinEnabled) ||
       this._realtimeRecoveryTimer ||
+      this._realtimeRecoveryPromise ||
       (normalized === 'timeout' && this._realtimeHeartbeatFailures < 2)
     ) {
       return
@@ -351,12 +364,24 @@ export class TaskManager extends EventEmitter {
 
     this._realtimeRecoveryTimer = setTimeout(() => {
       this._realtimeRecoveryTimer = null
-      this.refreshMonitorConnections(`realtime-${normalized}`).catch((error) => {
-        log.warn('Could not recover Supabase monitor channels after heartbeat failure', {
+      this._realtimeRecoveryPromise = (async () => {
+        const source = this._supabaseSource || (await this._getSupabaseSource())
+        const result = await source.recoverInterruptedChannels({ minInterruptedMs: 30_000 })
+        log.info('Completed Supabase monitor channel recovery sweep', {
           status: normalized,
-          error: error.message
+          recovered: result?.recovered || 0
         })
-      })
+        return result
+      })()
+        .catch((error) => {
+          log.warn('Could not recover Supabase monitor channels after heartbeat failure', {
+            status: normalized,
+            error: error.message
+          })
+        })
+        .finally(() => {
+          this._realtimeRecoveryPromise = null
+        })
     }, REALTIME_RECOVERY_DELAY_MS)
     this._realtimeRecoveryTimer.unref?.()
   }
@@ -694,9 +719,9 @@ export class TaskManager extends EventEmitter {
     }
 
     if (this._walmartQueueAccountId && this._walmartQueueAccountId !== account.id) {
-      await Promise.resolve(
-        this._pool.unpin?.(this._walmartQueueAccountId, { close: true })
-      ).catch(() => {})
+      await Promise.resolve(this._pool.unpin?.(this._walmartQueueAccountId, { close: true })).catch(
+        () => {}
+      )
       this._walmartQueueAccountId = null
     }
 
@@ -710,10 +735,13 @@ export class TaskManager extends EventEmitter {
       log.info('Pre-warmed Walmart Join All Queues account', { accountId: account.id })
       return true
     } catch (error) {
-      log.warn('Could not pre-warm Walmart Join All Queues account; queue alerts will launch it on demand', {
-        accountId: account.id,
-        error: error.message
-      })
+      log.warn(
+        'Could not pre-warm Walmart Join All Queues account; queue alerts will launch it on demand',
+        {
+          accountId: account.id,
+          error: error.message
+        }
+      )
       return false
     }
   }
@@ -768,7 +796,65 @@ export class TaskManager extends EventEmitter {
     }
 
     const result = await this._runFlowsForTask({ ...taskRow, mode: 'test-checkout' }, dropEvent)
-    this._emitStatus(taskRow.id, result.success ? 'idle' : 'error')
+    this._emitStatus(
+      taskRow.id,
+      hasManualCheckoutResult(result)
+        ? 'manual_required'
+        : this._tasks.has(taskRow.id)
+          ? 'monitoring'
+          : 'idle'
+    )
+    return result
+  }
+
+  async runTaskNow(taskRow) {
+    const flow = FLOWS[taskRow.retailer]
+    if (!flow) {
+      this._emitStatus(taskRow.id, 'error')
+      return {
+        success: false,
+        results: [{ success: false, error: `Checkout is not supported for ${taskRow.retailer}` }]
+      }
+    }
+    if (taskRow.mode === 'alert-only') {
+      this._emitStatus(taskRow.id, this._tasks.has(taskRow.id) ? 'monitoring' : 'idle')
+      return {
+        success: false,
+        results: [
+          { success: false, error: 'Change this task to Auto-checkout before using Run now.' }
+        ]
+      }
+    }
+
+    const dropEvent = {
+      retailer: taskRow.retailer,
+      productName: taskRow.product_name || 'Manual checkout run',
+      productUrl: taskRow.product_url,
+      dropType: DROP_TYPES.IN_STOCK,
+      price: taskRow.max_price ?? null,
+      observedAt: new Date().toISOString(),
+      eventId: `manual-${taskRow.id}-${Date.now()}`
+    }
+    this._emitStatus(taskRow.id, 'checkout')
+    this.emit('drop', dropEvent)
+    await this._notify.fire({
+      ...dropEvent,
+      productName: `MANUAL CHECKOUT STARTED: ${dropEvent.productName}`
+    })
+    const result = await this._runFlowsWhileInStock(
+      { ...taskRow, mode: 'auto-checkout' },
+      dropEvent
+    )
+    this._emitStatus(
+      taskRow.id,
+      hasManualCheckoutResult(result)
+        ? 'manual_required'
+        : this._tasks.has(taskRow.id)
+          ? 'monitoring'
+          : result.success
+            ? 'idle'
+            : 'error'
+    )
     return result
   }
 
@@ -862,7 +948,17 @@ export class TaskManager extends EventEmitter {
           account: this._getPokemonCenterAccount(),
           browserMode: this._getSettings().pokemonCenterQueueBrowser || 'managed'
         })
-      } else if (dropEvent.retailer === 'walmart' && this._walmartJoinAllQueuesEnabled && joiner) {
+      } else if (
+        dropEvent.retailer === 'walmart' &&
+        this._walmartJoinAllQueuesEnabled &&
+        joiner &&
+        // Walmart queues are held over HTTP by WalmartQueueHost: one
+        // validateTickets call covers every ticket, no browser per queue. The
+        // browser joiner here only duplicates that work, opens a product page
+        // per item, and starves the pool it shares with cookie refresh.
+        // Set walmartQueueTransport='browser' to fall back to it.
+        this._getSettings().walmartQueueTransport === 'browser'
+      ) {
         const taskAccountIds = task ? parseAccountIds(task.account_ids) : []
         const account = taskAccountIds.length
           ? this._accountManager.getDecrypted(taskAccountIds[0])
@@ -925,17 +1021,25 @@ export class TaskManager extends EventEmitter {
       return
     }
 
-    let result
-    if (task.mode === 'test-checkout') {
-      result = await this._runFlowsForTask({ ...task, mode: 'test-checkout' }, dropEvent)
-    } else {
-      result = await this._runFlowsForTask(task, dropEvent)
-    }
+    const result = await this._runFlowsWhileInStock(
+      task.mode === 'test-checkout' ? { ...task, mode: 'test-checkout' } : task,
+      dropEvent
+    )
     const receiptResult = classifyDropReceiptResult(result)
     this._dropEventLedger.complete(receipt.receiptId, {
       status: receiptResult.status,
       detail: receiptResult.detail
     })
+    this._emitStatus(
+      task.id,
+      hasManualCheckoutResult(result)
+        ? 'manual_required'
+        : this._tasks.has(task.id)
+          ? 'monitoring'
+          : result.success
+            ? 'idle'
+            : 'error'
+    )
   }
 
   async _onQueueTurn({ id, label, status, context }) {
@@ -1176,7 +1280,16 @@ export class TaskManager extends EventEmitter {
             : 'failed',
         detail: result.error || result.message
       })
-      this._emitStatus(id, result.success ? 'idle' : 'error')
+      this._emitStatus(
+        id,
+        hasManualCheckoutResult(result)
+          ? 'manual_required'
+          : this._tasks.has(id)
+            ? 'monitoring'
+            : result.success
+              ? 'idle'
+              : 'error'
+      )
       const queueResultLabel = result.testMode
         ? 'TEST CHECKOUT READY'
         : result.submissionUncertain
@@ -1196,10 +1309,44 @@ export class TaskManager extends EventEmitter {
     }
   }
 
-  async _runFlowsForTask(task, dropEvent) {
+  async _runFlowsWhileInStock(task, dropEvent) {
+    let result
+    let attempt = 0
+    while (true) {
+      result = await this._runFlowsForTask(task, dropEvent, { bypassCircuit: attempt > 0 })
+      if (
+        result.success ||
+        hasManualCheckoutResult(result) ||
+        hasAccountBusyResult(result) ||
+        result.testMode
+      )
+        return result
+      if (hasOutOfStockResult(result)) return result
+
+      const gate = this._supabaseSource?.getInventoryGate?.(
+        dropEvent.productUrl,
+        dropEvent.observedAt
+      )
+      const monitorStillActive = Boolean(task.id && this._tasks.has(task.id))
+      if (gate?.mode === 'stop' || (!monitorStillActive && gate?.mode !== 'extend')) return result
+
+      attempt += 1
+      this._emitCheckoutStep(
+        dropEvent,
+        { name: 'monitor' },
+        `Checkout failed while Target still reports stock; starting another checkout attempt (${attempt})`
+      )
+      await new Promise((resolve) => setTimeout(resolve, 5000))
+      if (task.id && !this._tasks.has(task.id)) return result
+    }
+  }
+
+  async _runFlowsForTask(task, dropEvent, { bypassCircuit = false } = {}) {
     const flow = FLOWS[dropEvent.retailer]
     if (!flow) return { success: false, results: [] }
-    const circuit = this._retailerCircuit.allow(dropEvent.retailer)
+    const circuit = bypassCircuit
+      ? { allowed: true }
+      : this._retailerCircuit.allow(dropEvent.retailer)
     if (!circuit.allowed) {
       log.warn('Retailer checkout circuit is temporarily open', {
         retailer: dropEvent.retailer,
@@ -1285,13 +1432,7 @@ export class TaskManager extends EventEmitter {
         orderResults: []
       }
     }
-    return this._runOrdersForAccountUnlocked(
-      flow,
-      task,
-      dropEvent,
-      accountId,
-      orderSubmissionGate
-    )
+    return this._runOrdersForAccountUnlocked(flow, task, dropEvent, accountId, orderSubmissionGate)
   }
 
   async _runOrdersForAccountUnlocked(flow, task, dropEvent, accountId, orderSubmissionGate = null) {
@@ -1372,9 +1513,7 @@ export class TaskManager extends EventEmitter {
     const attemptId = this._checkoutTelemetry?.beginAttempt({ task, dropEvent, accountId })
     const checkoutLease = leaseScope || {}
     const ownerId = checkoutLease.ownerId || attemptId || randomUUID()
-    const existingLease = checkoutLease.ownerId
-      ? this._accountCheckoutLeases.get(accountId)
-      : null
+    const existingLease = checkoutLease.ownerId ? this._accountCheckoutLeases.get(accountId) : null
     const lease = checkoutLease.ownerId
       ? existingLease?.ownerId === ownerId
         ? { acquired: true, reused: true }
@@ -1464,7 +1603,7 @@ export class TaskManager extends EventEmitter {
     let submissionStarted = false
 
     const retryManager = new RetryManager({
-      maxRetries: 3,
+      maxRetries: 5,
       initialDelay: 2000,
       maxDelay: 10000
     })
@@ -1473,11 +1612,11 @@ export class TaskManager extends EventEmitter {
       const result = await retryManager.retry(
         async (attempt) => {
           if (attempt > 1) {
-            this._emitCheckoutStep(dropEvent, account, `Retry attempt ${attempt}/3`)
+            this._emitCheckoutStep(dropEvent, account, `Retry attempt ${attempt}/5`)
             this._checkoutTelemetry?.record(
               attemptId,
               'browser_launch',
-              `Retry attempt ${attempt}/3`
+              `Retry attempt ${attempt}/5`
             )
           }
 
@@ -1523,6 +1662,11 @@ export class TaskManager extends EventEmitter {
               mode: task.mode,
               buyLimit: task.buy_limit,
               maxPrice: task.max_price,
+              getInventoryGate: () =>
+                this._supabaseSource?.getInventoryGate?.(
+                  dropEvent.productUrl,
+                  dropEvent.observedAt
+                ) || { mode: 'fallback', reason: 'inventory-source-unavailable' },
               requireRetailerSeller:
                 task.retailer === 'walmart'
                   ? checkoutSettings.walmartRequireRetailerSeller !== false
@@ -1644,8 +1788,13 @@ export class TaskManager extends EventEmitter {
       this._checkoutTelemetry?.completeAttempt(attemptId, result)
       return { accountId, ...result }
     } catch (err) {
-      await this._closeAccountContext(accountId, { allowPinned: ownsPin })
-      releaseLease()
+      const preserveCheckout = shouldPreserveTargetCheckout(err.message)
+      preserveLease = preserveCheckout
+      checkoutLease.preserved = preserveCheckout
+      if (!preserveCheckout) {
+        await this._closeAccountContext(accountId, { allowPinned: ownsPin })
+      }
+      if (!preserveCheckout) releaseLease()
       await this._notify.fire({
         ...dropEvent,
         productName: `ERROR [${account.name}]: ${err.message}`,
@@ -1654,9 +1803,15 @@ export class TaskManager extends EventEmitter {
       this._logHistory(dropEvent, { success: false }, accountId)
       this._checkoutTelemetry?.completeAttempt(attemptId, {
         success: false,
-        error: err.message
+        error: err.message,
+        requiresManualCheckout: preserveCheckout
       })
-      return { accountId, success: false, error: err.message }
+      return {
+        accountId,
+        success: false,
+        requiresManualCheckout: preserveCheckout,
+        error: err.message
+      }
     } finally {
       if (!preserveLease && !retainLeaseAfterFlow) releaseLease()
       if (ownsPin && !preserveLease) {
@@ -1750,6 +1905,7 @@ export class TaskManager extends EventEmitter {
           profilePath: account.profile_path,
           proxy: account.proxy,
           retailer: task.retailer,
+          warmupUrl: task.product_url,
           priority: 10
         })
         .then(() => {
@@ -1889,6 +2045,9 @@ export function isRetryableCheckoutError(message = '', code = '') {
     'target page, context or browser has been closed',
     'target fulfillment is still loading',
     'target availability did not settle',
+    'target browser add-to-cart was not confirmed',
+    'target did not confirm the requested item in the cart',
+    'target high-demand add-to-cart retry window expired',
     'target cart quantity could not be verified',
     "sam's club add to cart is not active yet",
     "sam's club cart does not contain requested item",
@@ -1903,6 +2062,12 @@ export function isRetryableCheckoutError(message = '', code = '') {
   ].some((keyword) => value.includes(keyword))
 }
 
+function shouldPreserveTargetCheckout(message = '') {
+  return /target (?:browser add-to-cart was not confirmed|did not confirm the requested item in the cart|high-demand add-to-cart retry window expired|session was lost after adding)/i.test(
+    String(message || '')
+  )
+}
+
 export function isRetryableCheckoutResult(result) {
   if (!result || result.success) return false
   if (
@@ -1914,6 +2079,25 @@ export function isRetryableCheckoutResult(result) {
     return false
   }
   return isRetryableCheckoutError(result.error || result.message, result.code)
+}
+
+function hasManualCheckoutResult(result) {
+  return Boolean(
+    result?.requiresManualCheckout ||
+    result?.submissionUncertain ||
+    result?.results?.some?.((entry) => entry?.requiresManualCheckout || entry?.submissionUncertain)
+  )
+}
+
+function hasAccountBusyResult(result) {
+  return Boolean(result?.accountBusy || result?.results?.some?.((entry) => entry?.accountBusy))
+}
+
+function hasOutOfStockResult(result) {
+  const values = [result?.error, result?.message, ...(result?.results || [])]
+    .map((entry) => (typeof entry === 'string' ? entry : entry?.error || entry?.message || ''))
+    .join(' ')
+  return /out of stock|sold out|no longer available|cart became empty/i.test(values)
 }
 
 function classifyDropReceiptResult(result) {

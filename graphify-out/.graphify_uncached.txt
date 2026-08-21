@@ -1,0 +1,65 @@
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\.prettierrc.yaml
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\Polar Extension\ui\options\options.html
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\Polar Extension\ui\popup\popup.html
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\README.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\README.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\guides\MCP_SETUP.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\guides\MULTI_ACCOUNT_SETUP.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\guides\RESTOCK_MONITORING.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\guides\SCRAPLING.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\guides\TARGET_CHECKOUT.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\guides\TESTING_GUIDE.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\guides\WALMART_FAST_CHECKOUT.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\guides\WARMUP_WORKAROUND.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\operations\2026-08-11-target-reliability-rollout.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\reference\DEBUG_API.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\reference\WALMART_AUTOMATION_NOTES.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\roadmaps\ADVANCED_FEATURES_ROADMAP.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\roadmaps\COMPLETE_IMPLEMENTATION_PLAN.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\roadmaps\FUTURE_IMPROVEMENTS.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\roadmaps\GITHUB_IMPROVEMENTS.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\roadmaps\IMPROVEMENTS.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\plans\2026-05-29-account-registration.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\plans\2026-06-15-supabase-monitor-mode-b2.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\plans\2026-06-25-pokebot-central-monitoring-worker.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\plans\2026-06-25-pokebot-control-plane.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\plans\2026-07-11-electron-app-auth.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\plans\2026-07-14-ref-counted-central-monitoring.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\plans\2026-08-10-target-polar-like-cart-retries.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\plans\2026-08-11-target-electron-resilience.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\plans\2026-08-11-target-monitoring-delivery.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\plans\2026-08-11-target-production-rollout.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\plans\2026-08-14-retailer-controls-and-previews.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\plans\2026-08-15-checkout-account-ownership-plan.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\plans\2026-08-15-checkout-observability.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\plans\2026-08-17-pokemon-center-queue-monitor.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\specs\2026-05-29-account-registration-design.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\specs\2026-06-15-supabase-monitor-mode-b2-design.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\specs\2026-06-25-pokebot-control-plane-design.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\specs\2026-07-11-electron-app-auth-design.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\specs\2026-07-14-ref-counted-central-monitoring-design.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\specs\2026-07-15-admin-pin-website-toggle-design.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\specs\2026-08-10-target-checkout-success-speed-design.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\specs\2026-08-11-target-hot-set-durable-notifications-design.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\specs\2026-08-15-checkout-account-ownership-design.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\specs\2026-08-15-checkout-observability-design.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\docs\superpowers\specs\2026-08-17-pokemon-center-queue-monitor-design.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\electron-builder.yml
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\scripts\README.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\src\main\README.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\src\main\experimental\README.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\src\renderer\README.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\src\renderer\index.html
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\supabase\README.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\tests\README.md
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\tests\fixtures\retailers\pokemon-center-queue.html
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\tests\fixtures\retailers\sams-traffic-gate.html
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\tests\fixtures\retailers\target-high-demand.html
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\tests\fixtures\retailers\walmart-queue.html
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\Polar Extension\icons\icon128.png
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\Polar Extension\icons\icon16.png
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\Polar Extension\icons\icon48.png
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\Polar Extension\icons\target_logo.png
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\resources\icon.png
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\src\renderer\src\assets\electron.svg
+C:\Users\kaib1\OneDrive\Desktop\Projects\PokeBot 2\src\renderer\src\assets\wavy-lines.svg

@@ -63,10 +63,7 @@ function createDisabledTrace({ retailer, accountName, taskId }) {
         const safeRetailer = safeSegment(retailer || 'retailer')
         const safeTask = safeSegment(taskId || 'checkout')
         const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-        screenshotPath = join(
-          dir,
-          `${stamp}-${safeRetailer}-${safeAccount}-${safeTask}.png`
-        )
+        screenshotPath = join(dir, `${stamp}-${safeRetailer}-${safeAccount}-${safeTask}.png`)
       }
 
       await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => {})

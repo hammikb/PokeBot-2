@@ -2,84 +2,98 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { recoverAmbiguousTargetCart } from '../../../../../src/main/automation/flows/target.js'
 
-function makePage({ url = 'https://www.target.com/p/example/-/A-123456', gotoError = null } = {}) {
-  let currentUrl = url
+// The recovery path must never navigate: it judges an unclear click purely from the
+// header cart badge on whatever page it is already sitting on.
+function makePage() {
   return {
-    url: vi.fn(() => currentUrl),
-    goto: vi.fn(async (nextUrl) => {
-      if (gotoError) throw gotoError
-      currentUrl = nextUrl
-    })
+    url: vi.fn(() => 'https://www.target.com/p/example/-/A-123456'),
+    goto: vi.fn(async () => {}),
+    waitForTimeout: vi.fn(async () => {})
   }
 }
 
 describe('recoverAmbiguousTargetCart', () => {
-  it('returns authoritative state for the exact requested TCIN within the probe budget', async () => {
+  it('confirms the add from an increase in the header cart badge without navigating', async () => {
     const page = makePage()
-    const waitForCartState = vi.fn(async (_page, tcin) => ({
-      present: true,
-      quantity: 1,
-      unitPrice: 24.99,
-      source: `cart-${tcin}`
-    }))
+    const readCartQuantity = vi.fn(async () => 3)
 
     await expect(
-      recoverAmbiguousTargetCart(page, '123456', { waitForCartState, timeoutMs: 2000 })
+      recoverAmbiguousTargetCart(page, '123456', {
+        baselineCartQuantity: 1,
+        readCartQuantity,
+        timeoutMs: 2000
+      })
     ).resolves.toEqual({
       present: true,
-      quantity: 1,
-      unitPrice: 24.99,
-      source: 'cart-123456'
+      quantity: 2,
+      unitPrice: null,
+      source: 'header-cart-badge',
+      recoveryOutcome: 'present'
     })
-    expect(page.goto).toHaveBeenCalledWith('https://www.target.com/co-cart', {
-      waitUntil: 'commit',
-      timeout: 1200
-    })
-    expect(waitForCartState).toHaveBeenCalledWith(page, '123456', expect.any(Number), null)
-  })
-
-  it('returns absent when the cart settles without the requested item', async () => {
-    const page = makePage({ url: 'https://www.target.com/co-cart' })
-    const waitForCartState = vi.fn(async () => ({
-      present: false,
-      quantity: null,
-      source: 'target-cart-page'
-    }))
-
-    await expect(
-      recoverAmbiguousTargetCart(page, '123456', { waitForCartState, timeoutMs: 2000 })
-    ).resolves.toMatchObject({ present: false, recoveryOutcome: 'absent' })
     expect(page.goto).not.toHaveBeenCalled()
   })
 
-  it('returns timeout instead of blocking retries when cart navigation exceeds its budget', async () => {
-    const page = makePage({ gotoError: new Error('page.goto: Timeout 1200ms exceeded') })
-    const waitForCartState = vi.fn()
+  it('does not confirm when the badge is positive but unchanged', async () => {
+    const page = makePage()
+    // Cart already held two unrelated items; a bare "2" must not read as our add.
+    const readCartQuantity = vi.fn(async () => 2)
 
     await expect(
-      recoverAmbiguousTargetCart(page, '123456', { waitForCartState, timeoutMs: 2000 })
-    ).resolves.toEqual({
-      present: false,
-      quantity: null,
-      unitPrice: null,
-      source: 'ambiguous-cart-recovery',
-      recoveryOutcome: 'timeout'
-    })
-    expect(waitForCartState).not.toHaveBeenCalled()
+      recoverAmbiguousTargetCart(page, '123456', {
+        baselineCartQuantity: 2,
+        readCartQuantity,
+        timeoutMs: 10,
+        now: (() => {
+          const stamps = [0, 5, 20]
+          return () => (stamps.length > 1 ? stamps.shift() : stamps[0])
+        })()
+      })
+    ).resolves.toMatchObject({ present: false, recoveryOutcome: 'timeout' })
+    expect(page.goto).not.toHaveBeenCalled()
   })
 
-  it('passes only the remaining portion of the 2-second budget to cart-state polling', async () => {
+  it('reports absent when there is no baseline to compare against', async () => {
     const page = makePage()
-    const timestamps = [1000, 2200, 2200]
-    const now = vi.fn(() => timestamps.shift() ?? 2200)
-    const waitForCartState = vi.fn(async () => ({ present: false, quantity: null, source: 'none' }))
+    const readCartQuantity = vi.fn(async () => 5)
 
-    await recoverAmbiguousTargetCart(page, '123456', {
-      waitForCartState,
-      timeoutMs: 2000,
-      now
+    await expect(
+      recoverAmbiguousTargetCart(page, '123456', {
+        baselineCartQuantity: null,
+        readCartQuantity
+      })
+    ).resolves.toMatchObject({ present: false, recoveryOutcome: 'absent' })
+    expect(readCartQuantity).not.toHaveBeenCalled()
+  })
+
+  it('stops polling once the probe budget is spent', async () => {
+    const page = makePage()
+    const stamps = [0, 500, 1000, 1500, 2000, 2500]
+    const now = vi.fn(() => (stamps.length > 1 ? stamps.shift() : stamps[0]))
+    const readCartQuantity = vi.fn(async () => 1)
+
+    await expect(
+      recoverAmbiguousTargetCart(page, '123456', {
+        baselineCartQuantity: 1,
+        readCartQuantity,
+        timeoutMs: 2000,
+        now
+      })
+    ).resolves.toMatchObject({ present: false, recoveryOutcome: 'timeout' })
+    expect(readCartQuantity.mock.calls.length).toBeLessThanOrEqual(3)
+  })
+
+  it('treats an unreadable badge as unresolved rather than confirming', async () => {
+    const page = makePage()
+    const readCartQuantity = vi.fn(async () => {
+      throw new Error('detached frame')
     })
 
-    expect(waitForCartState).toHaveBeenCalledWith(page, '123456', 800, null)
+    await expect(
+      recoverAmbiguousTargetCart(page, '123456', {
+        baselineCartQuantity: 0,
+        readCartQuantity,
+        timeoutMs: 500
+      })
+    ).resolves.toMatchObject({ present: false, recoveryOutcome: 'timeout' })
   })
 })
