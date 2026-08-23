@@ -2,12 +2,68 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 )
+
+func TestBuildMonitorLogAddsSafeServiceIdentity(t *testing.T) {
+	now := time.Date(2026, 8, 23, 20, 0, 0, 0, time.UTC)
+	row := buildMonitorLog("pokebot-worker", "info", "cycle complete", now)
+	if row.Service != "target-stock-observer-go" || row.WorkerName != "pokebot-worker" {
+		t.Fatalf("service identity = %+v", row)
+	}
+	if row.Message != "cycle complete" || row.Level != "info" {
+		t.Fatalf("log fields = %+v", row)
+	}
+	if row.CreatedAt != now.Format(time.RFC3339Nano) {
+		t.Fatalf("created_at = %q", row.CreatedAt)
+	}
+}
+
+func TestPostLogUsesExistingAuthenticatedIngestEnvelope(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost {
+			t.Errorf("method = %s", request.Method)
+		}
+		if got := request.Header.Get("Authorization"); got != "Bearer ingest-token" {
+			t.Errorf("authorization = %q", got)
+		}
+		var body struct {
+			Type    string     `json:"type"`
+			Payload monitorLog `json:"payload"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if body.Type != "log" {
+			t.Errorf("event type = %q", body.Type)
+		}
+		if body.Payload.Service != "target-stock-observer-go" || body.Payload.Message != "cycle complete" {
+			t.Errorf("payload = %+v", body.Payload)
+		}
+		writer.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cfg := config{ingestURL: server.URL, ingestToken: "ingest-token", workerName: "pokebot-worker", ingestClient: server.Client()}
+	if err := postLog(cfg, "info", "cycle complete"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBuildCycleSummaryIncludesBoundedCounters(t *testing.T) {
+	got := buildCycleSummary(44, 42, 2, 47200, 1)
+	want := "Target cycle complete: 42/44 checks succeeded, 2 failed, 1 available, 47.2 KB downloaded."
+	if got != want {
+		t.Fatalf("summary = %q, want %q", got, want)
+	}
+}
 
 func TestClassifyTargetResponse(t *testing.T) {
 	valid := []byte(`{"data":{"product":{"fulfillment":{"shipping_options":{}}}}}`)
@@ -111,6 +167,28 @@ func TestLoadConfigBlockedFailoverSettings(t *testing.T) {
 	}
 	if cfg.blockedBackoff != 20*time.Second {
 		t.Fatalf("blocked backoff = %s, want 20s", cfg.blockedBackoff)
+	}
+}
+
+func TestBuildFulfillmentURLIncludesProductionLocationContext(t *testing.T) {
+	cfg := config{apiKey: "key", storeID: "3294", zipCode: "90019", stateCode: "CA", latitude: "34.040", longitude: "-118.340"}
+	raw, err := buildFulfillmentURL(cfg, "95280894")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := parsed.Query()
+	for key, want := range map[string]string{
+		"store_id": "3294", "pricing_store_id": "3294", "zip": "90019",
+		"state": "CA", "latitude": "34.040", "longitude": "-118.340",
+		"visitor_id": "0", "tcin": "95280894",
+	} {
+		if values.Get(key) != want {
+			t.Fatalf("%s = %q, want %q", key, values.Get(key), want)
+		}
 	}
 }
 

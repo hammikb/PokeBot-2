@@ -25,12 +25,15 @@ import (
 
 const redskyURL = "https://redsky.target.com/redsky_aggregations/v1/web/product_fulfillment_and_variation_hierarchy_v1"
 const defaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+const monitorService = "target-stock-observer-go"
 
 var tcinPattern = regexp.MustCompile(`(?:^|/)A-(\d+)(?:[/?#]|$)`)
 
 type config struct {
 	ingestURL, ingestToken, watchlistURL, apiKey, userAgent string
-	storeID, zipCode, stateCode                             string
+	workerName                                              string
+	ingestClient                                            *http.Client
+	storeID, zipCode, stateCode, latitude, longitude        string
 	proxyFile, stateFile                                    string
 	checkSeconds, slowCheckSeconds                          int
 	fastStart, fastEnd                                      int
@@ -64,6 +67,38 @@ type shippingOptions struct {
 type envelope struct {
 	Type    string `json:"type"`
 	Payload any    `json:"payload"`
+}
+
+type monitorLog struct {
+	WorkerName string `json:"worker_name"`
+	Service    string `json:"service"`
+	Level      string `json:"level"`
+	Message    string `json:"message"`
+	CreatedAt  string `json:"created_at"`
+}
+
+func buildMonitorLog(workerName, level, message string, now time.Time) monitorLog {
+	message = strings.TrimSpace(message)
+	if len(message) > 2000 {
+		message = message[:2000]
+	}
+	if message == "" {
+		message = "monitor event"
+	}
+	return monitorLog{
+		WorkerName: strings.TrimSpace(workerName),
+		Service:    monitorService,
+		Level:      strings.TrimSpace(level),
+		Message:    message,
+		CreatedAt:  now.UTC().Format(time.RFC3339Nano),
+	}
+}
+
+func buildCycleSummary(total, succeeded, failed int, downloadedBytes int64, available int) string {
+	return fmt.Sprintf(
+		"Target cycle complete: %d/%d checks succeeded, %d failed, %d available, %.1f KB downloaded.",
+		succeeded, total, failed, available, float64(downloadedBytes)/1000,
+	)
 }
 
 type targetBlockedError struct {
@@ -297,53 +332,79 @@ func main() {
 	defer client.CloseIdleConnections()
 	consecutiveErrors := 0
 	var downloadedBytes int64
-	var lastRefresh, lastBandwidth, lastProxyHealth time.Time
+	var lastRefresh, lastBandwidth, lastProxyHealth, lastCycleLog time.Time
 	lastMode := ""
-	log.Printf("Target Go observer started (products=%d, fast=%ds, slow=%ds, proxy_required=true, shadow=%t)", len(urls), cfg.checkSeconds, cfg.slowCheckSeconds, cfg.shadow)
+	startupMessage := fmt.Sprintf("Target Go observer started: %d products, fast=%ds, normal=%ds, proxy required, shadow=%t.", len(urls), cfg.checkSeconds, cfg.slowCheckSeconds, cfg.shadow)
+	log.Printf("%s", startupMessage)
+	publishMonitorLog(cfg, "info", startupMessage)
 
 	for {
 		cycleStarted := time.Now()
 		mode, scheduled := schedule(cfg, time.Now())
 		if mode != lastMode {
-			log.Printf("polling schedule changed: mode=%s interval=%s", mode, scheduled)
+			scheduleMessage := fmt.Sprintf("Target polling schedule: mode=%s, interval=%s.", mode, scheduled)
+			log.Printf("%s", scheduleMessage)
+			publishMonitorLog(cfg, "info", scheduleMessage)
 			lastMode = mode
 		}
 		if lastRefresh.IsZero() || time.Since(lastRefresh) >= cfg.productRefresh {
+			previousProductCount := len(urls)
 			if refreshed, refreshErr := loadProductURLs(cfg); refreshErr != nil {
 				log.Printf("watchlist refresh failed: %v", refreshErr)
+				publishMonitorLog(cfg, "warn", fmt.Sprintf("Target watchlist refresh failed: %v", refreshErr))
 			} else if len(refreshed) > 0 {
 				urls = refreshed
+				if len(urls) != previousProductCount {
+					publishMonitorLog(cfg, "info", fmt.Sprintf("Target watchlist refreshed: %d products.", len(urls)))
+				}
 			}
 			lastRefresh = time.Now()
 		}
 
 		cycleSucceeded, cycleBlocked := true, false
+		cycleChecks, cycleFailed, cycleAvailable := 0, 0, 0
+		var cycleBytes int64
+		availabilityTransition := false
 		for i, productURL := range urls {
 			current, fetchErr := fetchWithFailover(&client, proxies, &proxyIndex, proxyPool, cfg, productURL)
 			if fetchErr != nil {
 				cycleSucceeded = false
+				cycleFailed++
 				log.Printf("check failed for %s: %v", productURL, fetchErr)
 				var blocked *targetBlockedError
 				if errors.As(fetchErr, &blocked) {
 					cycleBlocked = true
+					publishMonitorLog(cfg, "warn", "Target request blocked; proxy failover/backoff engaged.")
 					break
 				}
 			} else {
+				cycleChecks++
+				if current.Available {
+					cycleAvailable++
+				}
 				downloadedBytes += int64(current.ResponseBytes)
+				cycleBytes += int64(current.ResponseBytes)
 				previous := state[current.TCIN]
 				log.Printf("tcin=%s status=%v atp=%v reason=%v bytes=%d", current.TCIN, current.AvailabilityStatus, current.AvailableToPromise, current.ReasonCode, current.ResponseBytes)
+				if previous != nil && previous.Available != current.Available {
+					availabilityTransition = true
+					publishMonitorLog(cfg, "info", fmt.Sprintf("Target stock transition: TCIN %s is now %s.", current.TCIN, current.AvailabilityStatus))
+				}
 				if !cfg.shadow {
 					if inventoryChanged(previous, &current) {
 						if err := postIngest(cfg, "target_inventory", current); err != nil {
 							log.Printf("inventory publish failed: %v", err)
+							publishMonitorLog(cfg, "error", fmt.Sprintf("Inventory publish failed for TCIN %s: %v", current.TCIN, err))
 						}
 					}
 					if previous != nil && !previous.Available && current.Available {
 						if err := postDrop(cfg, current); err != nil {
 							log.Printf("drop publish failed: %v", err)
+							publishMonitorLog(cfg, "error", fmt.Sprintf("Drop publish failed for TCIN %s: %v", current.TCIN, err))
 						}
 						if err := sendDiscord(cfg, previous, &current); err != nil {
 							log.Printf("Discord alert failed: %v", err)
+							publishMonitorLog(cfg, "error", fmt.Sprintf("Discord alert failed for TCIN %s: %v", current.TCIN, err))
 						}
 					}
 				} else if previous != nil && !previous.Available && current.Available {
@@ -368,7 +429,9 @@ func main() {
 				proxyIndex = next
 				client = newClient(proxies[proxyIndex])
 			}
-			log.Printf("switching proxy after failures: proxy[%d]", proxyIndex+1)
+			proxyMessage := fmt.Sprintf("Switching Target proxy after failures; active proxy index %d.", proxyIndex+1)
+			log.Printf("%s", proxyMessage)
+			publishMonitorLog(cfg, "warn", proxyMessage)
 		}
 		if cfg.proxyHealthPublish && (lastProxyHealth.IsZero() || time.Since(lastProxyHealth) >= cfg.proxyHealthInterval) {
 			if err := postIngest(cfg, "proxy_health", proxyPool.healthRows(time.Now())); err != nil {
@@ -381,6 +444,10 @@ func main() {
 		if time.Since(lastBandwidth) >= time.Hour {
 			log.Printf("Target response bodies downloaded since startup: %.3f MB", float64(downloadedBytes)/1_000_000)
 			lastBandwidth = time.Now()
+		}
+		if lastCycleLog.IsZero() || time.Since(lastCycleLog) >= 5*time.Minute || cycleFailed > 0 || availabilityTransition {
+			publishMonitorLog(cfg, "info", buildCycleSummary(len(urls), cycleChecks, cycleFailed, cycleBytes, cycleAvailable))
+			lastCycleLog = time.Now()
 		}
 		interval := scheduled
 		if cycleBlocked {
@@ -434,8 +501,9 @@ func loadConfig() (config, error) {
 	}
 	return config{
 		ingestURL: ingest, ingestToken: token,
+		workerName: env("POKEALERT_WORKER_NAME", "pokebot-worker"), ingestClient: &http.Client{Timeout: 20 * time.Second},
 		watchlistURL: env("POKEALERT_WATCHLIST_URL", strings.Replace(ingest, "/api/ingest", "/api/watchlist", 1)),
-		apiKey:       apiKey, userAgent: env("TARGET_STOCK_USER_AGENT", defaultUserAgent), storeID: env("TARGET_STOCK_STORE_ID", "1296"), zipCode: env("TARGET_STOCK_ZIP", "90001"), stateCode: env("TARGET_STOCK_STATE", "CA"),
+		apiKey:       apiKey, userAgent: env("TARGET_STOCK_USER_AGENT", defaultUserAgent), storeID: env("TARGET_STOCK_STORE_ID", "3294"), zipCode: env("TARGET_STOCK_ZIP", "90019"), stateCode: env("TARGET_STOCK_STATE", "CA"), latitude: env("TARGET_STOCK_LATITUDE", "34.040"), longitude: env("TARGET_STOCK_LONGITUDE", "-118.340"),
 		proxyFile: env("TARGET_STOCK_PROXY_FILE", "/home/hammikb/api-monitor-python/proxies.txt"), stateFile: env("TARGET_STOCK_STATE_FILE", "/home/hammikb/api-monitor-python/.target-stock-observer-go-state.json"),
 		checkSeconds: check, slowCheckSeconds: slow, fastStart: start, fastEnd: end,
 		requestSpacing: time.Duration(envFloat("TARGET_STOCK_REQUEST_SPACING_SECONDS", 2) * float64(time.Second)), productRefresh: time.Duration(envInt("TARGET_STOCK_PRODUCT_REFRESH_SECONDS", 300)) * time.Second, errorBackoff: time.Duration(max(envInt("TARGET_STOCK_ERROR_BACKOFF_MAX_SECONDS", 900), 60)) * time.Second, blockedBackoff: time.Duration(max(envInt("TARGET_STOCK_BLOCKED_BACKOFF_SECONDS", 900), 5)) * time.Second, maxFailovers: min(max(envInt("TARGET_STOCK_MAX_FAILOVERS", 2), 0), 8), proxyCooldown: time.Duration(max(envInt("TARGET_STOCK_PROXY_COOLDOWN_SECONDS", 300), 60)) * time.Second, proxyHealthInterval: time.Duration(max(envInt("TARGET_STOCK_PROXY_HEALTH_INTERVAL_SECONDS", 60), 10)) * time.Second,
@@ -586,13 +654,21 @@ func fetchWithFailover(client **http.Client, proxies []string, proxyIndex *int, 
 	}
 }
 
+func buildFulfillmentURL(cfg config, tcin string) (string, error) {
+	query := url.Values{"key": {cfg.apiKey}, "tcin": {tcin}, "store_id": {cfg.storeID}, "pricing_store_id": {cfg.storeID}, "required_store_id": {cfg.storeID}, "scheduled_delivery_store_id": {cfg.storeID}, "zip": {cfg.zipCode}, "state": {cfg.stateCode}, "latitude": {cfg.latitude}, "longitude": {cfg.longitude}, "has_pricing_store_id": {"true"}, "visitor_id": {"0"}, "channel": {"WEB"}, "page": {"/p/A-" + tcin}}
+	return redskyURL + "?" + query.Encode(), nil
+}
+
 func fetchObservation(client *http.Client, cfg config, productURL string) (observation, error) {
 	tcin, err := extractTCIN(productURL)
 	if err != nil {
 		return observation{}, err
 	}
-	query := url.Values{"key": {cfg.apiKey}, "tcin": {tcin}, "store_id": {cfg.storeID}, "pricing_store_id": {cfg.storeID}, "zip": {cfg.zipCode}, "state": {cfg.stateCode}, "has_pricing_store_id": {"true"}, "visitor_id": {"0"}, "channel": {"WEB"}, "page": {"/p/A-" + tcin}}
-	request, err := http.NewRequest(http.MethodGet, redskyURL+"?"+query.Encode(), nil)
+	targetURL, err := buildFulfillmentURL(cfg, tcin)
+	if err != nil {
+		return observation{}, err
+	}
+	request, err := http.NewRequest(http.MethodGet, targetURL, nil)
 	if err != nil {
 		return observation{}, err
 	}
@@ -674,11 +750,21 @@ func isAvailable(value shippingOptions) bool {
 }
 
 func postIngest(cfg config, eventType string, payload any) error {
+	return postIngestWithClient(cfg, cfg.ingestClient, eventType, payload)
+}
+
+func postIngestWithClient(cfg config, client *http.Client, eventType string, payload any) error {
 	body, _ := json.Marshal(envelope{Type: eventType, Payload: payload})
-	request, _ := http.NewRequest(http.MethodPost, cfg.ingestURL, bytes.NewReader(body))
+	request, err := http.NewRequest(http.MethodPost, cfg.ingestURL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
 	request.Header.Set("Authorization", "Bearer "+cfg.ingestToken)
 	request.Header.Set("Content-Type", "application/json")
-	response, err := (&http.Client{Timeout: 20 * time.Second}).Do(request)
+	if client == nil {
+		client = &http.Client{Timeout: 20 * time.Second}
+	}
+	response, err := client.Do(request)
 	if err != nil {
 		return err
 	}
@@ -688,6 +774,16 @@ func postIngest(cfg config, eventType string, payload any) error {
 		return fmt.Errorf("ingest failed with HTTP %d", response.StatusCode)
 	}
 	return nil
+}
+
+func postLog(cfg config, level, message string) error {
+	return postIngestWithClient(cfg, cfg.ingestClient, "log", buildMonitorLog(cfg.workerName, level, message, time.Now()))
+}
+
+func publishMonitorLog(cfg config, level, message string) {
+	if err := postLog(cfg, level, message); err != nil {
+		log.Printf("monitor log publish failed: %v", err)
+	}
 }
 
 func postDrop(cfg config, current observation) error {
