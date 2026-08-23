@@ -24,6 +24,7 @@ import {
   summarize,
 } from "../lib/dashboard.js";
 import { formatDashboardTime } from "../lib/time.js";
+import { filterLogs } from "../lib/logs.js";
 import { matchSet } from "../lib/pokemon-sets.js";
 import {
   ALLOWED_SERVICES,
@@ -49,6 +50,20 @@ test("freshnessState distinguishes fresh, stale, and offline telemetry", () => {
   assert.equal(freshnessState("2026-08-23T19:56:00.000Z", now), "stale");
   assert.equal(freshnessState("2026-08-23T19:50:00.000Z", now), "offline");
   assert.equal(freshnessState("not-a-time", now), "offline");
+});
+
+test("filterLogs applies query, service, and level filters without changing order", () => {
+  const logs = [
+    { id: "1", service: "target-stock-observer-go", level: "info", worker_name: "pi-a", message: "cycle complete" },
+    { id: "2", service: "api-monitor", level: "error", worker_name: "pi-a", message: "legacy failed" },
+    { id: "3", service: "target-stock-observer-go", level: "warn", worker_name: "pi-b", message: "proxy blocked" },
+  ];
+
+  assert.deepEqual(filterLogs(logs, {}), logs);
+  assert.deepEqual(filterLogs(logs, { query: "blocked" }).map((row) => row.id), ["3"]);
+  assert.deepEqual(filterLogs(logs, { service: "target-stock-observer-go" }).map((row) => row.id), ["1", "3"]);
+  assert.deepEqual(filterLogs(logs, { level: "error" }).map((row) => row.id), ["2"]);
+  assert.deepEqual(filterLogs(logs, { query: "pi-a", level: "info" }).map((row) => row.id), ["1"]);
 });
 
 test("Sam's Club monitor is exposed through the protected Pi service controls", () => {
