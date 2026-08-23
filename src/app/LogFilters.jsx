@@ -62,7 +62,7 @@ export function LogFilters({ logs }) {
           <span>{visibleLogs.length} of {logs.length} messages</span>
           <span className={warningCount ? 'warn' : ''}>{warningCount} warnings</span>
           <span className={errorCount ? 'bad' : ''}>{errorCount} errors</span>
-          <span>Latest {formatWhen(logs[0]?.created_at)}</span>
+          <span>Latest {logs[0] ? formatWhen(logs[0].created_at) : 'none yet'}</span>
         </div>
       </section>
       <ConsoleLog logs={visibleLogs} />
