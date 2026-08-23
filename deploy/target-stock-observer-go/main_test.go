@@ -190,6 +190,17 @@ func TestSafeProxyErrorRedactsTargetKey(t *testing.T) {
 	}
 }
 
+func TestRetryableProxyErrorRecognizesGatewayAndMalformedTLSResponses(t *testing.T) {
+	for _, errText := range []string{
+		"Get https://redsky.target.com/path: Bad Gateway",
+		"Get https://redsky.target.com/path: server gave HTTP response to HTTPS client",
+	} {
+		if !retryableProxyError(errors.New(errText)) {
+			t.Fatalf("retryableProxyError(%q) = false, want true", errText)
+		}
+	}
+}
+
 func TestProxyHealthRowsAreSafeAndComparable(t *testing.T) {
 	pool := newProxyPool([]string{"http://user:secret@example.test:8080"}, 0, 60*time.Second)
 	now := time.Unix(100, 0)

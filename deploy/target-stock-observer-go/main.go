@@ -1022,7 +1022,7 @@ func extractTCIN(value string) (string, error) {
 }
 func retryableProxyError(err error) bool {
 	text := strings.ToLower(err.Error())
-	for _, marker := range []string{"proxy", "timeout", "502", "503", "504", "connection reset", "connection refused"} {
+	for _, marker := range []string{"proxy", "timeout", "502", "503", "504", "bad gateway", "server gave http response to https client", "malformed http response", "connection reset", "connection refused"} {
 		if strings.Contains(text, marker) {
 			return true
 		}
