@@ -1424,6 +1424,10 @@ body {
   text-transform: uppercase;
 }
 
+.nav-section + .nav-section {
+  margin-top: 19px;
+}
+
 .nav-links {
   width: 100%;
   display: grid;
