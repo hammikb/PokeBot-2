@@ -171,6 +171,7 @@ type proxyHealth struct {
 	cooldownUntil       time.Time
 	lastFailureAt       time.Time
 	lastUsedAt          time.Time
+	activeRequests      int
 }
 
 type proxyHealthRow struct {
@@ -236,13 +237,29 @@ func runConcurrentCycle(urls []string, cfg config, proxies []string, pool *proxy
 	results := make(chan checkResult, len(urls))
 	var waitGroup sync.WaitGroup
 	waitGroup.Add(workers)
-	for worker := 0; worker < workers; worker++ {
-		proxyIndex := (cfg.proxyIndex + worker) % len(proxies)
-		client := newClient(proxies[proxyIndex])
+	for range workers {
+		proxyIndex := -1
+		var client *http.Client
 		go func() {
 			defer waitGroup.Done()
-			defer client.CloseIdleConnections()
+			defer func() {
+				if client != nil {
+					client.CloseIdleConnections()
+				}
+			}()
 			for productURL := range jobs {
+				if client != nil {
+					client.CloseIdleConnections()
+				}
+				proxyIndex = pool.claimReady(time.Now(), -1)
+				if proxyIndex < 0 {
+					proxyIndex = pool.claimNext(time.Now(), -1)
+				}
+				if proxyIndex < 0 {
+					results <- checkResult{productURL: productURL, err: errors.New("no proxy available for Target request")}
+					continue
+				}
+				client = newClient(proxies[proxyIndex])
 				current, err := fetchWithFailover(&client, proxies, &proxyIndex, pool, cfg, productURL)
 				results <- checkResult{productURL: productURL, current: current, err: err}
 			}
@@ -336,6 +353,69 @@ func (p *proxyPool) healthRows(now time.Time) []proxyHealthRow {
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+func (p *proxyPool) claimReady(now time.Time, current int) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.proxies) == 0 {
+		return -1
+	}
+	best := -1
+	for index, health := range p.health {
+		if index == current && len(p.proxies) > 1 {
+			continue
+		}
+		if health.activeRequests > 0 || health.cooldownUntil.After(now) {
+			continue
+		}
+		if best == -1 || health.lastUsedAt.Before(p.health[best].lastUsedAt) {
+			best = index
+		}
+	}
+	if best >= 0 {
+		p.health[best].activeRequests++
+		p.health[best].lastUsedAt = now
+	}
+	return best
+}
+
+func (p *proxyPool) claimNext(now time.Time, current int) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.proxies) == 0 {
+		return -1
+	}
+	best := -1
+	bestReady := false
+	bestActive := int(^uint(0) >> 1)
+	for index, health := range p.health {
+		if index == current && len(p.proxies) > 1 {
+			continue
+		}
+		ready := !health.cooldownUntil.After(now)
+		if best == -1 || (ready && !bestReady) ||
+			(ready == bestReady && (health.activeRequests < bestActive ||
+				(health.activeRequests == bestActive && health.lastUsedAt.Before(p.health[best].lastUsedAt)))) {
+			best = index
+			bestReady = ready
+			bestActive = health.activeRequests
+		}
+	}
+	if best >= 0 {
+		p.health[best].activeRequests++
+		p.health[best].lastUsedAt = now
+	}
+	return best
+}
+
+func (p *proxyPool) release(index int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if index < 0 || index >= len(p.health) || p.health[index].activeRequests == 0 {
+		return
+	}
+	p.health[index].activeRequests--
 }
 
 func publicProxyID(proxy string) string {
@@ -450,7 +530,7 @@ func main() {
 		for _, result := range runConcurrentCycle(urls, cfg, proxies, proxyPool) {
 			if result.err != nil {
 				cycleFailed++
-				log.Printf("check failed for %s: %v", result.productURL, result.err)
+				log.Printf("check failed for %s: %s", result.productURL, safeProxyError(result.err))
 				var blocked *targetBlockedError
 				if errors.As(result.err, &blocked) {
 					cycleBlocked = true
@@ -651,13 +731,24 @@ func newClient(proxy string) *http.Client {
 	return &http.Client{Timeout: 25 * time.Second, Jar: jar, Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL), MaxIdleConns: 32, MaxIdleConnsPerHost: 8, IdleConnTimeout: 90 * time.Second}}
 }
 
+var targetKeyInError = regexp.MustCompile(`([?&]key=)[^&\s]+`)
+
+func safeProxyError(err error) string {
+	if err == nil {
+		return ""
+	}
+	return targetKeyInError.ReplaceAllString(err.Error(), "$1[redacted]")
+}
+
 func fetchWithFailover(client **http.Client, proxies []string, proxyIndex *int, pool *proxyPool, cfg config, productURL string) (observation, error) {
 	maxFailovers := min(cfg.maxFailovers, len(proxies)-1)
+	currentProxy := *proxyIndex
 	for attempt := 0; ; attempt++ {
 		current, err := fetchObservation(*client, cfg, productURL)
 		if err == nil {
 			if pool != nil {
-				pool.recordSuccess(*proxyIndex, time.Now())
+				pool.recordSuccess(currentProxy, time.Now())
+				pool.release(currentProxy)
 			}
 			return current, nil
 		}
@@ -668,41 +759,51 @@ func fetchWithFailover(client **http.Client, proxies []string, proxyIndex *int, 
 				if blocked.status == http.StatusTooManyRequests {
 					kind = "blocked_429"
 				}
-				pool.recordFailure(*proxyIndex, kind, time.Now())
+				pool.recordFailure(currentProxy, kind, time.Now())
+				pool.release(currentProxy)
 			}
 			if attempt >= maxFailovers {
 				return observation{}, err
 			}
-			next := (*proxyIndex + 1) % len(proxies)
+			next := (currentProxy + 1) % len(proxies)
 			if pool != nil {
-				next = pool.chooseReady(time.Now(), *proxyIndex)
+				next = pool.claimReady(time.Now(), currentProxy)
+				if next < 0 {
+					next = pool.claimNext(time.Now(), currentProxy)
+				}
 			}
-			if next < 0 || next == *proxyIndex {
+			if next < 0 || next == currentProxy {
 				return observation{}, err
 			}
 			(*client).CloseIdleConnections()
-			*proxyIndex = next
-			*client = newClient(proxies[*proxyIndex])
-			log.Printf("proxy blocked; cooldown and failover to proxy[%d]: %v", *proxyIndex+1, err)
+			currentProxy = next
+			*proxyIndex = currentProxy
+			*client = newClient(proxies[currentProxy])
+			log.Printf("proxy blocked; cooldown and failover to proxy[%d]: %s", currentProxy+1, safeProxyError(err))
 			continue
 		}
 		if pool != nil {
-			pool.recordFailure(*proxyIndex, "transport", time.Now())
+			pool.recordFailure(currentProxy, "transport", time.Now())
+			pool.release(currentProxy)
 		}
 		if !retryableProxyError(err) || attempt >= maxFailovers {
 			return observation{}, err
 		}
-		next := (*proxyIndex + 1) % len(proxies)
+		next := (currentProxy + 1) % len(proxies)
 		if pool != nil {
-			next = pool.chooseReady(time.Now(), *proxyIndex)
+			next = pool.claimReady(time.Now(), currentProxy)
+			if next < 0 {
+				next = pool.claimNext(time.Now(), currentProxy)
+			}
 		}
-		if next < 0 || next == *proxyIndex {
+		if next < 0 || next == currentProxy {
 			return observation{}, err
 		}
 		(*client).CloseIdleConnections()
-		*proxyIndex = next
-		*client = newClient(proxies[*proxyIndex])
-		log.Printf("proxy failed; immediate failover to proxy[%d]: %v", *proxyIndex+1, err)
+		currentProxy = next
+		*proxyIndex = currentProxy
+		*client = newClient(proxies[currentProxy])
+		log.Printf("proxy failed; immediate failover to proxy[%d]: %s", currentProxy+1, safeProxyError(err))
 	}
 }
 

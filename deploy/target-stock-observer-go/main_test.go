@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -149,6 +150,43 @@ func TestProxyPoolReadySelectionSkipsCoolingProxies(t *testing.T) {
 	pool.recordFailure(2, "blocked", now)
 	if got := pool.chooseReady(now, 0); got != -1 {
 		t.Fatalf("all-cooling selection = %d, want -1", got)
+	}
+}
+
+func TestProxyPoolClaimsOnlyReadyUnreservedProxies(t *testing.T) {
+	pool := newProxyPool([]string{"http://one:80", "http://two:80", "http://three:80"}, 0, 60*time.Second)
+	now := time.Unix(100, 0)
+	pool.recordFailure(0, "blocked", now)
+
+	first := pool.claimReady(now, -1)
+	second := pool.claimReady(now, -1)
+	if first == 0 || second == 0 || first == second {
+		t.Fatalf("claims reused a cooling or active proxy: first=%d second=%d", first, second)
+	}
+	if got := pool.claimReady(now, -1); got != -1 {
+		t.Fatalf("third claim = %d, want no unreserved ready proxy", got)
+	}
+	pool.release(first)
+	if got := pool.claimReady(now, -1); got != first {
+		t.Fatalf("released proxy claim = %d, want %d", got, first)
+	}
+}
+
+func TestProxyPoolClaimNextPrefersAReadyProxy(t *testing.T) {
+	pool := newProxyPool([]string{"http://one:80", "http://two:80", "http://three:80"}, 0, 60*time.Second)
+	now := time.Unix(100, 0)
+	pool.recordFailure(0, "blocked", now)
+	pool.recordFailure(1, "transport", now)
+	if got := pool.claimNext(now, -1); got != 2 {
+		t.Fatalf("next claim = %d, want ready proxy 2", got)
+	}
+}
+
+func TestSafeProxyErrorRedactsTargetKey(t *testing.T) {
+	err := errors.New("Get https://redsky.target.com/path?key=secret-value&tcin=123: Bad Gateway")
+	got := safeProxyError(err)
+	if strings.Contains(got, "secret-value") || !strings.Contains(got, "key=[redacted]") {
+		t.Fatalf("redacted error = %q", got)
 	}
 }
 
