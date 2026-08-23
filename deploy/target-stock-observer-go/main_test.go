@@ -12,6 +12,27 @@ import (
 	"time"
 )
 
+func TestWorkerCountSupportsAFullCadenceWithoutUnboundedConcurrency(t *testing.T) {
+	if got := workerCount(44, 15, 12); got != 12 {
+		t.Fatalf("worker count = %d, want 12", got)
+	}
+	if got := workerCount(44, 4, 12); got != 4 {
+		t.Fatalf("worker count capped by proxies = %d, want 4", got)
+	}
+	if got := workerCount(44, 15, 0); got != 12 {
+		t.Fatalf("default worker count = %d, want 12", got)
+	}
+}
+
+func TestCycleDelayDoesNotAddAnotherIntervalWhenPassRunsLong(t *testing.T) {
+	if got := cycleDelay(10*time.Second, 30*time.Second); got != 20*time.Second {
+		t.Fatalf("cycle delay = %s, want 20s", got)
+	}
+	if got := cycleDelay(45*time.Second, 30*time.Second); got != 0 {
+		t.Fatalf("overrun cycle delay = %s, want 0", got)
+	}
+}
+
 func TestBuildMonitorLogAddsSafeServiceIdentity(t *testing.T) {
 	now := time.Date(2026, 8, 23, 20, 0, 0, 0, time.UTC)
 	row := buildMonitorLog("pokebot-worker", "info", "cycle complete", now)
