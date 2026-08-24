@@ -96,6 +96,45 @@ func TestBuildBulkCycleLogDescribesBatchOnlyRetries(t *testing.T) {
 	}
 }
 
+func TestCycleStatePersistsOnceWhenCycleHasObservations(t *testing.T) {
+	if !cycleHasSuccessfulChecks([]checkResult{{current: observation{TCIN: "100"}}}) {
+		t.Fatal("successful cycle result should trigger one state save")
+	}
+	if cycleHasSuccessfulChecks([]checkResult{{err: errors.New("deferred")}}) {
+		t.Fatal("failed-only cycle should not trigger a state save")
+	}
+}
+
+func TestMergeBulkObservationsRecoversProductsFromIncompleteRetry(t *testing.T) {
+	products := map[string]string{
+		"100": "https://www.target.com/p/-/A-100",
+		"200": "https://www.target.com/p/-/A-200",
+		"300": "https://www.target.com/p/-/A-300",
+	}
+	first := []observation{{TCIN: "100", ProductURL: products["100"]}}
+	retry := []observation{{TCIN: "200", ProductURL: products["200"]}}
+	merged, missing := mergeBulkObservations(first, retry, products)
+	if len(merged) != 2 || len(missing) != 1 || missing[0] != products["300"] {
+		t.Fatalf("merged=%+v missing=%v", merged, missing)
+	}
+}
+
+func TestProxyExplorationAdaptsToCycleHealth(t *testing.T) {
+	pool := newProxyPool([]string{"http://one:80", "http://two:80", "http://three:80"}, 0, 60*time.Second)
+	for range 10 {
+		pool.recordCycle(true)
+	}
+	if got := pool.explorationEvery(); got != stableProxyExplorationEvery {
+		t.Fatalf("healthy exploration interval = %d, want %d", got, stableProxyExplorationEvery)
+	}
+	for range 3 {
+		pool.recordCycle(false)
+	}
+	if got := pool.explorationEvery(); got != recoveryProxyExplorationEvery {
+		t.Fatalf("degraded exploration interval = %d, want %d", got, recoveryProxyExplorationEvery)
+	}
+}
+
 func TestBulkModeSuppressesPerProductFailureLogs(t *testing.T) {
 	if shouldLogIndividualCheckFailure(true) {
 		t.Fatal("bulk mode should report failures at the batch/cycle level")
@@ -297,7 +336,7 @@ func TestProxyPoolSummaryAndLogIncludeCompleteCycleRate(t *testing.T) {
 	if summary.total != 4 || summary.proven != 1 || summary.unproven != 1 || summary.cooling != 1 || summary.degraded != 1 || summary.blocked403 != 2 || summary.transportFailures != 1 {
 		t.Fatalf("proxy summary = %+v", summary)
 	}
-	want := "Target proxy pool: 4 total, 1 proven, 1 unproven, 1 cooling, 1 degraded; 403=2, transport=1; full_cycles=12/23 (52.2%)."
+	want := "Target proxy pool: 4 total, 1 proven, 1 unproven, 1 cooling, 1 degraded; 403=2, transport=1; full_cycles=12/23 (52.2%), explore_every=10 selections."
 	if got := buildProxyPoolLog(summary, 12, 23); got != want {
 		t.Fatalf("proxy log = %q, want %q", got, want)
 	}

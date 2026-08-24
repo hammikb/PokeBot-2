@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -213,11 +214,13 @@ type proxyPool struct {
 	health         []proxyHealth
 	cooldown       time.Duration
 	selectionCount uint64
+	recentCycles   []bool
 }
 
 type proxyPoolSummary struct {
 	total, proven, unproven, cooling, degraded int
 	blocked403, transportFailures              int
+	explorationEvery                           int
 }
 
 type persistedProxyHealth struct {
@@ -242,7 +245,12 @@ const maxConcurrency = 32
 const defaultBulkBatchSize = 24
 const maxBulkBatchSize = 24
 const minimumProvenProxies = 3
-const proxyExplorationEvery = 10
+const defaultProxyExplorationEvery = 10
+const stableProxyExplorationEvery = 60
+const recoveryProxyExplorationEvery = 6
+const proxyCycleHealthWindow = 20
+const proxyStableCycleThreshold = 0.9
+const proxyRecoveryCycleThreshold = 0.8
 
 func workerCount(products, proxies, configured int) int {
 	if products <= 0 || proxies <= 0 {
@@ -286,6 +294,15 @@ type checkResult struct {
 	productURL string
 	current    observation
 	err        error
+}
+
+func cycleHasSuccessfulChecks(results []checkResult) bool {
+	for _, result := range results {
+		if result.err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func runConcurrentCycle(urls []string, cfg config, proxies []string, pool *proxyPool) []checkResult {
@@ -490,6 +507,41 @@ func (p *proxyPool) provenReadyCountLocked(now time.Time, current int) int {
 	return count
 }
 
+func (p *proxyPool) recordCycle(full bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.recentCycles = append(p.recentCycles, full)
+	if len(p.recentCycles) > proxyCycleHealthWindow {
+		p.recentCycles = p.recentCycles[len(p.recentCycles)-proxyCycleHealthWindow:]
+	}
+}
+
+func (p *proxyPool) explorationEvery() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.explorationEveryLocked()
+}
+
+func (p *proxyPool) explorationEveryLocked() int {
+	if len(p.recentCycles) < 10 {
+		return defaultProxyExplorationEvery
+	}
+	fullCycles := 0
+	for _, full := range p.recentCycles {
+		if full {
+			fullCycles++
+		}
+	}
+	rate := float64(fullCycles) / float64(len(p.recentCycles))
+	if rate >= proxyStableCycleThreshold {
+		return stableProxyExplorationEvery
+	}
+	if rate < proxyRecoveryCycleThreshold {
+		return recoveryProxyExplorationEvery
+	}
+	return defaultProxyExplorationEvery
+}
+
 func (p *proxyPool) claimReady(now time.Time, current int) int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -497,7 +549,8 @@ func (p *proxyPool) claimReady(now time.Time, current int) int {
 		return -1
 	}
 	p.selectionCount++
-	explore := p.provenReadyCountLocked(now, current) < minimumProvenProxies || p.selectionCount%proxyExplorationEvery == 0
+	explorationEvery := p.explorationEveryLocked()
+	explore := p.provenReadyCountLocked(now, current) < minimumProvenProxies || p.selectionCount%uint64(explorationEvery) == 0
 	best := p.selectReadyLocked(now, current, explore)
 	if best >= 0 {
 		p.health[best].activeRequests++
@@ -559,7 +612,7 @@ func (p *proxyPool) claimEmergency(now time.Time, current int) int {
 func (p *proxyPool) summary(now time.Time) proxyPoolSummary {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	result := proxyPoolSummary{total: len(p.health)}
+	result := proxyPoolSummary{total: len(p.health), explorationEvery: p.explorationEveryLocked()}
 	for _, health := range p.health {
 		result.blocked403 += health.blocked403
 		result.transportFailures += health.transportFailures
@@ -583,9 +636,9 @@ func buildProxyPoolLog(summary proxyPoolSummary, fullCycles, totalCycles int) st
 		rate = float64(fullCycles) * 100 / float64(totalCycles)
 	}
 	return fmt.Sprintf(
-		"Target proxy pool: %d total, %d proven, %d unproven, %d cooling, %d degraded; 403=%d, transport=%d; full_cycles=%d/%d (%.1f%%).",
+		"Target proxy pool: %d total, %d proven, %d unproven, %d cooling, %d degraded; 403=%d, transport=%d; full_cycles=%d/%d (%.1f%%), explore_every=%d selections.",
 		summary.total, summary.proven, summary.unproven, summary.cooling, summary.degraded,
-		summary.blocked403, summary.transportFailures, fullCycles, totalCycles, rate,
+		summary.blocked403, summary.transportFailures, fullCycles, totalCycles, rate, summary.explorationEvery,
 	)
 }
 
@@ -801,6 +854,7 @@ func main() {
 		} else {
 			results = runConcurrentCycle(urls, cfg, proxies, proxyPool)
 		}
+		stateSaveNeeded := cycleHasSuccessfulChecks(results)
 		for _, result := range results {
 			if result.err != nil {
 				cycleFailed++
@@ -849,8 +903,10 @@ func main() {
 					log.Printf("SHADOW availability transition detected for tcin=%s", current.TCIN)
 				}
 				state[current.TCIN] = &current
-				saveState(cfg.stateFile, state)
 			}
+		}
+		if stateSaveNeeded {
+			saveState(cfg.stateFile, state)
 		}
 		if cycleBlocked {
 			if cfg.bulkEnabled {
@@ -861,7 +917,9 @@ func main() {
 		}
 		if cfg.bulkEnabled {
 			bulkCycles++
-			if cycleFailed == 0 && cycleChecks == len(urls) {
+			fullCycle := cycleFailed == 0 && cycleChecks == len(urls)
+			proxyPool.recordCycle(fullCycle)
+			if fullCycle {
 				bulkFullCycles++
 			}
 			bulkCycleMessage := buildBulkCycleLog(len(urls), cycleChecks, cycleFailed, cfg.bulkBatchSize)
@@ -1151,11 +1209,16 @@ func fetchBulkBatch(client *http.Client, cfg config, productURLs map[string]stri
 }
 
 func fetchBulkBatchWithFailover(proxies []string, pool *proxyPool, cfg config, productURLs map[string]string) ([]observation, []string, int64, error) {
+	observations, missing, responseBytes, _, err := fetchBulkBatchWithFailoverExcluding(proxies, pool, cfg, productURLs, -1)
+	return observations, missing, responseBytes, err
+}
+
+func fetchBulkBatchWithFailoverExcluding(proxies []string, pool *proxyPool, cfg config, productURLs map[string]string, excludedProxy int) ([]observation, []string, int64, int, error) {
 	if len(proxies) == 0 {
-		return nil, nil, 0, errors.New("no proxies available for Target bulk request")
+		return nil, nil, 0, -1, errors.New("no proxies available for Target bulk request")
 	}
 	maxFailovers := min(cfg.maxFailovers, len(proxies)-1)
-	currentProxy := -1
+	currentProxy := excludedProxy
 	var totalBytes int64
 	for attempt := 0; ; attempt++ {
 		emergencyProbe := false
@@ -1168,19 +1231,19 @@ func fetchBulkBatchWithFailover(proxies []string, pool *proxyPool, cfg config, p
 			}
 		}
 		if currentProxy < 0 {
-			return nil, nil, totalBytes, errors.New("no ready proxy available for Target bulk request")
+			return nil, nil, totalBytes, -1, errors.New("no ready proxy available for Target bulk request")
 		}
 		client := pool.client(currentProxy)
 		if client == nil {
 			pool.release(currentProxy)
-			return nil, nil, totalBytes, fmt.Errorf("proxy[%d] has no HTTP client", currentProxy+1)
+			return nil, nil, totalBytes, -1, fmt.Errorf("proxy[%d] has no HTTP client", currentProxy+1)
 		}
 		observations, missing, responseBytes, err := fetchBulkBatch(client, cfg, productURLs)
 		totalBytes += responseBytes
 		if err == nil {
 			pool.recordSuccess(currentProxy, time.Now())
 			pool.release(currentProxy)
-			return observations, missing, totalBytes, nil
+			return observations, missing, totalBytes, currentProxy, nil
 		}
 		var blocked *targetBlockedError
 		if errors.As(err, &blocked) {
@@ -1195,7 +1258,7 @@ func fetchBulkBatchWithFailover(proxies []string, pool *proxyPool, cfg config, p
 		client.CloseIdleConnections()
 		pool.release(currentProxy)
 		if emergencyProbe || attempt >= maxFailovers {
-			return nil, nil, totalBytes, err
+			return nil, nil, totalBytes, -1, err
 		}
 		log.Printf("bulk batch proxy[%d] failed; targeted failover: %s", currentProxy+1, safeProxyError(err))
 	}
@@ -1223,7 +1286,7 @@ func runBulkCycle(urls []string, cfg config, proxies []string, pool *proxyPool) 
 		if len(productURLs) == 0 {
 			continue
 		}
-		observations, missing, responseBytes, err := fetchBulkBatchWithFailover(proxies, pool, cfg, productURLs)
+		observations, missing, responseBytes, successfulProxy, err := fetchBulkBatchWithFailoverExcluding(proxies, pool, cfg, productURLs, -1)
 		if err != nil {
 			log.Printf("bulk batch failed after proxy retries; deferring %d products to the next cycle: %s", len(productURLs), safeProxyError(err))
 			for _, productURL := range productURLs {
@@ -1231,6 +1294,17 @@ func runBulkCycle(urls []string, cfg config, proxies []string, pool *proxyPool) 
 			}
 			continue
 		}
+		if len(missing) > 0 && successfulProxy >= 0 {
+			log.Printf("bulk batch incomplete; retrying through proxy failover: missing=%d", len(missing))
+			retryObservations, _, retryBytes, _, retryErr := fetchBulkBatchWithFailoverExcluding(proxies, pool, cfg, productURLs, successfulProxy)
+			responseBytes += retryBytes
+			if retryErr != nil {
+				log.Printf("bulk batch incomplete retry failed; deferring remaining missing products: %s", safeProxyError(retryErr))
+			} else {
+				observations, missing = mergeBulkObservations(observations, retryObservations, productURLs)
+			}
+		}
+		assignBulkResponseBytes(observations, responseBytes)
 		for _, current := range observations {
 			results = append(results, checkResult{productURL: current.ProductURL, current: current})
 		}
@@ -1367,6 +1441,40 @@ func parseBulkObservations(data []byte, productURLs map[string]string) ([]observ
 		}
 	}
 	return observations, missing, nil
+}
+
+func mergeBulkObservations(first, retry []observation, productURLs map[string]string) ([]observation, []string) {
+	merged := make([]observation, 0, len(productURLs))
+	found := make(map[string]bool, len(productURLs))
+	for _, observations := range [][]observation{first, retry} {
+		for _, current := range observations {
+			if found[current.TCIN] {
+				continue
+			}
+			if productURL, ok := productURLs[current.TCIN]; ok {
+				current.ProductURL = productURL
+				merged = append(merged, current)
+				found[current.TCIN] = true
+			}
+		}
+	}
+	missing := make([]string, 0, len(productURLs)-len(merged))
+	for tcin, productURL := range productURLs {
+		if !found[tcin] {
+			missing = append(missing, productURL)
+		}
+	}
+	sort.Strings(missing)
+	return merged, missing
+}
+
+func assignBulkResponseBytes(observations []observation, responseBytes int64) {
+	for index := range observations {
+		observations[index].ResponseBytes = 0
+	}
+	if len(observations) > 0 {
+		observations[0].ResponseBytes = int(responseBytes)
+	}
 }
 
 func findShippingOptions(value any) (shippingOptions, bool) {
