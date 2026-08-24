@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Move the production Go Target observer to batched fulfillment checks while preserving per-product recovery and a reversible rollback path.
+**Goal:** Move the production Go Target observer to batched fulfillment checks with proxy-only retry, batch deferral, and a reversible rollback path.
 
-**Architecture:** The observer will collect the existing watchlist TCINs, split them into batches of 24, and query Target's fulfillment-summary endpoint through reserved proxy sessions. A failed batch will retry through available proxies; any batch failure or missing TCIN will fall back to the existing per-product checker for only the affected products.
+**Architecture:** The observer will collect the existing watchlist TCINs, split them into batches of 24, and query Target's fulfillment-summary endpoint through reserved proxy sessions. A failed batch will retry the same bulk request through available proxies; an exhausted batch or missing TCIN will be recorded as deferred and retried on the next cycle. The monitor will never fan out into per-product requests.
 
 **Tech Stack:** Go, Target RedSky fulfillment endpoint, Pi systemd service, existing proxy pool, Supabase/Vercel ingest.
 
@@ -27,15 +27,15 @@
 - [ ] Add a bulk request builder using `product_summary_with_fulfillment_v1` and `tcins` batches capped at 24.
 - [ ] Parse `data.product_summaries` into the existing observation model.
 
-### Task 2: Retry and targeted fallback
+### Task 2: Bulk-only retry and defer
 
 **Files:**
 - Modify: `deploy/target-stock-observer-go/main.go`
 - Test: `deploy/target-stock-observer-go/main_test.go`
 
-- [ ] Add failing tests proving a failed batch can be retried and that only failed or missing products use the per-product fallback.
+- [ ] Add failing tests proving a failed batch can be retried through another proxy and never uses per-product fallback.
 - [ ] Reserve proxies for bulk requests and release them on success or failure.
-- [ ] Reuse the existing per-product failover path for fallback products.
+- [ ] Defer an exhausted or incomplete batch to the next cycle without creating individual requests.
 
 ### Task 3: Production deployment
 
@@ -50,5 +50,5 @@
 ### Task 4: Verification
 
 - [ ] Confirm the service reports bulk mode and the expected 44-product watchlist.
-- [ ] Confirm complete bulk cycles and targeted fallback behavior in journald.
+- [ ] Confirm complete bulk cycles, proxy-only bulk retries, and deferred-batch behavior in journald.
 - [ ] Confirm `api-monitor.service` and `pokemon-center-queue.service` remain inactive and no Electron process was restarted.

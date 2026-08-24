@@ -110,12 +110,21 @@ func TestParseBulkObservationsReturnsMissingTCINs(t *testing.T) {
 	}
 }
 
-func TestBulkBatchFallbackPolicyDefersTargetBlocks(t *testing.T) {
-	if bulkBatchFallbackAllowed(&targetBlockedError{status: http.StatusForbidden}) {
-		t.Fatal("403 batch block should defer instead of launching per-product fallback")
+func TestNormalizeTargetProductURLAcceptsBareTCIN(t *testing.T) {
+	if got, err := normalizeTargetProductURL("94681790"); err != nil || got != "https://www.target.com/p/-/A-94681790" {
+		t.Fatalf("bare TCIN normalized to %q, err=%v", got, err)
 	}
-	if !bulkBatchFallbackAllowed(errors.New("Bad Gateway")) {
-		t.Fatal("transport gateway failure should use targeted per-product fallback")
+	if got, err := normalizeTargetProductURL("https://www.target.com/p/example/-/A-94681790"); err != nil || got != "https://www.target.com/p/example/-/A-94681790" {
+		t.Fatalf("Target URL changed to %q, err=%v", got, err)
+	}
+}
+
+func TestBulkBatchFailureNeverUsesPerProductFallback(t *testing.T) {
+	if bulkBatchFallbackAllowed(&targetBlockedError{status: http.StatusForbidden}) {
+		t.Fatal("403 batch block should defer without per-product fallback")
+	}
+	if bulkBatchFallbackAllowed(errors.New("Bad Gateway")) {
+		t.Fatal("transport batch failure should defer after bulk proxy retries")
 	}
 }
 

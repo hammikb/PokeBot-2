@@ -28,6 +28,7 @@ const defaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 const monitorService = "target-stock-observer-go"
 
 var tcinPattern = regexp.MustCompile(`(?:^|/)A-(\d+)(?:[/?#]|$)`)
+var bareTCINPattern = regexp.MustCompile(`^\d+$`)
 
 type config struct {
 	ingestURL, ingestToken, watchlistURL, apiKey, userAgent string
@@ -597,7 +598,11 @@ func main() {
 			}
 		}
 		if cycleBlocked {
-			log.Printf("Target cycle had blocked requests; proxy failover handled per worker.")
+			if cfg.bulkEnabled {
+				log.Printf("Target cycle had blocked requests; proxy failover handled by bulk batch.")
+			} else {
+				log.Printf("Target cycle had blocked requests; proxy failover handled per worker.")
+			}
 		}
 		if cfg.proxyHealthPublish && (lastProxyHealth.IsZero() || time.Since(lastProxyHealth) >= cfg.proxyHealthInterval) {
 			if err := postIngest(cfg, "proxy_health", proxyPool.healthRows(time.Now())); err != nil {
@@ -710,13 +715,15 @@ func loadProductURLs(cfg config) ([]string, error) {
 	}
 	deduped := map[string]bool{}
 	result := []string{}
-	for _, productURL := range urls {
-		if _, err := extractTCIN(productURL); err == nil {
-			tcin, _ := extractTCIN(productURL)
-			if !deduped[tcin] {
-				deduped[tcin] = true
-				result = append(result, productURL)
-			}
+	for _, rawValue := range urls {
+		productURL, err := normalizeTargetProductURL(rawValue)
+		if err != nil {
+			continue
+		}
+		tcin, _ := extractTCIN(productURL)
+		if !deduped[tcin] {
+			deduped[tcin] = true
+			result = append(result, productURL)
 		}
 	}
 	if len(result) == 0 {
@@ -831,11 +838,7 @@ func fetchWithFailover(client **http.Client, proxies []string, proxyIndex *int, 
 
 func fetchBulkBatch(client *http.Client, cfg config, productURLs map[string]string) ([]observation, []string, int64, error) {
 	tcins := make([]string, 0, len(productURLs))
-	for productURL := range productURLs {
-		tcin, err := extractTCIN(productURL)
-		if err != nil {
-			return nil, nil, 0, err
-		}
+	for tcin := range productURLs {
 		tcins = append(tcins, tcin)
 	}
 	request, err := http.NewRequest(http.MethodGet, buildBulkFulfillmentURL(cfg, tcins), nil)
@@ -908,27 +911,28 @@ func fetchBulkBatchWithFailover(proxies []string, pool *proxyPool, cfg config, p
 			pool.recordFailure(currentProxy, "transport", time.Now())
 		}
 		pool.release(currentProxy)
-		if attempt >= maxFailovers || (!errors.As(err, &blocked) && !retryableProxyError(err)) {
+		if attempt >= maxFailovers {
 			return nil, nil, totalBytes, err
 		}
 		log.Printf("bulk batch proxy[%d] failed; targeted failover: %s", currentProxy+1, safeProxyError(err))
 	}
 }
 
-func bulkBatchFallbackAllowed(err error) bool {
-	var blocked *targetBlockedError
-	return !errors.As(err, &blocked)
+// bulkBatchFallbackAllowed is intentionally always false. A failed batch must
+// never fan out into per-product requests; the bulk failover path above owns
+// retries, and an exhausted batch is deferred to the next cycle.
+func bulkBatchFallbackAllowed(error) bool {
+	return false
 }
 
 func runBulkCycle(urls []string, cfg config, proxies []string, pool *proxyPool) []checkResult {
 	results := make([]checkResult, 0, len(urls))
-	fallbackURLs := make([]string, 0)
 	for _, batch := range splitBulkBatches(urls, cfg.bulkBatchSize) {
 		productURLs := make(map[string]string, len(batch))
 		for _, productURL := range batch {
 			tcin, err := extractTCIN(productURL)
 			if err != nil {
-				fallbackURLs = append(fallbackURLs, productURL)
+				results = append(results, checkResult{productURL: productURL, err: err})
 				continue
 			}
 			productURLs[tcin] = productURL
@@ -938,26 +942,23 @@ func runBulkCycle(urls []string, cfg config, proxies []string, pool *proxyPool) 
 		}
 		observations, missing, responseBytes, err := fetchBulkBatchWithFailover(proxies, pool, cfg, productURLs)
 		if err != nil {
-			if bulkBatchFallbackAllowed(err) {
-				log.Printf("bulk batch failed; per-product fallback for %d products: %s", len(batch), safeProxyError(err))
-				fallbackURLs = append(fallbackURLs, batch...)
-			} else {
-				log.Printf("bulk batch blocked; deferring %d products to the next cycle: %s", len(batch), safeProxyError(err))
-				for _, productURL := range batch {
-					results = append(results, checkResult{productURL: productURL, err: err})
-				}
+			log.Printf("bulk batch failed after proxy retries; deferring %d products to the next cycle: %s", len(productURLs), safeProxyError(err))
+			for _, productURL := range productURLs {
+				results = append(results, checkResult{productURL: productURL, err: err})
 			}
 			continue
 		}
 		for _, current := range observations {
 			results = append(results, checkResult{productURL: current.ProductURL, current: current})
 		}
-		fallbackURLs = append(fallbackURLs, missing...)
+		if len(missing) > 0 {
+			missingErr := fmt.Errorf("Target bulk response omitted %d requested products", len(missing))
+			log.Printf("bulk batch incomplete; deferring %d missing products to the next cycle", len(missing))
+			for _, productURL := range missing {
+				results = append(results, checkResult{productURL: productURL, err: missingErr})
+			}
+		}
 		log.Printf("bulk batch complete: requested=%d returned=%d missing=%d response_bytes=%d", len(productURLs), len(observations), len(missing), responseBytes)
-	}
-	if len(fallbackURLs) > 0 {
-		log.Printf("bulk targeted fallback: %d products", len(fallbackURLs))
-		results = append(results, runConcurrentCycle(fallbackURLs, cfg, proxies, pool)...)
 	}
 	return results
 }
@@ -1243,6 +1244,20 @@ func extractTCIN(value string) (string, error) {
 		return "", fmt.Errorf("cannot extract TCIN from %q", value)
 	}
 	return match[1], nil
+}
+
+func normalizeTargetProductURL(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", errors.New("empty Target product value")
+	}
+	if bareTCINPattern.MatchString(value) {
+		return "https://www.target.com/p/-/A-" + value, nil
+	}
+	if _, err := extractTCIN(value); err != nil {
+		return "", err
+	}
+	return value, nil
 }
 func retryableProxyError(err error) bool {
 	text := strings.ToLower(err.Error())
