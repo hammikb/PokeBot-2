@@ -119,6 +119,10 @@ func buildBulkCycleLog(total, succeeded, deferred, batchSize int) string {
 	)
 }
 
+func shouldLogIndividualCheckFailure(bulkEnabled bool) bool {
+	return !bulkEnabled
+}
+
 type targetBlockedError struct {
 	status int
 	bytes  int
@@ -567,11 +571,15 @@ func main() {
 		for _, result := range results {
 			if result.err != nil {
 				cycleFailed++
-				log.Printf("check failed for %s: %s", result.productURL, safeProxyError(result.err))
 				var blocked *targetBlockedError
 				if errors.As(result.err, &blocked) {
 					cycleBlocked = true
-					publishMonitorLog(cfg, "warn", fmt.Sprintf("Target request blocked for %s; proxy failover engaged.", result.productURL))
+				}
+				if shouldLogIndividualCheckFailure(cfg.bulkEnabled) {
+					log.Printf("check failed for %s: %s", result.productURL, safeProxyError(result.err))
+					if blocked != nil {
+						publishMonitorLog(cfg, "warn", fmt.Sprintf("Target request blocked for %s; proxy failover engaged.", result.productURL))
+					}
 				}
 			} else {
 				current := result.current

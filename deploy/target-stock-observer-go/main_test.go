@@ -95,6 +95,15 @@ func TestBuildBulkCycleLogDescribesBatchOnlyRetries(t *testing.T) {
 	}
 }
 
+func TestBulkModeSuppressesPerProductFailureLogs(t *testing.T) {
+	if shouldLogIndividualCheckFailure(true) {
+		t.Fatal("bulk mode should report failures at the batch/cycle level")
+	}
+	if !shouldLogIndividualCheckFailure(false) {
+		t.Fatal("per-product mode should keep individual failure logging")
+	}
+}
+
 func TestSplitBulkBatchesPreservesWatchlistOrder(t *testing.T) {
 	urls := []string{"https://www.target.com/p/-/A-1", "https://www.target.com/p/-/A-2", "https://www.target.com/p/-/A-3"}
 	got := splitBulkBatches(urls, 2)
