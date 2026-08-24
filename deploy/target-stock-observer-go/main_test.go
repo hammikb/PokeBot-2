@@ -87,6 +87,29 @@ func TestBuildCycleSummaryIncludesBoundedCounters(t *testing.T) {
 	}
 }
 
+func TestSplitBulkBatchesPreservesWatchlistOrder(t *testing.T) {
+	urls := []string{"https://www.target.com/p/-/A-1", "https://www.target.com/p/-/A-2", "https://www.target.com/p/-/A-3"}
+	got := splitBulkBatches(urls, 2)
+	if len(got) != 2 || strings.Join(got[0], ",") != strings.Join(urls[:2], ",") || strings.Join(got[1], ",") != urls[2] {
+		t.Fatalf("bulk batches = %#v", got)
+	}
+}
+
+func TestParseBulkObservationsReturnsMissingTCINs(t *testing.T) {
+	body := []byte(`{"data":{"product_summaries":[{"tcin":"100","fulfillment":{"shipping_options":{"availability_status":"IN_STOCK","available_to_promise_quantity":2}}}]}}`)
+	products := map[string]string{"100": "https://www.target.com/p/-/A-100", "200": "https://www.target.com/p/-/A-200"}
+	observations, missing, err := parseBulkObservations(body, products)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(observations) != 1 || observations[0].TCIN != "100" || !observations[0].Available || observations[0].ProductURL != products["100"] {
+		t.Fatalf("observations = %+v", observations)
+	}
+	if len(missing) != 1 || missing[0] != products["200"] {
+		t.Fatalf("missing = %v", missing)
+	}
+}
+
 func TestClassifyTargetResponse(t *testing.T) {
 	valid := []byte(`{"data":{"product":{"fulfillment":{"shipping_options":{}}}}}`)
 	if got := classifyTargetResponse(200, "application/json", valid); got != responseOK {
@@ -228,6 +251,8 @@ func TestLoadConfigBlockedFailoverSettings(t *testing.T) {
 	t.Setenv("TARGET_REDSKY_API_KEY", "key")
 	t.Setenv("TARGET_STOCK_MAX_FAILOVERS", "4")
 	t.Setenv("TARGET_STOCK_BLOCKED_BACKOFF_SECONDS", "20")
+	t.Setenv("TARGET_STOCK_BULK_ENABLED", "true")
+	t.Setenv("TARGET_STOCK_BULK_BATCH_SIZE", "99")
 	cfg, err := loadConfig()
 	if err != nil {
 		t.Fatal(err)
@@ -237,6 +262,9 @@ func TestLoadConfigBlockedFailoverSettings(t *testing.T) {
 	}
 	if cfg.blockedBackoff != 20*time.Second {
 		t.Fatalf("blocked backoff = %s, want 20s", cfg.blockedBackoff)
+	}
+	if !cfg.bulkEnabled || cfg.bulkBatchSize != maxBulkBatchSize {
+		t.Fatalf("bulk settings = enabled=%v batch=%d", cfg.bulkEnabled, cfg.bulkBatchSize)
 	}
 }
 
@@ -259,6 +287,18 @@ func TestBuildFulfillmentURLIncludesProductionLocationContext(t *testing.T) {
 		if values.Get(key) != want {
 			t.Fatalf("%s = %q, want %q", key, values.Get(key), want)
 		}
+	}
+}
+
+func TestBuildBulkFulfillmentURLUsesTCINListAndLocationContext(t *testing.T) {
+	cfg := config{apiKey: "key", storeID: "3294", zipCode: "90019", stateCode: "CA", latitude: "34.040", longitude: "-118.340"}
+	parsed, err := url.Parse(buildBulkFulfillmentURL(cfg, []string{"100", "200"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := parsed.Query()
+	if !strings.HasSuffix(parsed.Path, "product_summary_with_fulfillment_v1") || values.Get("tcins") != "100,200" || values.Get("store_id") != "3294" || values.Get("scheduled_delivery_zip_code") != "90019" || values.Get("page") != "/c/27p31" {
+		t.Fatalf("bulk URL = %s", parsed.Redacted())
 	}
 }
 

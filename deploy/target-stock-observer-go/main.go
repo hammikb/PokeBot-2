@@ -37,6 +37,8 @@ type config struct {
 	proxyFile, stateFile                                    string
 	checkSeconds, slowCheckSeconds                          int
 	concurrency                                             int
+	bulkEnabled                                             bool
+	bulkBatchSize                                           int
 	fastStart, fastEnd                                      int
 	productRefresh, errorBackoff                            time.Duration
 	blockedBackoff                                          time.Duration
@@ -194,6 +196,8 @@ type proxyPool struct {
 
 const defaultConcurrency = 12
 const maxConcurrency = 32
+const defaultBulkBatchSize = 24
+const maxBulkBatchSize = 24
 
 func workerCount(products, proxies, configured int) int {
 	if products <= 0 || proxies <= 0 {
@@ -219,6 +223,18 @@ func cycleDelay(elapsed, interval time.Duration) time.Duration {
 		return 0
 	}
 	return interval - elapsed
+}
+
+func splitBulkBatches(urls []string, batchSize int) [][]string {
+	if batchSize < 1 {
+		batchSize = defaultBulkBatchSize
+	}
+	result := make([][]string, 0, (len(urls)+batchSize-1)/batchSize)
+	for start := 0; start < len(urls); start += batchSize {
+		end := min(start+batchSize, len(urls))
+		result = append(result, append([]string(nil), urls[start:end]...))
+	}
+	return result
 }
 
 type checkResult struct {
@@ -496,7 +512,7 @@ func main() {
 	var downloadedBytes int64
 	var lastRefresh, lastBandwidth, lastProxyHealth, lastCycleLog time.Time
 	lastMode := ""
-	startupMessage := fmt.Sprintf("Target Go observer started: %d products, fast=%ds, normal=%ds, concurrency=%d, proxy required, shadow=%t.", len(urls), cfg.checkSeconds, cfg.slowCheckSeconds, workerCount(len(urls), len(proxies), cfg.concurrency), cfg.shadow)
+	startupMessage := fmt.Sprintf("Target Go observer started: %d products, fast=%ds, normal=%ds, concurrency=%d, bulk=%t, bulk_batch=%d, proxy required, shadow=%t.", len(urls), cfg.checkSeconds, cfg.slowCheckSeconds, workerCount(len(urls), len(proxies), cfg.concurrency), cfg.bulkEnabled, cfg.bulkBatchSize, cfg.shadow)
 	log.Printf("%s", startupMessage)
 	publishMonitorLog(cfg, "info", startupMessage)
 
@@ -527,7 +543,13 @@ func main() {
 		cycleChecks, cycleFailed, cycleAvailable := 0, 0, 0
 		var cycleBytes int64
 		availabilityTransition := false
-		for _, result := range runConcurrentCycle(urls, cfg, proxies, proxyPool) {
+		var results []checkResult
+		if cfg.bulkEnabled {
+			results = runBulkCycle(urls, cfg, proxies, proxyPool)
+		} else {
+			results = runConcurrentCycle(urls, cfg, proxies, proxyPool)
+		}
+		for _, result := range results {
 			if result.err != nil {
 				cycleFailed++
 				log.Printf("check failed for %s: %s", result.productURL, safeProxyError(result.err))
@@ -637,7 +659,7 @@ func loadConfig() (config, error) {
 		watchlistURL: env("POKEALERT_WATCHLIST_URL", strings.Replace(ingest, "/api/ingest", "/api/watchlist", 1)),
 		apiKey:       apiKey, userAgent: env("TARGET_STOCK_USER_AGENT", defaultUserAgent), storeID: env("TARGET_STOCK_STORE_ID", "3294"), zipCode: env("TARGET_STOCK_ZIP", "90019"), stateCode: env("TARGET_STOCK_STATE", "CA"), latitude: env("TARGET_STOCK_LATITUDE", "34.040"), longitude: env("TARGET_STOCK_LONGITUDE", "-118.340"),
 		proxyFile: env("TARGET_STOCK_PROXY_FILE", "/home/hammikb/api-monitor-python/proxies.txt"), stateFile: env("TARGET_STOCK_STATE_FILE", "/home/hammikb/api-monitor-python/.target-stock-observer-go-state.json"),
-		checkSeconds: check, slowCheckSeconds: slow, concurrency: concurrency, fastStart: start, fastEnd: end,
+		checkSeconds: check, slowCheckSeconds: slow, concurrency: concurrency, bulkEnabled: envBool("TARGET_STOCK_BULK_ENABLED", false), bulkBatchSize: min(max(envInt("TARGET_STOCK_BULK_BATCH_SIZE", defaultBulkBatchSize), 1), maxBulkBatchSize), fastStart: start, fastEnd: end,
 		productRefresh: time.Duration(envInt("TARGET_STOCK_PRODUCT_REFRESH_SECONDS", 300)) * time.Second, errorBackoff: time.Duration(max(envInt("TARGET_STOCK_ERROR_BACKOFF_MAX_SECONDS", 900), 60)) * time.Second, blockedBackoff: time.Duration(max(envInt("TARGET_STOCK_BLOCKED_BACKOFF_SECONDS", 900), 5)) * time.Second, maxFailovers: min(max(envInt("TARGET_STOCK_MAX_FAILOVERS", 2), 0), 8), proxyCooldown: time.Duration(max(envInt("TARGET_STOCK_PROXY_COOLDOWN_SECONDS", 300), 60)) * time.Second, proxyHealthInterval: time.Duration(max(envInt("TARGET_STOCK_PROXY_HEALTH_INTERVAL_SECONDS", 60), 10)) * time.Second,
 		proxyIndex: max(envInt("TARGET_STOCK_PROXY_INDEX", 0), 0), timeZone: zone, shadow: envBool("TARGET_STOCK_SHADOW", false), proxyHealthPublish: envBool("TARGET_STOCK_PROXY_HEALTH_PUBLISH", false),
 	}, nil
@@ -807,9 +829,150 @@ func fetchWithFailover(client **http.Client, proxies []string, proxyIndex *int, 
 	}
 }
 
+func fetchBulkBatch(client *http.Client, cfg config, productURLs map[string]string) ([]observation, []string, int64, error) {
+	tcins := make([]string, 0, len(productURLs))
+	for productURL := range productURLs {
+		tcin, err := extractTCIN(productURL)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		tcins = append(tcins, tcin)
+	}
+	request, err := http.NewRequest(http.MethodGet, buildBulkFulfillmentURL(cfg, tcins), nil)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Referer", "https://www.target.com/")
+	request.Header.Set("User-Agent", cfg.userAgent)
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	defer response.Body.Close()
+	data, truncated, err := readBoundedBody(response.Body, maxResponseBytes)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	if truncated {
+		return nil, nil, int64(len(data)), fmt.Errorf("Target bulk response exceeded %d bytes", maxResponseBytes)
+	}
+	if response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusTooManyRequests {
+		return nil, nil, int64(len(data)), &targetBlockedError{status: response.StatusCode, bytes: len(data)}
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, nil, int64(len(data)), fmt.Errorf("Target bulk returned HTTP %d", response.StatusCode)
+	}
+	observations, missing, err := parseBulkObservations(data, productURLs)
+	if err != nil {
+		return nil, nil, int64(len(data)), err
+	}
+	if len(observations) > 0 {
+		observations[0].ResponseBytes = len(data)
+	}
+	return observations, missing, int64(len(data)), nil
+}
+
+func fetchBulkBatchWithFailover(proxies []string, pool *proxyPool, cfg config, productURLs map[string]string) ([]observation, []string, int64, error) {
+	if len(proxies) == 0 {
+		return nil, nil, 0, errors.New("no proxies available for Target bulk request")
+	}
+	maxFailovers := min(cfg.maxFailovers, len(proxies)-1)
+	currentProxy := -1
+	var totalBytes int64
+	for attempt := 0; ; attempt++ {
+		currentProxy = pool.claimReady(time.Now(), currentProxy)
+		if currentProxy < 0 {
+			currentProxy = pool.claimNext(time.Now(), currentProxy)
+		}
+		if currentProxy < 0 {
+			return nil, nil, totalBytes, errors.New("no ready proxy available for Target bulk request")
+		}
+		client := newClient(proxies[currentProxy])
+		observations, missing, responseBytes, err := fetchBulkBatch(client, cfg, productURLs)
+		client.CloseIdleConnections()
+		totalBytes += responseBytes
+		if err == nil {
+			pool.recordSuccess(currentProxy, time.Now())
+			pool.release(currentProxy)
+			return observations, missing, totalBytes, nil
+		}
+		var blocked *targetBlockedError
+		if errors.As(err, &blocked) {
+			kind := "blocked_403"
+			if blocked.status == http.StatusTooManyRequests {
+				kind = "blocked_429"
+			}
+			pool.recordFailure(currentProxy, kind, time.Now())
+		} else {
+			pool.recordFailure(currentProxy, "transport", time.Now())
+		}
+		pool.release(currentProxy)
+		if attempt >= maxFailovers || (!errors.As(err, &blocked) && !retryableProxyError(err)) {
+			return nil, nil, totalBytes, err
+		}
+		log.Printf("bulk batch proxy[%d] failed; targeted failover: %s", currentProxy+1, safeProxyError(err))
+	}
+}
+
+func runBulkCycle(urls []string, cfg config, proxies []string, pool *proxyPool) []checkResult {
+	results := make([]checkResult, 0, len(urls))
+	fallbackURLs := make([]string, 0)
+	for _, batch := range splitBulkBatches(urls, cfg.bulkBatchSize) {
+		productURLs := make(map[string]string, len(batch))
+		for _, productURL := range batch {
+			tcin, err := extractTCIN(productURL)
+			if err != nil {
+				fallbackURLs = append(fallbackURLs, productURL)
+				continue
+			}
+			productURLs[tcin] = productURL
+		}
+		if len(productURLs) == 0 {
+			continue
+		}
+		observations, missing, responseBytes, err := fetchBulkBatchWithFailover(proxies, pool, cfg, productURLs)
+		if err != nil {
+			log.Printf("bulk batch failed; per-product fallback for %d products: %s", len(batch), safeProxyError(err))
+			fallbackURLs = append(fallbackURLs, batch...)
+			continue
+		}
+		for _, current := range observations {
+			results = append(results, checkResult{productURL: current.ProductURL, current: current})
+		}
+		fallbackURLs = append(fallbackURLs, missing...)
+		log.Printf("bulk batch complete: requested=%d returned=%d missing=%d response_bytes=%d", len(productURLs), len(observations), len(missing), responseBytes)
+	}
+	if len(fallbackURLs) > 0 {
+		log.Printf("bulk targeted fallback: %d products", len(fallbackURLs))
+		results = append(results, runConcurrentCycle(fallbackURLs, cfg, proxies, pool)...)
+	}
+	return results
+}
+
 func buildFulfillmentURL(cfg config, tcin string) (string, error) {
 	query := url.Values{"key": {cfg.apiKey}, "tcin": {tcin}, "store_id": {cfg.storeID}, "pricing_store_id": {cfg.storeID}, "required_store_id": {cfg.storeID}, "scheduled_delivery_store_id": {cfg.storeID}, "zip": {cfg.zipCode}, "state": {cfg.stateCode}, "latitude": {cfg.latitude}, "longitude": {cfg.longitude}, "has_pricing_store_id": {"true"}, "visitor_id": {"0"}, "channel": {"WEB"}, "page": {"/p/A-" + tcin}}
 	return redskyURL + "?" + query.Encode(), nil
+}
+
+func buildBulkFulfillmentURL(cfg config, tcins []string) string {
+	query := url.Values{
+		"key":                         {cfg.apiKey},
+		"tcins":                       {strings.Join(tcins, ",")},
+		"store_id":                    {cfg.storeID},
+		"pricing_store_id":            {cfg.storeID},
+		"required_store_id":           {cfg.storeID},
+		"scheduled_delivery_store_id": {cfg.storeID},
+		"scheduled_delivery_zip_code": {cfg.zipCode},
+		"zip":                         {cfg.zipCode},
+		"state":                       {cfg.stateCode},
+		"latitude":                    {cfg.latitude},
+		"longitude":                   {cfg.longitude},
+		"visitor_id":                  {"0"},
+		"channel":                     {"WEB"},
+		"page":                        {"/c/27p31"},
+	}
+	return strings.Replace(redskyURL, "product_fulfillment_and_variation_hierarchy_v1", "product_summary_with_fulfillment_v1", 1) + "?" + query.Encode()
 }
 
 func fetchObservation(client *http.Client, cfg config, productURL string) (observation, error) {
@@ -859,6 +1022,55 @@ func fetchObservation(client *http.Client, cfg config, productURL string) (obser
 		return observation{}, errors.New("Target response did not contain shipping_options")
 	}
 	return observation{TCIN: tcin, ProductURL: productURL, AvailabilityStatus: options.AvailabilityStatus, AvailableToPromise: options.AvailableToPromise, ReasonCode: options.ReasonCode, Available: isAvailable(options), ResponseBytes: len(data), ObservedAt: time.Now().UTC().Format(time.RFC3339Nano)}, nil
+}
+
+func parseBulkObservations(data []byte, productURLs map[string]string) ([]observation, []string, error) {
+	var payload struct {
+		Data struct {
+			ProductSummaries []json.RawMessage `json:"product_summaries"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, nil, fmt.Errorf("decode Target bulk response: %w", err)
+	}
+	if payload.Data.ProductSummaries == nil {
+		return nil, nil, errors.New("Target bulk response did not contain data.product_summaries")
+	}
+	found := make(map[string]bool, len(payload.Data.ProductSummaries))
+	observations := make([]observation, 0, len(payload.Data.ProductSummaries))
+	for index, raw := range payload.Data.ProductSummaries {
+		var product map[string]any
+		if err := json.Unmarshal(raw, &product); err != nil {
+			return nil, nil, fmt.Errorf("decode Target bulk product %d: %w", index, err)
+		}
+		value, ok := product["tcin"]
+		if !ok {
+			if item, itemOK := product["item"].(map[string]any); itemOK {
+				value, ok = item["tcin"]
+			}
+		}
+		if !ok {
+			continue
+		}
+		tcin := strings.TrimSpace(fmt.Sprint(value))
+		productURL, expected := productURLs[tcin]
+		if !expected {
+			continue
+		}
+		options, ok := findShippingOptions(product)
+		if !ok {
+			continue
+		}
+		found[tcin] = true
+		observations = append(observations, observation{TCIN: tcin, ProductURL: productURL, AvailabilityStatus: options.AvailabilityStatus, AvailableToPromise: options.AvailableToPromise, ReasonCode: options.ReasonCode, Available: isAvailable(options), ObservedAt: time.Now().UTC().Format(time.RFC3339Nano)})
+	}
+	missing := make([]string, 0)
+	for tcin, productURL := range productURLs {
+		if !found[tcin] {
+			missing = append(missing, productURL)
+		}
+	}
+	return observations, missing, nil
 }
 
 func findShippingOptions(value any) (shippingOptions, bool) {
