@@ -110,6 +110,15 @@ func TestParseBulkObservationsReturnsMissingTCINs(t *testing.T) {
 	}
 }
 
+func TestBulkBatchFallbackPolicyDefersTargetBlocks(t *testing.T) {
+	if bulkBatchFallbackAllowed(&targetBlockedError{status: http.StatusForbidden}) {
+		t.Fatal("403 batch block should defer instead of launching per-product fallback")
+	}
+	if !bulkBatchFallbackAllowed(errors.New("Bad Gateway")) {
+		t.Fatal("transport gateway failure should use targeted per-product fallback")
+	}
+}
+
 func TestClassifyTargetResponse(t *testing.T) {
 	valid := []byte(`{"data":{"product":{"fulfillment":{"shipping_options":{}}}}}`)
 	if got := classifyTargetResponse(200, "application/json", valid); got != responseOK {

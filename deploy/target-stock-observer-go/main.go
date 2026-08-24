@@ -915,6 +915,11 @@ func fetchBulkBatchWithFailover(proxies []string, pool *proxyPool, cfg config, p
 	}
 }
 
+func bulkBatchFallbackAllowed(err error) bool {
+	var blocked *targetBlockedError
+	return !errors.As(err, &blocked)
+}
+
 func runBulkCycle(urls []string, cfg config, proxies []string, pool *proxyPool) []checkResult {
 	results := make([]checkResult, 0, len(urls))
 	fallbackURLs := make([]string, 0)
@@ -933,8 +938,15 @@ func runBulkCycle(urls []string, cfg config, proxies []string, pool *proxyPool) 
 		}
 		observations, missing, responseBytes, err := fetchBulkBatchWithFailover(proxies, pool, cfg, productURLs)
 		if err != nil {
-			log.Printf("bulk batch failed; per-product fallback for %d products: %s", len(batch), safeProxyError(err))
-			fallbackURLs = append(fallbackURLs, batch...)
+			if bulkBatchFallbackAllowed(err) {
+				log.Printf("bulk batch failed; per-product fallback for %d products: %s", len(batch), safeProxyError(err))
+				fallbackURLs = append(fallbackURLs, batch...)
+			} else {
+				log.Printf("bulk batch blocked; deferring %d products to the next cycle: %s", len(batch), safeProxyError(err))
+				for _, productURL := range batch {
+					results = append(results, checkResult{productURL: productURL, err: err})
+				}
+			}
 			continue
 		}
 		for _, current := range observations {
