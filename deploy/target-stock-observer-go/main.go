@@ -105,6 +105,20 @@ func buildCycleSummary(total, succeeded, failed int, downloadedBytes int64, avai
 	)
 }
 
+func buildBulkCycleLog(total, succeeded, deferred, batchSize int) string {
+	if batchSize < 1 {
+		batchSize = defaultBulkBatchSize
+	}
+	batches := 0
+	if total > 0 {
+		batches = (total + batchSize - 1) / batchSize
+	}
+	return fmt.Sprintf(
+		"Target bulk cycle: %d products, %d batches (batch_size=%d), %d succeeded, %d deferred; retries use proxy failover only.",
+		total, batches, batchSize, succeeded, deferred,
+	)
+}
+
 type targetBlockedError struct {
 	status int
 	bytes  int
@@ -603,6 +617,15 @@ func main() {
 			} else {
 				log.Printf("Target cycle had blocked requests; proxy failover handled per worker.")
 			}
+		}
+		if cfg.bulkEnabled {
+			bulkCycleMessage := buildBulkCycleLog(len(urls), cycleChecks, cycleFailed, cfg.bulkBatchSize)
+			bulkCycleLevel := "info"
+			if cycleFailed > 0 {
+				bulkCycleLevel = "warn"
+			}
+			log.Printf("%s", bulkCycleMessage)
+			publishMonitorLog(cfg, bulkCycleLevel, bulkCycleMessage)
 		}
 		if cfg.proxyHealthPublish && (lastProxyHealth.IsZero() || time.Since(lastProxyHealth) >= cfg.proxyHealthInterval) {
 			if err := postIngest(cfg, "proxy_health", proxyPool.healthRows(time.Now())); err != nil {

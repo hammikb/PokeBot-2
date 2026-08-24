@@ -87,6 +87,14 @@ func TestBuildCycleSummaryIncludesBoundedCounters(t *testing.T) {
 	}
 }
 
+func TestBuildBulkCycleLogDescribesBatchOnlyRetries(t *testing.T) {
+	got := buildBulkCycleLog(44, 20, 24, 24)
+	want := "Target bulk cycle: 44 products, 2 batches (batch_size=24), 20 succeeded, 24 deferred; retries use proxy failover only."
+	if got != want {
+		t.Fatalf("bulk cycle log = %q, want %q", got, want)
+	}
+}
+
 func TestSplitBulkBatchesPreservesWatchlistOrder(t *testing.T) {
 	urls := []string{"https://www.target.com/p/-/A-1", "https://www.target.com/p/-/A-2", "https://www.target.com/p/-/A-3"}
 	got := splitBulkBatches(urls, 2)
