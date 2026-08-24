@@ -13,6 +13,7 @@ EnvironmentFile=/home/hammikb/pi-health-reporter/pi-health-reporter.env
 EnvironmentFile=-/home/hammikb/target-stock-observer-go/production.env
 Environment=TARGET_STOCK_PROXY_FILE=/home/hammikb/api-monitor-python/proxies.txt
 Environment=TARGET_STOCK_STATE_FILE=/home/hammikb/target-stock-observer-go/production-state.json
+Environment=TARGET_STOCK_PROXY_HEALTH_STATE_FILE=/home/hammikb/target-stock-observer-go/proxy-health-state.json
 Environment=TARGET_STOCK_SHADOW=false
 Environment=TARGET_STOCK_PROXY_INDEX=0
 Environment=TARGET_STOCK_CHECK_SECONDS=15

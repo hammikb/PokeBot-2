@@ -35,7 +35,7 @@ type config struct {
 	workerName                                              string
 	ingestClient                                            *http.Client
 	storeID, zipCode, stateCode, latitude, longitude        string
-	proxyFile, stateFile                                    string
+	proxyFile, stateFile, proxyHealthFile                   string
 	checkSeconds, slowCheckSeconds                          int
 	concurrency                                             int
 	bulkEnabled                                             bool
@@ -207,16 +207,42 @@ type proxyHealthRow struct {
 }
 
 type proxyPool struct {
-	mu       sync.Mutex
-	proxies  []string
-	health   []proxyHealth
-	cooldown time.Duration
+	mu             sync.Mutex
+	proxies        []string
+	clients        []*http.Client
+	health         []proxyHealth
+	cooldown       time.Duration
+	selectionCount uint64
+}
+
+type proxyPoolSummary struct {
+	total, proven, unproven, cooling, degraded int
+	blocked403, transportFailures              int
+}
+
+type persistedProxyHealth struct {
+	Successes           int       `json:"successes"`
+	Blocked403          int       `json:"blocked_403"`
+	Blocked429          int       `json:"blocked_429"`
+	Blocked             int       `json:"blocked"`
+	TransportFailures   int       `json:"transport_failures"`
+	ConsecutiveFailures int       `json:"consecutive_failures"`
+	CooldownUntil       time.Time `json:"cooldown_until,omitempty"`
+	LastFailureAt       time.Time `json:"last_failure_at,omitempty"`
+	LastUsedAt          time.Time `json:"last_used_at,omitempty"`
+}
+
+type proxyHealthSnapshot struct {
+	Version int                             `json:"version"`
+	Proxies map[string]persistedProxyHealth `json:"proxies"`
 }
 
 const defaultConcurrency = 12
 const maxConcurrency = 32
 const defaultBulkBatchSize = 24
 const maxBulkBatchSize = 24
+const minimumProvenProxies = 3
+const proxyExplorationEvery = 10
 
 func workerCount(products, proxies, configured int) int {
 	if products <= 0 || proxies <= 0 {
@@ -321,9 +347,27 @@ func newProxyPool(proxies []string, startIndex int, cooldown time.Duration) *pro
 	if len(proxies) == 0 {
 		return &proxyPool{}
 	}
-	pool := &proxyPool{proxies: append([]string(nil), proxies...), health: make([]proxyHealth, len(proxies)), cooldown: cooldown}
+	pool := &proxyPool{proxies: append([]string(nil), proxies...), clients: make([]*http.Client, len(proxies)), health: make([]proxyHealth, len(proxies)), cooldown: cooldown}
+	for index, proxy := range proxies {
+		pool.clients[index] = newClient(proxy)
+	}
 	_ = startIndex
 	return pool
+}
+
+func (p *proxyPool) client(index int) *http.Client {
+	if index < 0 || index >= len(p.clients) {
+		return nil
+	}
+	return p.clients[index]
+}
+
+func (p *proxyPool) closeIdleConnections() {
+	for _, client := range p.clients {
+		if client != nil {
+			client.CloseIdleConnections()
+		}
+	}
 }
 
 func (p *proxyPool) recordSuccess(index int, now time.Time) {
@@ -390,13 +434,14 @@ func (p *proxyPool) healthRows(now time.Time) []proxyHealthRow {
 	return rows
 }
 
-func (p *proxyPool) claimReady(now time.Time, current int) int {
+func (p *proxyPool) selectReady(now time.Time, current int, explore bool) int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if len(p.proxies) == 0 {
-		return -1
-	}
-	best := -1
+	return p.selectReadyLocked(now, current, explore)
+}
+
+func (p *proxyPool) selectReadyLocked(now time.Time, current int, explore bool) int {
+	proven, unproven, degraded := -1, -1, -1
 	for index, health := range p.health {
 		if index == current && len(p.proxies) > 1 {
 			continue
@@ -404,10 +449,56 @@ func (p *proxyPool) claimReady(now time.Time, current int) int {
 		if health.activeRequests > 0 || health.cooldownUntil.After(now) {
 			continue
 		}
-		if best == -1 || health.lastUsedAt.Before(p.health[best].lastUsedAt) {
-			best = index
+		if health.successes > 0 && health.consecutiveFailures == 0 {
+			if proven == -1 || health.lastUsedAt.Before(p.health[proven].lastUsedAt) {
+				proven = index
+			}
+			continue
+		}
+		if health.successes == 0 && health.blocked == 0 && health.transportFailures == 0 {
+			if unproven == -1 || health.lastUsedAt.Before(p.health[unproven].lastUsedAt) {
+				unproven = index
+			}
+			continue
+		}
+		if degraded == -1 || health.lastUsedAt.Before(p.health[degraded].lastUsedAt) {
+			degraded = index
 		}
 	}
+	if explore && unproven >= 0 {
+		return unproven
+	}
+	if proven >= 0 {
+		return proven
+	}
+	if unproven >= 0 {
+		return unproven
+	}
+	return degraded
+}
+
+func (p *proxyPool) provenReadyCountLocked(now time.Time, current int) int {
+	count := 0
+	for index, health := range p.health {
+		if index == current && len(p.proxies) > 1 {
+			continue
+		}
+		if health.activeRequests == 0 && !health.cooldownUntil.After(now) && health.successes > 0 && health.consecutiveFailures == 0 {
+			count++
+		}
+	}
+	return count
+}
+
+func (p *proxyPool) claimReady(now time.Time, current int) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.proxies) == 0 {
+		return -1
+	}
+	p.selectionCount++
+	explore := p.provenReadyCountLocked(now, current) < minimumProvenProxies || p.selectionCount%proxyExplorationEvery == 0
+	best := p.selectReadyLocked(now, current, explore)
 	if best >= 0 {
 		p.health[best].activeRequests++
 		p.health[best].lastUsedAt = now
@@ -422,18 +513,17 @@ func (p *proxyPool) claimNext(now time.Time, current int) int {
 		return -1
 	}
 	best := -1
-	bestReady := false
 	bestActive := int(^uint(0) >> 1)
 	for index, health := range p.health {
 		if index == current && len(p.proxies) > 1 {
 			continue
 		}
-		ready := !health.cooldownUntil.After(now)
-		if best == -1 || (ready && !bestReady) ||
-			(ready == bestReady && (health.activeRequests < bestActive ||
-				(health.activeRequests == bestActive && health.lastUsedAt.Before(p.health[best].lastUsedAt)))) {
+		if health.cooldownUntil.After(now) {
+			continue
+		}
+		if best == -1 || health.activeRequests < bestActive ||
+			(health.activeRequests == bestActive && health.lastUsedAt.Before(p.health[best].lastUsedAt)) {
 			best = index
-			bestReady = ready
 			bestActive = health.activeRequests
 		}
 	}
@@ -442,6 +532,140 @@ func (p *proxyPool) claimNext(now time.Time, current int) int {
 		p.health[best].lastUsedAt = now
 	}
 	return best
+}
+
+func (p *proxyPool) claimEmergency(now time.Time, current int) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	best := -1
+	for index, health := range p.health {
+		if index == current && len(p.proxies) > 1 {
+			continue
+		}
+		if health.activeRequests > 0 || !health.cooldownUntil.After(now) {
+			continue
+		}
+		if best == -1 || health.cooldownUntil.Before(p.health[best].cooldownUntil) {
+			best = index
+		}
+	}
+	if best >= 0 {
+		p.health[best].activeRequests++
+		p.health[best].lastUsedAt = now
+	}
+	return best
+}
+
+func (p *proxyPool) summary(now time.Time) proxyPoolSummary {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	result := proxyPoolSummary{total: len(p.health)}
+	for _, health := range p.health {
+		result.blocked403 += health.blocked403
+		result.transportFailures += health.transportFailures
+		switch {
+		case health.cooldownUntil.After(now):
+			result.cooling++
+		case health.successes > 0 && health.consecutiveFailures == 0:
+			result.proven++
+		case health.successes == 0 && health.blocked == 0 && health.transportFailures == 0:
+			result.unproven++
+		default:
+			result.degraded++
+		}
+	}
+	return result
+}
+
+func buildProxyPoolLog(summary proxyPoolSummary, fullCycles, totalCycles int) string {
+	rate := 0.0
+	if totalCycles > 0 {
+		rate = float64(fullCycles) * 100 / float64(totalCycles)
+	}
+	return fmt.Sprintf(
+		"Target proxy pool: %d total, %d proven, %d unproven, %d cooling, %d degraded; 403=%d, transport=%d; full_cycles=%d/%d (%.1f%%).",
+		summary.total, summary.proven, summary.unproven, summary.cooling, summary.degraded,
+		summary.blocked403, summary.transportFailures, fullCycles, totalCycles, rate,
+	)
+}
+
+func (p *proxyPool) saveHealth(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	p.mu.Lock()
+	snapshot := proxyHealthSnapshot{Version: 1, Proxies: make(map[string]persistedProxyHealth, len(p.health))}
+	for index, health := range p.health {
+		snapshot.Proxies[publicProxyID(p.proxies[index])] = persistedProxyHealth{
+			Successes: health.successes, Blocked403: health.blocked403, Blocked429: health.blocked429,
+			Blocked: health.blocked, TransportFailures: health.transportFailures,
+			ConsecutiveFailures: health.consecutiveFailures, CooldownUntil: health.cooldownUntil,
+			LastFailureAt: health.lastFailureAt, LastUsedAt: health.lastUsedAt,
+		}
+	}
+	p.mu.Unlock()
+
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(path), ".proxy-health-*.tmp")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err := temporary.Chmod(0600); err != nil {
+		temporary.Close()
+		return err
+	}
+	if _, err := temporary.Write(data); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporaryPath, path)
+}
+
+func (p *proxyPool) loadHealth(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var snapshot proxyHealthSnapshot
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		return err
+	}
+	if snapshot.Version != 1 {
+		return fmt.Errorf("unsupported proxy health state version %d", snapshot.Version)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for index, proxy := range p.proxies {
+		stored, ok := snapshot.Proxies[publicProxyID(proxy)]
+		if !ok {
+			continue
+		}
+		p.health[index] = proxyHealth{
+			successes: stored.Successes, blocked403: stored.Blocked403, blocked429: stored.Blocked429,
+			blocked: stored.Blocked, transportFailures: stored.TransportFailures,
+			consecutiveFailures: stored.ConsecutiveFailures, cooldownUntil: stored.CooldownUntil,
+			lastFailureAt: stored.LastFailureAt, lastUsedAt: stored.LastUsedAt,
+		}
+	}
+	return nil
 }
 
 func (p *proxyPool) release(index int) {
@@ -528,8 +752,17 @@ func main() {
 
 	state := loadState(cfg.stateFile)
 	proxyPool := newProxyPool(proxies, cfg.proxyIndex%len(proxies), cfg.proxyCooldown)
+	defer proxyPool.closeIdleConnections()
+	if err := proxyPool.loadHealth(cfg.proxyHealthFile); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			log.Printf("proxy health restore failed: %v", err)
+		}
+	} else {
+		log.Printf("restored proxy health for %d proxies", len(proxies))
+	}
 	var downloadedBytes int64
 	var lastRefresh, lastBandwidth, lastProxyHealth, lastCycleLog time.Time
+	bulkCycles, bulkFullCycles := 0, 0
 	lastMode := ""
 	startupMessage := fmt.Sprintf("Target Go observer started: %d products, fast=%ds, normal=%ds, concurrency=%d, bulk=%t, bulk_batch=%d, proxy required, shadow=%t.", len(urls), cfg.checkSeconds, cfg.slowCheckSeconds, workerCount(len(urls), len(proxies), cfg.concurrency), cfg.bulkEnabled, cfg.bulkBatchSize, cfg.shadow)
 	log.Printf("%s", startupMessage)
@@ -627,6 +860,10 @@ func main() {
 			}
 		}
 		if cfg.bulkEnabled {
+			bulkCycles++
+			if cycleFailed == 0 && cycleChecks == len(urls) {
+				bulkFullCycles++
+			}
 			bulkCycleMessage := buildBulkCycleLog(len(urls), cycleChecks, cycleFailed, cfg.bulkBatchSize)
 			bulkCycleLevel := "info"
 			if cycleFailed > 0 {
@@ -636,6 +873,9 @@ func main() {
 			publishMonitorLog(cfg, bulkCycleLevel, bulkCycleMessage)
 		}
 		if cfg.proxyHealthPublish && (lastProxyHealth.IsZero() || time.Since(lastProxyHealth) >= cfg.proxyHealthInterval) {
+			proxyPoolMessage := buildProxyPoolLog(proxyPool.summary(time.Now()), bulkFullCycles, bulkCycles)
+			log.Printf("%s", proxyPoolMessage)
+			publishMonitorLog(cfg, "info", proxyPoolMessage)
 			if err := postIngest(cfg, "proxy_health", proxyPool.healthRows(time.Now())); err != nil {
 				log.Printf("proxy health publish failed: %v", err)
 			} else {
@@ -650,6 +890,9 @@ func main() {
 		if lastCycleLog.IsZero() || time.Since(lastCycleLog) >= 5*time.Minute || cycleFailed > 0 || availabilityTransition {
 			publishMonitorLog(cfg, "info", buildCycleSummary(len(urls), cycleChecks, cycleFailed, cycleBytes, cycleAvailable))
 			lastCycleLog = time.Now()
+		}
+		if err := proxyPool.saveHealth(cfg.proxyHealthFile); err != nil {
+			log.Printf("proxy health save failed: %v", err)
 		}
 		if delay := cycleDelay(time.Since(cycleStarted), scheduled); delay > 0 {
 			time.Sleep(delay)
@@ -694,7 +937,7 @@ func loadConfig() (config, error) {
 		workerName: env("POKEALERT_WORKER_NAME", "pokebot-worker"), ingestClient: &http.Client{Timeout: 20 * time.Second},
 		watchlistURL: env("POKEALERT_WATCHLIST_URL", strings.Replace(ingest, "/api/ingest", "/api/watchlist", 1)),
 		apiKey:       apiKey, userAgent: env("TARGET_STOCK_USER_AGENT", defaultUserAgent), storeID: env("TARGET_STOCK_STORE_ID", "3294"), zipCode: env("TARGET_STOCK_ZIP", "90019"), stateCode: env("TARGET_STOCK_STATE", "CA"), latitude: env("TARGET_STOCK_LATITUDE", "34.040"), longitude: env("TARGET_STOCK_LONGITUDE", "-118.340"),
-		proxyFile: env("TARGET_STOCK_PROXY_FILE", "/home/hammikb/api-monitor-python/proxies.txt"), stateFile: env("TARGET_STOCK_STATE_FILE", "/home/hammikb/api-monitor-python/.target-stock-observer-go-state.json"),
+		proxyFile: env("TARGET_STOCK_PROXY_FILE", "/home/hammikb/api-monitor-python/proxies.txt"), stateFile: env("TARGET_STOCK_STATE_FILE", "/home/hammikb/api-monitor-python/.target-stock-observer-go-state.json"), proxyHealthFile: env("TARGET_STOCK_PROXY_HEALTH_STATE_FILE", "/home/hammikb/target-stock-observer-go/proxy-health-state.json"),
 		checkSeconds: check, slowCheckSeconds: slow, concurrency: concurrency, bulkEnabled: envBool("TARGET_STOCK_BULK_ENABLED", false), bulkBatchSize: min(max(envInt("TARGET_STOCK_BULK_BATCH_SIZE", defaultBulkBatchSize), 1), maxBulkBatchSize), fastStart: start, fastEnd: end,
 		productRefresh: time.Duration(envInt("TARGET_STOCK_PRODUCT_REFRESH_SECONDS", 300)) * time.Second, errorBackoff: time.Duration(max(envInt("TARGET_STOCK_ERROR_BACKOFF_MAX_SECONDS", 900), 60)) * time.Second, blockedBackoff: time.Duration(max(envInt("TARGET_STOCK_BLOCKED_BACKOFF_SECONDS", 900), 5)) * time.Second, maxFailovers: min(max(envInt("TARGET_STOCK_MAX_FAILOVERS", 2), 0), 8), proxyCooldown: time.Duration(max(envInt("TARGET_STOCK_PROXY_COOLDOWN_SECONDS", 300), 60)) * time.Second, proxyHealthInterval: time.Duration(max(envInt("TARGET_STOCK_PROXY_HEALTH_INTERVAL_SECONDS", 60), 10)) * time.Second,
 		proxyIndex: max(envInt("TARGET_STOCK_PROXY_INDEX", 0), 0), timeZone: zone, shadow: envBool("TARGET_STOCK_SHADOW", false), proxyHealthPublish: envBool("TARGET_STOCK_PROXY_HEALTH_PUBLISH", false),
@@ -915,16 +1158,24 @@ func fetchBulkBatchWithFailover(proxies []string, pool *proxyPool, cfg config, p
 	currentProxy := -1
 	var totalBytes int64
 	for attempt := 0; ; attempt++ {
+		emergencyProbe := false
 		currentProxy = pool.claimReady(time.Now(), currentProxy)
-		if currentProxy < 0 {
-			currentProxy = pool.claimNext(time.Now(), currentProxy)
+		if currentProxy < 0 && attempt == 0 {
+			currentProxy = pool.claimEmergency(time.Now(), currentProxy)
+			emergencyProbe = currentProxy >= 0
+			if emergencyProbe {
+				log.Printf("all proxies cooling; probing proxy[%d] once for this bulk batch", currentProxy+1)
+			}
 		}
 		if currentProxy < 0 {
 			return nil, nil, totalBytes, errors.New("no ready proxy available for Target bulk request")
 		}
-		client := newClient(proxies[currentProxy])
+		client := pool.client(currentProxy)
+		if client == nil {
+			pool.release(currentProxy)
+			return nil, nil, totalBytes, fmt.Errorf("proxy[%d] has no HTTP client", currentProxy+1)
+		}
 		observations, missing, responseBytes, err := fetchBulkBatch(client, cfg, productURLs)
-		client.CloseIdleConnections()
 		totalBytes += responseBytes
 		if err == nil {
 			pool.recordSuccess(currentProxy, time.Now())
@@ -941,8 +1192,9 @@ func fetchBulkBatchWithFailover(proxies []string, pool *proxyPool, cfg config, p
 		} else {
 			pool.recordFailure(currentProxy, "transport", time.Now())
 		}
+		client.CloseIdleConnections()
 		pool.release(currentProxy)
-		if attempt >= maxFailovers {
+		if emergencyProbe || attempt >= maxFailovers {
 			return nil, nil, totalBytes, err
 		}
 		log.Printf("bulk batch proxy[%d] failed; targeted failover: %s", currentProxy+1, safeProxyError(err))

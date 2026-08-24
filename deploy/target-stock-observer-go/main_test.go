@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -230,6 +231,78 @@ func TestProxyPoolClaimsOnlyReadyUnreservedProxies(t *testing.T) {
 	}
 }
 
+func TestProxyPoolReusesClientPerStickyProxy(t *testing.T) {
+	pool := newProxyPool([]string{"http://user:secret@proxy.example:80"}, 0, 60*time.Second)
+	defer pool.closeIdleConnections()
+
+	first := pool.client(0)
+	second := pool.client(0)
+	if first == nil || first != second {
+		t.Fatal("sticky proxy must reuse one HTTP client and cookie jar")
+	}
+}
+
+func TestProxyPoolSelectionPrefersProvenWithControlledExploration(t *testing.T) {
+	now := time.Unix(100, 0)
+	pool := newProxyPool([]string{"http://one:80", "http://two:80", "http://three:80"}, 0, 60*time.Second)
+	pool.health[0] = proxyHealth{successes: 5, lastUsedAt: time.Unix(90, 0)}
+	pool.health[1] = proxyHealth{successes: 2, lastUsedAt: time.Unix(80, 0)}
+
+	if got := pool.selectReady(now, -1, false); got != 1 {
+		t.Fatalf("normal selection = %d, want least-recently-used proven proxy 1", got)
+	}
+	if got := pool.selectReady(now, -1, true); got != 2 {
+		t.Fatalf("exploration selection = %d, want unproven proxy 2", got)
+	}
+}
+
+func TestProxyHealthRoundTripDoesNotPersistCredentials(t *testing.T) {
+	proxy := "http://user:secret@proxy.example:80"
+	now := time.Unix(100, 0)
+	path := t.TempDir() + "/proxy-health.json"
+
+	pool := newProxyPool([]string{proxy}, 0, 60*time.Second)
+	pool.recordSuccess(0, now)
+	pool.recordFailure(0, "blocked_403", now.Add(time.Second))
+	if err := pool.saveHealth(path); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "user") || strings.Contains(string(data), "secret") || strings.Contains(string(data), "proxy.example") {
+		t.Fatalf("health state exposed proxy credentials or endpoint: %s", data)
+	}
+
+	restored := newProxyPool([]string{proxy}, 0, 60*time.Second)
+	if err := restored.loadHealth(path); err != nil {
+		t.Fatal(err)
+	}
+	got := restored.health[0]
+	if got.successes != 1 || got.blocked403 != 1 || got.consecutiveFailures != 1 || !got.cooldownUntil.Equal(now.Add(61*time.Second)) {
+		t.Fatalf("restored health = %+v", got)
+	}
+}
+
+func TestProxyPoolSummaryAndLogIncludeCompleteCycleRate(t *testing.T) {
+	now := time.Unix(100, 0)
+	pool := newProxyPool([]string{"http://one:80", "http://two:80", "http://three:80", "http://four:80"}, 0, 60*time.Second)
+	pool.health[0] = proxyHealth{successes: 3}
+	pool.health[1] = proxyHealth{}
+	pool.health[2] = proxyHealth{successes: 1, consecutiveFailures: 1, cooldownUntil: now.Add(time.Minute), blocked403: 2}
+	pool.health[3] = proxyHealth{transportFailures: 1, consecutiveFailures: 1}
+
+	summary := pool.summary(now)
+	if summary.total != 4 || summary.proven != 1 || summary.unproven != 1 || summary.cooling != 1 || summary.degraded != 1 || summary.blocked403 != 2 || summary.transportFailures != 1 {
+		t.Fatalf("proxy summary = %+v", summary)
+	}
+	want := "Target proxy pool: 4 total, 1 proven, 1 unproven, 1 cooling, 1 degraded; 403=2, transport=1; full_cycles=12/23 (52.2%)."
+	if got := buildProxyPoolLog(summary, 12, 23); got != want {
+		t.Fatalf("proxy log = %q, want %q", got, want)
+	}
+}
+
 func TestProxyPoolClaimNextPrefersAReadyProxy(t *testing.T) {
 	pool := newProxyPool([]string{"http://one:80", "http://two:80", "http://three:80"}, 0, 60*time.Second)
 	now := time.Unix(100, 0)
@@ -237,6 +310,31 @@ func TestProxyPoolClaimNextPrefersAReadyProxy(t *testing.T) {
 	pool.recordFailure(1, "transport", now)
 	if got := pool.claimNext(now, -1); got != 2 {
 		t.Fatalf("next claim = %d, want ready proxy 2", got)
+	}
+}
+
+func TestProxyPoolClaimNextDoesNotReuseCoolingProxy(t *testing.T) {
+	pool := newProxyPool([]string{"http://one:80", "http://two:80"}, 0, 60*time.Second)
+	now := time.Unix(100, 0)
+	pool.recordFailure(0, "blocked_403", now)
+	pool.recordFailure(1, "blocked_403", now)
+	if got := pool.claimNext(now, -1); got != -1 {
+		t.Fatalf("all-cooling claim = %d, want -1", got)
+	}
+}
+
+func TestProxyPoolEmergencyClaimUsesEarliestCoolingProxy(t *testing.T) {
+	pool := newProxyPool([]string{"http://one:80", "http://two:80", "http://three:80"}, 0, 60*time.Second)
+	now := time.Unix(100, 0)
+	pool.health[0] = proxyHealth{cooldownUntil: now.Add(3 * time.Minute)}
+	pool.health[1] = proxyHealth{cooldownUntil: now.Add(time.Minute)}
+	pool.health[2] = proxyHealth{cooldownUntil: now.Add(2 * time.Minute)}
+
+	if got := pool.claimEmergency(now, -1); got != 1 {
+		t.Fatalf("emergency claim = %d, want earliest-cooling proxy 1", got)
+	}
+	if got := pool.claimEmergency(now, 1); got != 2 {
+		t.Fatalf("second emergency claim = %d, want next-earliest proxy 2", got)
 	}
 }
 
