@@ -176,12 +176,57 @@ func TestNormalizeTargetProductURLAcceptsBareTCIN(t *testing.T) {
 	}
 }
 
+func TestBuildDiscordPayloadIncludesProductDetailsAndTransition(t *testing.T) {
+	previous := &observation{TCIN: "123", AvailabilityStatus: "OUT_OF_STOCK", AvailableToPromise: 0, Available: false}
+	current := &observation{TCIN: "123", ProductURL: "https://www.target.com/p/-/A-123", AvailabilityStatus: "IN_STOCK", AvailableToPromise: 2, Available: true, ObservedAt: "2026-08-24T20:00:00Z"}
+	product := watchlistProduct{Name: "Test Elite Trainer Box", ProductKey: "123", Retailer: "target", ProductURL: current.ProductURL}
+	payload := buildDiscordPayload(previous, current, product)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, want := range []string{"Test Elite Trainer Box", "123", "OUT_OF_STOCK", "IN_STOCK", "0", "2", current.ProductURL, "Target restock detected"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("Discord payload %q does not contain %q", text, want)
+		}
+	}
+}
+
+func TestLoadProductURLsReturnsWatchlistMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"items":[{"retailer":"target","name":"Poster Collection","product_key":"123","product_url":"https://www.target.com/p/-/A-123"},{"retailer":"walmart","name":"Other","product_key":"456","product_url":"https://www.walmart.com/ip/456"}]}`)
+	}))
+	defer server.Close()
+	cfg := config{watchlistURL: server.URL}
+	urls, metadata, err := loadProductURLs(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(urls) != 1 || urls[0] != "https://www.target.com/p/-/A-123" {
+		t.Fatalf("urls = %#v", urls)
+	}
+	if metadata["123"].Name != "Poster Collection" {
+		t.Fatalf("metadata = %#v", metadata)
+	}
+}
+
 func TestBulkBatchFailureNeverUsesPerProductFallback(t *testing.T) {
 	if bulkBatchFallbackAllowed(&targetBlockedError{status: http.StatusForbidden}) {
 		t.Fatal("403 batch block should defer without per-product fallback")
 	}
 	if bulkBatchFallbackAllowed(errors.New("Bad Gateway")) {
 		t.Fatal("transport batch failure should defer after bulk proxy retries")
+	}
+}
+
+func TestBulkMissingProductsUseSingleItemFallback(t *testing.T) {
+	if bulkMissingFallbackAllowed(0) {
+		t.Fatal("empty missing set should not trigger fallback")
+	}
+	if !bulkMissingFallbackAllowed(3) {
+		t.Fatal("products omitted from an otherwise valid bulk response should be checked individually")
 	}
 }
 

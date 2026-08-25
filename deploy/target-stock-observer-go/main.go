@@ -63,6 +63,13 @@ type observation struct {
 	ObservedAt         string `json:"observed_at"`
 }
 
+type watchlistProduct struct {
+	Name       string
+	ProductKey string
+	ProductURL string
+	Retailer   string
+}
+
 type shippingOptions struct {
 	AvailabilityStatus any `json:"availability_status"`
 	AvailableToPromise any `json:"available_to_promise_quantity"`
@@ -791,7 +798,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	urls, err := loadProductURLs(cfg)
+	urls, productMetadata, err := loadProductURLs(cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -832,11 +839,12 @@ func main() {
 		}
 		if lastRefresh.IsZero() || time.Since(lastRefresh) >= cfg.productRefresh {
 			previousProductCount := len(urls)
-			if refreshed, refreshErr := loadProductURLs(cfg); refreshErr != nil {
+			if refreshed, refreshedMetadata, refreshErr := loadProductURLs(cfg); refreshErr != nil {
 				log.Printf("watchlist refresh failed: %v", refreshErr)
 				publishMonitorLog(cfg, "warn", fmt.Sprintf("Target watchlist refresh failed: %v", refreshErr))
 			} else if len(refreshed) > 0 {
 				urls = refreshed
+				productMetadata = refreshedMetadata
 				if len(urls) != previousProductCount {
 					publishMonitorLog(cfg, "info", fmt.Sprintf("Target watchlist refreshed: %d products.", len(urls)))
 				}
@@ -890,13 +898,19 @@ func main() {
 						}
 					}
 					if previous != nil && !previous.Available && current.Available {
-						if err := postDrop(cfg, current); err != nil {
+						if err := postDrop(cfg, current, productMetadata[current.TCIN]); err != nil {
 							log.Printf("drop publish failed: %v", err)
 							publishMonitorLog(cfg, "error", fmt.Sprintf("Drop publish failed for TCIN %s: %v", current.TCIN, err))
 						}
-						if err := sendDiscord(cfg, previous, &current); err != nil {
+						if err := sendDiscord(cfg, previous, &current, productMetadata[current.TCIN]); err != nil {
 							log.Printf("Discord alert failed: %v", err)
 							publishMonitorLog(cfg, "error", fmt.Sprintf("Discord alert failed for TCIN %s: %v", current.TCIN, err))
+						} else {
+							name := productMetadata[current.TCIN].Name
+							if strings.TrimSpace(name) == "" {
+								name = "Target TCIN " + current.TCIN
+							}
+							log.Printf("Discord alert sent: tcin=%s name=%q status=%v", current.TCIN, name, current.AvailabilityStatus)
 						}
 					}
 				} else if previous != nil && !previous.Available && current.Available {
@@ -1002,8 +1016,9 @@ func loadConfig() (config, error) {
 	}, nil
 }
 
-func loadProductURLs(cfg config) ([]string, error) {
+func loadProductURLs(cfg config) ([]string, map[string]watchlistProduct, error) {
 	urls := []string{}
+	metadata := map[string]watchlistProduct{}
 	for _, value := range strings.Split(os.Getenv("TARGET_STOCK_URLS"), ",") {
 		if strings.TrimSpace(value) != "" {
 			urls = append(urls, strings.TrimSpace(value))
@@ -1012,36 +1027,41 @@ func loadProductURLs(cfg config) ([]string, error) {
 	if cfg.watchlistURL != "" {
 		request, err := http.NewRequest(http.MethodGet, cfg.watchlistURL, nil)
 		if err != nil {
-			return nil, fmt.Errorf("build watchlist request: %w", err)
+			return nil, nil, fmt.Errorf("build watchlist request: %w", err)
 		}
 		request.Header.Set("Authorization", "Bearer "+cfg.ingestToken)
 		response, err := (&http.Client{Timeout: 20 * time.Second}).Do(request)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		defer response.Body.Close()
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
-			return nil, fmt.Errorf("watchlist failed with HTTP %d", response.StatusCode)
+			return nil, nil, fmt.Errorf("watchlist failed with HTTP %d", response.StatusCode)
 		}
 		data, truncated, err := readBoundedBody(response.Body, 2<<20)
 		if err != nil {
-			return nil, fmt.Errorf("read watchlist: %w", err)
+			return nil, nil, fmt.Errorf("read watchlist: %w", err)
 		}
 		if truncated {
-			return nil, fmt.Errorf("watchlist response exceeded %d bytes", 2<<20)
+			return nil, nil, fmt.Errorf("watchlist response exceeded %d bytes", 2<<20)
 		}
 		var body struct {
 			Items []struct {
+				Name       string `json:"name"`
+				ProductKey string `json:"product_key"`
 				Retailer   string `json:"retailer"`
 				ProductURL string `json:"product_url"`
 			} `json:"items"`
 		}
 		if err := json.Unmarshal(data, &body); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, item := range body.Items {
 			if strings.EqualFold(item.Retailer, "target") {
 				urls = append(urls, strings.TrimSpace(item.ProductURL))
+				if tcin, err := extractTCIN(item.ProductURL); err == nil {
+					metadata[tcin] = watchlistProduct{Name: strings.TrimSpace(item.Name), ProductKey: strings.TrimSpace(item.ProductKey), ProductURL: strings.TrimSpace(item.ProductURL), Retailer: strings.TrimSpace(item.Retailer)}
+				}
 			}
 		}
 	}
@@ -1056,12 +1076,15 @@ func loadProductURLs(cfg config) ([]string, error) {
 		if !deduped[tcin] {
 			deduped[tcin] = true
 			result = append(result, productURL)
+			if _, ok := metadata[tcin]; !ok {
+				metadata[tcin] = watchlistProduct{ProductKey: tcin, ProductURL: productURL, Retailer: "target"}
+			}
 		}
 	}
 	if len(result) == 0 {
-		return nil, errors.New("no Target products configured")
+		return nil, nil, errors.New("no Target products configured")
 	}
-	return result, nil
+	return result, metadata, nil
 }
 
 func loadProxies(path string) ([]string, error) {
@@ -1271,6 +1294,10 @@ func bulkBatchFallbackAllowed(error) bool {
 	return false
 }
 
+func bulkMissingFallbackAllowed(missing int) bool {
+	return missing > 0
+}
+
 func runBulkCycle(urls []string, cfg config, proxies []string, pool *proxyPool) []checkResult {
 	results := make([]checkResult, 0, len(urls))
 	for _, batch := range splitBulkBatches(urls, cfg.bulkBatchSize) {
@@ -1308,12 +1335,9 @@ func runBulkCycle(urls []string, cfg config, proxies []string, pool *proxyPool) 
 		for _, current := range observations {
 			results = append(results, checkResult{productURL: current.ProductURL, current: current})
 		}
-		if len(missing) > 0 {
-			missingErr := fmt.Errorf("Target bulk response omitted %d requested products", len(missing))
-			log.Printf("bulk batch incomplete; deferring %d missing products to the next cycle", len(missing))
-			for _, productURL := range missing {
-				results = append(results, checkResult{productURL: productURL, err: missingErr})
-			}
+		if bulkMissingFallbackAllowed(len(missing)) {
+			log.Printf("bulk batch incomplete; checking %d omitted products with single-item fallback", len(missing))
+			results = append(results, runConcurrentCycle(missing, cfg, proxies, pool)...)
 		}
 		log.Printf("bulk batch complete: requested=%d returned=%d missing=%d response_bytes=%d", len(productURLs), len(observations), len(missing), responseBytes)
 	}
@@ -1555,18 +1579,66 @@ func publishMonitorLog(cfg config, level, message string) {
 	}
 }
 
-func postDrop(cfg config, current observation) error {
-	return postIngest(cfg, "drop", map[string]any{"retailer": "target", "product_key": current.TCIN, "product_url": current.ProductURL, "name": "Target TCIN " + current.TCIN, "drop_type": "inventory_quantity"})
+func postDrop(cfg config, current observation, product watchlistProduct) error {
+	name := strings.TrimSpace(product.Name)
+	if name == "" {
+		name = "Target TCIN " + current.TCIN
+	}
+	return postIngest(cfg, "drop", map[string]any{"retailer": "target", "product_key": current.TCIN, "product_url": current.ProductURL, "name": name, "drop_type": "inventory_quantity"})
 }
 
-func sendDiscord(cfg config, previous, current *observation) error {
+func buildDiscordPayload(previous, current *observation, product watchlistProduct) map[string]any {
+	name := strings.TrimSpace(product.Name)
+	if name == "" {
+		name = "Target product " + current.TCIN
+	}
+	productURL := strings.TrimSpace(current.ProductURL)
+	if productURL == "" {
+		productURL = product.ProductURL
+	}
+	previousStatus := "unknown"
+	previousATP := any(nil)
+	if previous != nil {
+		previousStatus = fmt.Sprint(previous.AvailabilityStatus)
+		previousATP = previous.AvailableToPromise
+	}
+	currentStatus := fmt.Sprint(current.AvailabilityStatus)
+	description := fmt.Sprintf("%s is available at Target. Status changed %s → %s (ATP %v → %v).", name, previousStatus, currentStatus, previousATP, current.AvailableToPromise)
+	fields := []any{
+		map[string]any{"name": "Product", "value": name, "inline": false},
+		map[string]any{"name": "TCIN", "value": current.TCIN, "inline": true},
+		map[string]any{"name": "Availability", "value": fmt.Sprintf("%s → %s", previousStatus, currentStatus), "inline": true},
+		map[string]any{"name": "ATP", "value": fmt.Sprintf("%v → %v", previousATP, current.AvailableToPromise), "inline": true},
+	}
+	if reason := strings.TrimSpace(fmt.Sprint(current.ReasonCode)); reason != "" && reason != "<nil>" {
+		fields = append(fields, map[string]any{"name": "Reason", "value": reason, "inline": true})
+	}
+	return map[string]any{
+		"content": productURL,
+		"embeds": []any{map[string]any{
+			"title":       "Target restock detected",
+			"description": description,
+			"url":         productURL,
+			"color":       0x16a34a,
+			"timestamp":   current.ObservedAt,
+			"fields":      fields,
+		}},
+	}
+}
+
+func sendDiscord(cfg config, previous, current *observation, product watchlistProduct) error {
 	webhook := strings.TrimSpace(os.Getenv("DISCORD_WEBHOOK_URL"))
 	if webhook == "" {
 		return nil
 	}
-	message := fmt.Sprintf("Target TCIN %s changed to %v (ATP %v -> %v).", current.TCIN, current.AvailabilityStatus, previous.AvailableToPromise, current.AvailableToPromise)
-	body, _ := json.Marshal(map[string]any{"content": current.ProductURL, "embeds": []any{map[string]any{"title": "Target stock change detected", "description": message, "url": current.ProductURL, "color": 0xcc0000, "timestamp": current.ObservedAt}}})
-	request, _ := http.NewRequest(http.MethodPost, webhook, bytes.NewReader(body))
+	body, err := json.Marshal(buildDiscordPayload(previous, current, product))
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequest(http.MethodPost, webhook, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
 	request.Header.Set("Content-Type", "application/json")
 	response, err := (&http.Client{Timeout: 15 * time.Second}).Do(request)
 	if err != nil {
