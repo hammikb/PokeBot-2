@@ -1337,7 +1337,17 @@ func runBulkCycle(urls []string, cfg config, proxies []string, pool *proxyPool) 
 		}
 		if bulkMissingFallbackAllowed(len(missing)) {
 			log.Printf("bulk batch incomplete; checking %d omitted products with single-item fallback", len(missing))
-			results = append(results, runConcurrentCycle(missing, cfg, proxies, pool)...)
+			fallbackResults := runConcurrentCycle(missing, cfg, proxies, pool)
+			fallbackSucceeded := 0
+			for _, fallback := range fallbackResults {
+				if fallback.err != nil {
+					log.Printf("single-item fallback failed for %s: %s", fallback.productURL, safeProxyError(fallback.err))
+				} else {
+					fallbackSucceeded++
+				}
+			}
+			log.Printf("single-item fallback complete: requested=%d succeeded=%d failed=%d", len(missing), fallbackSucceeded, len(fallbackResults)-fallbackSucceeded)
+			results = append(results, fallbackResults...)
 		}
 		log.Printf("bulk batch complete: requested=%d returned=%d missing=%d response_bytes=%d", len(productURLs), len(observations), len(missing), responseBytes)
 	}
