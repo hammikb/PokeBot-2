@@ -21,7 +21,12 @@ const ACTIONABLE_DROP_TYPES = new Set([
 // emits so TaskManager._onDrop is unchanged. The serverside worker no longer
 // filters by price, so each task's max_price is applied here.
 export class SupabaseMonitorSource extends EventEmitter {
-  constructor({ client, catchUpWindowMs = DEFAULT_CATCH_UP_WINDOW_MS, now = () => Date.now() }) {
+  constructor({
+    client,
+    catchUpWindowMs = DEFAULT_CATCH_UP_WINDOW_MS,
+    now = () => Date.now(),
+    deliveryState = null
+  }) {
     super()
     this._client = client
     this._channels = new Map() // productUrl → { channel, productId, generation }
@@ -37,6 +42,14 @@ export class SupabaseMonitorSource extends EventEmitter {
     this._catchUpRetryAttempts = new Map()
     this._cursors = new Map()
     this._seenEventIds = new Map()
+    this._deliveryState = deliveryState
+    this._deliveryMetrics = {
+      realtime: 0,
+      catchUp: 0,
+      duplicates: 0,
+      catchUpErrors: 0,
+      lastCatchUpAt: null
+    }
     this._walmartQueueChannel = null
     this._walmartQueueProductCache = new Map()
   }
@@ -102,6 +115,15 @@ export class SupabaseMonitorSource extends EventEmitter {
     }
 
     const productId = product.id
+    if (!this._cursors.has(productId)) {
+      let persistedCursor = null
+      try {
+        persistedCursor = this._deliveryState?.load?.(productId)
+      } catch (error) {
+        this._emitDeliveryStateNotice('load', productId, error)
+      }
+      if (persistedCursor) this._cursors.set(productId, persistedCursor)
+    }
     const { data: userData, error: userError } = await this._client.auth.getUser()
     if (userError || !userData?.user?.id) {
       throw new Error(
@@ -196,8 +218,12 @@ export class SupabaseMonitorSource extends EventEmitter {
       receivedAt
     )
     const eventId = stableEventId(productId, payload, observedAt, receivedAt)
-    if (this._hasSeenEvent(productId, eventId)) return false
+    if (this._hasSeenEvent(productId, eventId)) {
+      this._deliveryMetrics.duplicates += 1
+      return false
+    }
     this._rememberEvent(productId, eventId)
+    this._deliveryMetrics.realtime += 1
 
     let product = this._walmartQueueProductCache.get(productId)
     if (!product) {
@@ -263,8 +289,12 @@ export class SupabaseMonitorSource extends EventEmitter {
     const dropCycleId = String(payload?.drop_cycle_id ?? payload?.dropCycleId ?? eventId)
 
     this._advanceCursor(productId, observedAt, eventId)
-    if (this._hasSeenEvent(productId, eventId)) return false
+    if (this._hasSeenEvent(productId, eventId)) {
+      this._deliveryMetrics.duplicates += 1
+      return false
+    }
     this._rememberEvent(productId, eventId)
+    this._deliveryMetrics[delivery === 'catch_up' ? 'catchUp' : 'realtime'] += 1
 
     const price = payload?.price ?? null
     const dropType = String(payload?.drop_type || 'in_stock').toLowerCase()
@@ -381,6 +411,11 @@ export class SupabaseMonitorSource extends EventEmitter {
     this._channels.delete(productUrl)
     this._byProduct.delete(entry.productId)
     this._cursors.delete(entry.productId)
+    try {
+      this._deliveryState?.clear?.(entry.productId)
+    } catch (error) {
+      this._emitDeliveryStateNotice('clear', entry.productId, error)
+    }
     this._seenEventIds.delete(entry.productId)
     this._inventory.delete(entry.productId)
     await this._client.removeChannel(entry.channel)
@@ -508,6 +543,7 @@ export class SupabaseMonitorSource extends EventEmitter {
           catchingUp: false,
           catchUpError: error.message
         })
+        this._deliveryMetrics.catchUpErrors += 1
         this._scheduleCatchUpRetry(productId)
       })
       .finally(() => {
@@ -573,6 +609,7 @@ export class SupabaseMonitorSource extends EventEmitter {
       catchUpError: null,
       interruptedAt: latest.status === 'SUBSCRIBED' ? null : latest.interruptedAt
     })
+    this._deliveryMetrics.lastCatchUpAt = new Date(completedAt).toISOString()
     const retryTimer = this._catchUpRetryTimers.get(productId)
     if (retryTimer) clearTimeout(retryTimer)
     this._catchUpRetryTimers.delete(productId)
@@ -629,7 +666,25 @@ export class SupabaseMonitorSource extends EventEmitter {
       (observedAt === current.observedAt && eventId > current.eventId)
     ) {
       this._cursors.set(productId, { observedAt, eventId })
+      try {
+        this._deliveryState?.save?.(productId, { observedAt, eventId })
+      } catch (error) {
+        this._emitDeliveryStateNotice('save', productId, error)
+      }
     }
+  }
+
+  getDeliveryMetrics() {
+    return { ...this._deliveryMetrics }
+  }
+
+  _emitDeliveryStateNotice(operation, productId, error) {
+    this.emit('notice', {
+      type: 'delivery_state_error',
+      operation,
+      productId,
+      message: error instanceof Error ? error.message : String(error)
+    })
   }
 
   _nextGeneration(productId) {

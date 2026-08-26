@@ -17,6 +17,13 @@ function makeTaskManager(overrides = {}) {
         catchingUp: 0,
         catchUpErrors: 0
       },
+      delivery: {
+        realtime: 12,
+        catchUp: 3,
+        duplicates: 4,
+        catchUpErrors: 1,
+        lastCatchUpAt: new Date(NOW - 7000).toISOString()
+      },
       openCircuits: 0,
       ...overrides
     }))
@@ -95,7 +102,13 @@ describe('MonitorHealth', () => {
       realtime: {
         activeTaskCount: 2,
         sourceState: 'connected',
-        channels: { total: 2, subscribed: 2 }
+        channels: { total: 2, subscribed: 2 },
+        delivery: {
+          realtime: 12,
+          catchUp: 3,
+          duplicates: 4,
+          catchUpErrors: 1
+        }
       },
       notifications: {
         lastShown: { notificationId: 'drop-1', at: NOW - 1000 },

@@ -52,6 +52,7 @@ describe('TaskManager monitor health snapshot', () => {
         catchingUp: 1,
         catchUpErrors: 1
       },
+      delivery: null,
       openCircuits: 1
     })
   })
@@ -79,6 +80,7 @@ describe('TaskManager monitor health snapshot', () => {
         catchingUp: 0,
         catchUpErrors: 0
       },
+      delivery: null,
       openCircuits: 0
     })
   })

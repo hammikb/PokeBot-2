@@ -58,14 +58,21 @@ func TestPostLogUsesExistingAuthenticatedIngestEnvelope(t *testing.T) {
 			t.Errorf("authorization = %q", got)
 		}
 		var body struct {
-			Type    string     `json:"type"`
-			Payload monitorLog `json:"payload"`
+			SchemaVersion int        `json:"schema_version"`
+			EventID       string     `json:"event_id"`
+			Source        string     `json:"source"`
+			Attempt       int        `json:"attempt"`
+			Type          string     `json:"type"`
+			Payload       monitorLog `json:"payload"`
 		}
 		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
 		if body.Type != "log" {
 			t.Errorf("event type = %q", body.Type)
+		}
+		if body.SchemaVersion != 1 || body.EventID == "" || body.Source != "pokebot-worker" || body.Attempt != 1 {
+			t.Errorf("delivery metadata = %+v", body)
 		}
 		if body.Payload.Service != "target-stock-observer-go" || body.Payload.Message != "cycle complete" {
 			t.Errorf("payload = %+v", body.Payload)
@@ -85,6 +92,55 @@ func TestBuildCycleSummaryIncludesBoundedCounters(t *testing.T) {
 	want := "Target cycle complete: 42/44 checks succeeded, 2 failed, 1 available, 47.2 KB downloaded."
 	if got != want {
 		t.Fatalf("summary = %q, want %q", got, want)
+	}
+}
+
+func TestPostIngestRetriesTransientFailureWithStableEventID(t *testing.T) {
+	attempts := 0
+	eventIDs := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		attempts++
+		var body struct {
+			EventID string `json:"event_id"`
+			Attempt int    `json:"attempt"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		eventIDs = append(eventIDs, body.EventID)
+		if body.Attempt != attempts {
+			t.Errorf("attempt = %d, want %d", body.Attempt, attempts)
+		}
+		if attempts == 1 {
+			writer.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		writer.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cfg := config{ingestURL: server.URL, ingestToken: "ingest-token", workerName: "pokebot-worker", ingestClient: server.Client()}
+	if err := postLog(cfg, "info", "retry me"); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 2 || len(eventIDs) != 2 || eventIDs[0] == "" || eventIDs[0] != eventIDs[1] {
+		t.Fatalf("attempts=%d eventIDs=%v", attempts, eventIDs)
+	}
+}
+
+func TestBuildSnapshotPayloadKeepsMonitorHealthFields(t *testing.T) {
+	got := buildSnapshotPayload(44, 42, 2, 47200, 12, time.Date(2026, 8, 25, 20, 0, 0, 0, time.UTC))
+	if got["status"] != "ok" {
+		t.Fatalf("identity = %#v", got)
+	}
+	if got["checks"] != 44 || got["total_products"] != 44 || got["active_contexts"] != 12 || got["bytes_used"] != int64(47200) {
+		t.Fatalf("counters = %#v", got)
+	}
+	if got["blocked_rate"] != 0.0455 {
+		t.Fatalf("blocked rate = %#v", got["blocked_rate"])
+	}
+	if got["captured_at"] != "2026-08-25T20:00:00Z" {
+		t.Fatalf("captured_at = %#v", got["captured_at"])
 	}
 }
 
