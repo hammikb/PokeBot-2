@@ -444,6 +444,9 @@ describe('SupabaseMonitorSource', () => {
     })
     expect(drops).toHaveLength(1)
     expect(drops[0].eventId).toBe('drop-shared')
+    const metrics = source.getDeliveryMetrics()
+    expect(metrics.catchUp + metrics.realtime).toBe(1)
+    expect(metrics.duplicates).toBeGreaterThanOrEqual(1)
   })
 
   it('reports catch-up query failures without interrupting the live channel', async () => {

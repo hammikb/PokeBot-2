@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -35,8 +36,13 @@ type health struct {
 }
 
 type envelope struct {
-	Type    string `json:"type"`
-	Payload health `json:"payload"`
+	SchemaVersion int    `json:"schema_version"`
+	EventID       string `json:"event_id"`
+	Source        string `json:"source"`
+	SentAt        string `json:"sent_at"`
+	Attempt       int    `json:"attempt"`
+	Type          string `json:"type"`
+	Payload       health `json:"payload"`
 }
 
 type cpuTimes struct{ values [8]uint64 }
@@ -110,26 +116,64 @@ func collectHealth(workerName, hostname string, cpu *float64) health {
 }
 
 func postHealth(ctx context.Context, client *http.Client, endpoint, token string, payload health) error {
-	body, err := json.Marshal(envelope{Type: "worker_health", Payload: payload})
+	eventID, err := newEventID()
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return err
+	var lastErr error
+	for attempt := 1; attempt <= 2; attempt++ {
+		body, marshalErr := json.Marshal(envelope{
+			SchemaVersion: 1,
+			EventID:       eventID,
+			Source:        payload.WorkerName,
+			SentAt:        time.Now().UTC().Format(time.RFC3339Nano),
+			Attempt:       attempt,
+			Type:          "worker_health",
+			Payload:       payload,
+		})
+		if marshalErr != nil {
+			return marshalErr
+		}
+		req, requestErr := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+		if requestErr != nil {
+			return requestErr
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		resp, requestErr := client.Do(req)
+		if requestErr != nil {
+			lastErr = requestErr
+		} else {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+				return nil
+			}
+			lastErr = fmt.Errorf("ingest failed with HTTP %d", resp.StatusCode)
+			if resp.StatusCode < 500 || resp.StatusCode >= 600 {
+				return lastErr
+			}
+		}
+		if attempt < 2 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(250 * time.Millisecond):
+			}
+		}
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
+	return lastErr
+}
+
+func newEventID() (string, error) {
+	bytesValue := make([]byte, 16)
+	if _, err := rand.Read(bytesValue); err != nil {
+		return "", err
 	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("ingest failed with HTTP %d", resp.StatusCode)
-	}
-	return nil
+	bytesValue[6] = (bytesValue[6] & 0x0f) | 0x40
+	bytesValue[8] = (bytesValue[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		bytesValue[0:4], bytesValue[4:6], bytesValue[6:8], bytesValue[8:10], bytesValue[10:16]), nil
 }
 
 func readMemInfo() (*float64, *float64, *float64) {
@@ -281,7 +325,7 @@ func envInt(key string, fallback int) int {
 }
 
 func floatPtr(value float64) *float64 { return &value }
-func round(value float64) float64      { return float64(int(value*10+0.5)) / 10 }
+func round(value float64) float64     { return float64(int(value*10+0.5)) / 10 }
 
 func formatPtr(value *float64) string {
 	if value == nil {

@@ -5,12 +5,14 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -77,8 +79,13 @@ type shippingOptions struct {
 }
 
 type envelope struct {
-	Type    string `json:"type"`
-	Payload any    `json:"payload"`
+	SchemaVersion int    `json:"schema_version"`
+	EventID       string `json:"event_id"`
+	Source        string `json:"source"`
+	SentAt        string `json:"sent_at"`
+	Attempt       int    `json:"attempt"`
+	Type          string `json:"type"`
+	Payload       any    `json:"payload"`
 }
 
 type monitorLog struct {
@@ -944,6 +951,10 @@ func main() {
 			log.Printf("%s", bulkCycleMessage)
 			publishMonitorLog(cfg, bulkCycleLevel, bulkCycleMessage)
 		}
+		snapshot := buildSnapshotPayload(len(urls), cycleChecks, cycleFailed, cycleBytes, len(proxies), time.Now())
+		if err := postIngest(cfg, "snapshot", snapshot); err != nil {
+			log.Printf("monitor snapshot publish failed: %v", err)
+		}
 		if cfg.proxyHealthPublish && (lastProxyHealth.IsZero() || time.Since(lastProxyHealth) >= cfg.proxyHealthInterval) {
 			proxyPoolMessage := buildProxyPoolLog(proxyPool.summary(time.Now()), bulkFullCycles, bulkCycles)
 			log.Printf("%s", proxyPoolMessage)
@@ -1557,26 +1568,80 @@ func postIngest(cfg config, eventType string, payload any) error {
 }
 
 func postIngestWithClient(cfg config, client *http.Client, eventType string, payload any) error {
-	body, _ := json.Marshal(envelope{Type: eventType, Payload: payload})
-	request, err := http.NewRequest(http.MethodPost, cfg.ingestURL, bytes.NewReader(body))
+	eventID, err := newEventID()
 	if err != nil {
 		return err
 	}
-	request.Header.Set("Authorization", "Bearer "+cfg.ingestToken)
-	request.Header.Set("Content-Type", "application/json")
 	if client == nil {
 		client = &http.Client{Timeout: 20 * time.Second}
 	}
-	response, err := client.Do(request)
-	if err != nil {
-		return err
+	var lastErr error
+	for attempt := 1; attempt <= 2; attempt++ {
+		body, marshalErr := json.Marshal(envelope{
+			SchemaVersion: 1,
+			EventID:       eventID,
+			Source:        cfg.workerName,
+			SentAt:        time.Now().UTC().Format(time.RFC3339Nano),
+			Attempt:       attempt,
+			Type:          eventType,
+			Payload:       payload,
+		})
+		if marshalErr != nil {
+			return marshalErr
+		}
+		request, requestErr := http.NewRequest(http.MethodPost, cfg.ingestURL, bytes.NewReader(body))
+		if requestErr != nil {
+			return requestErr
+		}
+		request.Header.Set("Authorization", "Bearer "+cfg.ingestToken)
+		request.Header.Set("Content-Type", "application/json")
+		response, requestErr := client.Do(request)
+		if requestErr != nil {
+			lastErr = requestErr
+		} else {
+			io.Copy(io.Discard, response.Body)
+			response.Body.Close()
+			if response.StatusCode >= 200 && response.StatusCode < 300 {
+				return nil
+			}
+			lastErr = fmt.Errorf("ingest failed with HTTP %d", response.StatusCode)
+			if response.StatusCode < 500 || response.StatusCode >= 600 {
+				return lastErr
+			}
+		}
+		if attempt < 2 {
+			time.Sleep(250 * time.Millisecond)
+		}
 	}
-	defer response.Body.Close()
-	io.Copy(io.Discard, response.Body)
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("ingest failed with HTTP %d", response.StatusCode)
+	return lastErr
+}
+
+func buildSnapshotPayload(total, succeeded, failed int, downloadedBytes int64, activeContexts int, capturedAt time.Time) map[string]any {
+	checks := succeeded + failed
+	blockedRate := 0.0
+	if checks > 0 {
+		blockedRate = float64(failed) / float64(checks)
 	}
-	return nil
+	return map[string]any{
+		"status":          "ok",
+		"checks":          checks,
+		"bytes_used":      downloadedBytes,
+		"total_products":  total,
+		"active_contexts": activeContexts,
+		"blocked_rate":    math.Round(blockedRate*10000) / 10000,
+		"captured_at":     capturedAt.UTC().Format(time.RFC3339Nano),
+	}
+}
+
+func newEventID() (string, error) {
+	bytesValue := make([]byte, 16)
+	if _, err := rand.Read(bytesValue); err != nil {
+		return "", err
+	}
+	bytesValue[6] = (bytesValue[6] & 0x0f) | 0x40
+	bytesValue[8] = (bytesValue[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		bytesValue[0:4], bytesValue[4:6], bytesValue[6:8], bytesValue[8:10], bytesValue[10:16]), nil
 }
 
 func postLog(cfg config, level, message string) error {

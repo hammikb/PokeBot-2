@@ -13,6 +13,7 @@ import { createModuleLogger } from '../utils/logger.js'
 import { RetailerCircuitBreaker } from './RetailerCircuitBreaker.js'
 import { OrderSubmissionGate } from './OrderSubmissionGate.js'
 import { DropEventLedger } from './DropEventLedger.js'
+import { MonitorDeliveryState } from '../monitor/MonitorDeliveryState.js'
 
 const log = createModuleLogger('TaskManager')
 const POKEMON_CENTER_AUTO_JOIN_ID = 'pokemon-center-auto-join'
@@ -117,7 +118,13 @@ export class TaskManager extends EventEmitter {
     if (!this._authSessionManager?.getStatus().authenticated) {
       throw new Error('Not signed in to Supabase yet')
     }
-    return new SupabaseMonitorSource({ client: this._authSessionManager.getClient() })
+    return new SupabaseMonitorSource({
+      client: this._authSessionManager.getClient(),
+      deliveryState: new MonitorDeliveryState({
+        getDb: this._getDb,
+        namespace: this._currentSupabaseUserId()
+      })
+    })
   }
 
   async _getSupabaseSource() {
@@ -865,6 +872,7 @@ export class TaskManager extends EventEmitter {
   getMonitorHealthSnapshot() {
     const channelHealth = this._supabaseSource?.getHealth?.() || {}
     const channels = Object.values(channelHealth)
+    const delivery = this._supabaseSource?.getDeliveryMetrics?.() || null
     const interruptedStatuses = new Set(['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'])
 
     return {
@@ -888,6 +896,7 @@ export class TaskManager extends EventEmitter {
         catchingUp: channels.filter((channel) => channel.catchingUp === true).length,
         catchUpErrors: channels.filter((channel) => Boolean(channel.catchUpError)).length
       },
+      delivery,
       openCircuits: Object.values(this._retailerCircuit?.snapshot?.() || {}).filter(
         (state) => state?.open === true || (state?.open === undefined && Boolean(state?.openedAt))
       ).length

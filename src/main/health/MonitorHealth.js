@@ -210,6 +210,15 @@ function normalizeRealtime(value = {}) {
       catchingUp: nonNegativeInteger(channels.catchingUp),
       catchUpErrors: nonNegativeInteger(channels.catchUpErrors)
     },
+    delivery: {
+      realtime: nonNegativeInteger(value?.delivery?.realtime),
+      catchUp: nonNegativeInteger(value?.delivery?.catchUp),
+      duplicates: nonNegativeInteger(value?.delivery?.duplicates),
+      catchUpErrors: nonNegativeInteger(value?.delivery?.catchUpErrors),
+      lastCatchUpAt: typeof value?.delivery?.lastCatchUpAt === 'string'
+        ? value.delivery.lastCatchUpAt
+        : null
+    },
     openCircuits: nonNegativeInteger(value?.openCircuits)
   }
 }
